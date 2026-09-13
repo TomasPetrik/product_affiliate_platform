@@ -1,0 +1,213 @@
+// Prisma schema for the affiliate product discovery platform.
+// Scope note: this file currently covers Phase 1 (catalog + admin foundation).
+// Analytics events, revenue entries and marketplace import jobs are intentionally
+// deferred to later phases per the approved architecture.
+//
+// Learn more: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Admin / Auth
+// ---------------------------------------------------------------------------
+
+enum AdminRole {
+  ADMIN
+  EDITOR
+}
+
+model AdminUser {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String
+  name         String
+  role         AdminRole @default(EDITOR)
+  isActive     Boolean   @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  createdProducts Product[]  @relation("ProductCreatedBy")
+  auditLogs       AuditLog[]
+
+  @@map("admin_users")
+}
+
+// ---------------------------------------------------------------------------
+// Catalog
+// ---------------------------------------------------------------------------
+
+model Category {
+  id          String  @id @default(cuid())
+  name        String
+  slug        String  @unique
+  description String?
+  imageUrl    String?
+  sortOrder   Int     @default(0)
+  isActive    Boolean @default(true)
+
+  seoTitle       String?
+  seoDescription String?
+
+  parentId String?
+  parent   Category?  @relation("CategoryHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children Category[] @relation("CategoryHierarchy")
+
+  products Product[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([parentId])
+  @@map("categories")
+}
+
+enum ProductStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+model Product {
+  id                String        @id @default(cuid())
+  slug              String        @unique
+  title             String
+  shortDescription  String?
+  longDescription   String?
+  brand             String?
+  status            ProductStatus @default(DRAFT)
+  isFeatured        Boolean       @default(false)
+  isTrending        Boolean       @default(false)
+
+  currency      String   @default("USD")
+  displayPrice  Decimal? @db.Decimal(10, 2)
+  originalPrice Decimal? @db.Decimal(10, 2)
+
+  rating      Decimal? @db.Decimal(2, 1)
+  ratingCount Int      @default(0)
+
+  seoTitle       String?
+  seoDescription String?
+  ogImageUrl     String?
+
+  publishedAt DateTime?
+
+  categoryId String?
+  category   Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  createdById String?
+  createdBy   AdminUser? @relation("ProductCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  images         ProductImage[]
+  affiliateLinks AffiliateLink[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([categoryId])
+  @@index([status])
+  @@index([isFeatured])
+  @@index([isTrending])
+  @@map("products")
+}
+
+model ProductImage {
+  id        String  @id @default(cuid())
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  url       String
+  altText   String?
+  position  Int     @default(0)
+  isPrimary Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  @@index([productId])
+  @@map("product_images")
+}
+
+// ---------------------------------------------------------------------------
+// Marketplace / Affiliate links
+// ---------------------------------------------------------------------------
+
+enum MarketplaceCode {
+  AMAZON
+  EBAY
+}
+
+model Marketplace {
+  id       String          @id @default(cuid())
+  code     MarketplaceCode @unique
+  name     String
+  baseUrl  String
+  logoUrl  String?
+  isActive Boolean         @default(true)
+
+  affiliateLinks AffiliateLink[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("marketplaces")
+}
+
+model AffiliateLink {
+  id                String   @id @default(cuid())
+  productId         String
+  product           Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  marketplaceId     String
+  marketplace       Marketplace @relation(fields: [marketplaceId], references: [id], onDelete: Restrict)
+
+  externalProductId String
+  rawProductUrl      String
+  affiliateUrl       String
+  trackingTag        String?
+
+  isPrimary Boolean @default(false)
+  isActive  Boolean @default(true)
+
+  lastCheckedAt          DateTime?
+  lastKnownPrice         Decimal?  @db.Decimal(10, 2)
+  lastKnownPriceCurrency String?
+  lastKnownAvailability  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([productId, marketplaceId])
+  @@index([productId])
+  @@index([marketplaceId])
+  @@map("affiliate_links")
+}
+
+// ---------------------------------------------------------------------------
+// Audit trail
+// ---------------------------------------------------------------------------
+
+model AuditLog {
+  id        String  @id @default(cuid())
+  actorId   String?
+  actor     AdminUser? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  action     String
+  entityType String
+  entityId   String
+
+  beforeState Json?
+  afterState  Json?
+  ipAddress   String?
+
+  createdAt DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([actorId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}

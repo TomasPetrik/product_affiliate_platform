@@ -17,3 +17,8 @@ export function formatDiscountPercent(displayPrice: number, originalPrice: numbe
 
   return Math.round(((originalPrice - displayPrice) / originalPrice) * 100);
 }
+
+/** Stored catalog discount; same formula as the public badge. */
+export function computeDiscountPercentage(displayPrice: number, originalPrice: number | null): number | null {
+  return formatDiscountPercent(displayPrice, originalPrice);
+}

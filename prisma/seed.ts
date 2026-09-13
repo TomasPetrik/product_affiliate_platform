@@ -1,6 +1,7 @@
 import "dotenv/config";
 
 import { prisma } from "@/lib/prisma";
+import { computeDiscountPercentage } from "@/lib/format";
 import { hashPassword } from "@/lib/password";
 
 /**
@@ -242,6 +243,9 @@ async function main() {
       throw new Error(`Seed data error: unknown category slug "${seed.categorySlug}" for product "${seed.slug}"`);
     }
 
+    const discountPercentage = computeDiscountPercentage(seed.displayPrice, seed.originalPrice);
+    const primaryImageUrl = `https://picsum.photos/seed/${seed.slug}/800/800`;
+
     const product = await prisma.product.upsert({
       where: { slug: seed.slug },
       create: {
@@ -255,6 +259,8 @@ async function main() {
         currency: seed.currency,
         displayPrice: seed.displayPrice,
         originalPrice: seed.originalPrice,
+        discountPercentage,
+        ogImageUrl: primaryImageUrl,
         rating: seed.rating,
         ratingCount: seed.ratingCount,
         isFeatured: seed.isFeatured,
@@ -271,11 +277,33 @@ async function main() {
         currency: seed.currency,
         displayPrice: seed.displayPrice,
         originalPrice: seed.originalPrice,
+        discountPercentage,
+        ogImageUrl: primaryImageUrl,
         rating: seed.rating,
         ratingCount: seed.ratingCount,
         isFeatured: seed.isFeatured,
         isTrending: seed.isTrending,
       },
+    });
+
+    await prisma.productImage.deleteMany({ where: { productId: product.id } });
+    await prisma.productImage.createMany({
+      data: [
+        {
+          productId: product.id,
+          url: primaryImageUrl,
+          altText: seed.title,
+          position: 0,
+          isPrimary: true,
+        },
+        {
+          productId: product.id,
+          url: `https://picsum.photos/seed/${seed.slug}-alt/800/800`,
+          altText: `${seed.title} — alternate view`,
+          position: 1,
+          isPrimary: false,
+        },
+      ],
     });
 
     for (const marketplaceCode of seed.marketplaces) {

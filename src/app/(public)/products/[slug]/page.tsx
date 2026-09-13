@@ -103,7 +103,12 @@ export default async function ProductPage({ params }: ProductPageProps) {
       </Breadcrumb>
 
       <div className="mt-6 grid gap-8 lg:grid-cols-2">
-        <ProductImagePlaceholder seed={product.slug} className="aspect-square w-full rounded-xl" />
+        <ProductImagePlaceholder
+          seed={product.slug}
+          src={product.imageUrl}
+          alt={product.title}
+          className="aspect-square w-full rounded-xl"
+        />
 
         <div>
           <p className="text-sm font-medium text-muted-foreground">{product.brand}</p>

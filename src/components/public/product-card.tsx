@@ -24,7 +24,12 @@ export function ProductCard({ product }: ProductCardProps) {
     <Card className="group overflow-hidden transition-shadow hover:shadow-md">
       <Link href={`/products/${product.slug}`} className="block">
         <div className="relative">
-          <ProductImagePlaceholder seed={product.slug} className="aspect-square w-full" />
+          <ProductImagePlaceholder
+            seed={product.slug}
+            src={product.imageUrl}
+            alt={product.title}
+            className="aspect-square w-full"
+          />
           <div className="absolute left-2 top-2 flex flex-wrap gap-1.5">
             {product.isTrending ? (
               <Badge className="gap-1 bg-orange-600 text-white hover:bg-orange-600">

@@ -17,12 +17,13 @@ import type { CategorySummary, MarketplaceLink, ProductDetail, ProductStatus, Pr
 
 const productInclude = {
   category: true,
+  images: { orderBy: [{ isPrimary: "desc" as const }, { position: "asc" as const }] },
   affiliateLinks: {
     where: { isActive: true },
     include: { marketplace: true },
     orderBy: { isPrimary: "desc" as const },
   },
-} as const;
+};
 
 type ProductWithRelations = Prisma.ProductGetPayload<{ include: typeof productInclude }>;
 
@@ -64,6 +65,7 @@ function toProductSummary(product: ProductWithRelations, categoryProductCount: n
     ratingCount: product.ratingCount,
     isFeatured: product.isFeatured,
     isTrending: product.isTrending,
+    imageUrl: product.images[0]?.url ?? product.ogImageUrl ?? null,
     marketplaces: toMarketplaceLinks(product),
     publishedAt: product.publishedAt ? product.publishedAt.toISOString() : product.createdAt.toISOString(),
   };

@@ -1,4 +1,5 @@
 import type { MarketplaceCode, ProductStatus } from "@/generated/prisma/enums";
+import { computeDiscountPercentage } from "@/lib/format";
 import { prisma } from "@/lib/prisma";
 
 export interface ProductAdminRow {
@@ -101,18 +102,22 @@ export async function saveProduct(
   links: AffiliateLinkInput[],
   createdById?: string,
 ) {
+  const discountPercentage = computeDiscountPercentage(fields.displayPrice, fields.originalPrice);
+
   return prisma.$transaction(async (tx) => {
     const product = productId
       ? await tx.product.update({
           where: { id: productId },
           data: {
             ...fields,
+            discountPercentage,
             publishedAt: fields.status === "PUBLISHED" ? new Date() : undefined,
           },
         })
       : await tx.product.create({
           data: {
             ...fields,
+            discountPercentage,
             createdById,
             publishedAt: fields.status === "PUBLISHED" ? new Date() : null,
           },

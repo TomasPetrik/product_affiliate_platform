@@ -43,6 +43,7 @@ export interface ProductSummary {
   ratingCount: number;
   isFeatured: boolean;
   isTrending: boolean;
+  imageUrl: string | null;
   marketplaces: MarketplaceLink[];
   publishedAt: string;
 }

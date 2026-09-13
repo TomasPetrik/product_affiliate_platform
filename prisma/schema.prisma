@@ -1,7 +1,6 @@
 // Prisma schema for the affiliate product discovery platform.
-// Scope note: this file currently covers Phase 1 (catalog + admin foundation).
-// Analytics events, revenue entries and marketplace import jobs are intentionally
-// deferred to later phases per the approved architecture.
+// Catalog, affiliate links, analytics events, and import jobs.
+// Amazon/eBay payloads are stored as normalized columns, not catch-all JSON.
 //
 // Learn more: https://pris.ly/d/prisma-schema
 
@@ -34,8 +33,9 @@ model AdminUser {
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
-  createdProducts Product[]  @relation("ProductCreatedBy")
+  createdProducts Product[]       @relation("ProductCreatedBy")
   auditLogs       AuditLog[]
+  productImports  ProductImport[]
 
   @@map("admin_users")
 }
@@ -86,9 +86,10 @@ model Product {
   isFeatured        Boolean       @default(false)
   isTrending        Boolean       @default(false)
 
-  currency      String   @default("USD")
-  displayPrice  Decimal  @db.Decimal(10, 2)
-  originalPrice Decimal? @db.Decimal(10, 2)
+  currency            String   @default("USD")
+  displayPrice        Decimal  @db.Decimal(10, 2)
+  originalPrice       Decimal? @db.Decimal(10, 2)
+  discountPercentage  Decimal? @db.Decimal(5, 2)
 
   rating      Decimal @default(0) @db.Decimal(2, 1)
   ratingCount Int     @default(0)
@@ -105,8 +106,11 @@ model Product {
   createdById String?
   createdBy   AdminUser? @relation("ProductCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
 
-  images         ProductImage[]
-  affiliateLinks AffiliateLink[]
+  images          ProductImage[]
+  affiliateLinks  AffiliateLink[]
+  productViews    ProductView[]
+  affiliateClicks AffiliateClick[]
+  imports         ProductImport[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -115,6 +119,7 @@ model Product {
   @@index([status])
   @@index([isFeatured])
   @@index([isTrending])
+  @@index([createdAt])
   @@map("products")
 }
 
@@ -150,7 +155,9 @@ model Marketplace {
   logoUrl  String?
   isActive Boolean         @default(true)
 
-  affiliateLinks AffiliateLink[]
+  affiliateLinks  AffiliateLink[]
+  affiliateClicks AffiliateClick[]
+  productImports  ProductImport[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -178,12 +185,15 @@ model AffiliateLink {
   lastKnownPriceCurrency String?
   lastKnownAvailability  String?
 
+  clicks AffiliateClick[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@unique([productId, marketplaceId])
   @@index([productId])
   @@index([marketplaceId])
+  @@index([externalProductId])
   @@map("affiliate_links")
 }
 
@@ -210,4 +220,127 @@ model AuditLog {
   @@index([actorId])
   @@index([createdAt])
   @@map("audit_logs")
+}
+
+// ---------------------------------------------------------------------------
+// Analytics / attribution
+// ---------------------------------------------------------------------------
+
+model TrafficSession {
+  id          String   @id @default(cuid())
+  anonymousId String
+  landingPath String?
+  referrer    String?
+  userAgent   String?
+  ipHash      String?
+  startedAt   DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  productViews    ProductView[]
+  affiliateClicks AffiliateClick[]
+  utmEvents       UTMEvent[]
+
+  @@index([anonymousId])
+  @@index([startedAt])
+  @@index([createdAt])
+  @@map("traffic_sessions")
+}
+
+model UTMEvent {
+  id          String   @id @default(cuid())
+  sessionId   String
+  session     TrafficSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  source      String?
+  medium      String?
+  campaign    String?
+  term        String?
+  content     String?
+  landingPath String?
+  referrer    String?
+  createdAt   DateTime @default(now())
+
+  @@index([sessionId])
+  @@index([source])
+  @@index([campaign])
+  @@index([createdAt])
+  @@map("utm_events")
+}
+
+model ProductView {
+  id        String          @id @default(cuid())
+  productId String
+  product   Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  sessionId String?
+  session   TrafficSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  path      String?
+  createdAt DateTime        @default(now())
+
+  @@index([productId])
+  @@index([sessionId])
+  @@index([createdAt])
+  @@map("product_views")
+}
+
+model AffiliateClick {
+  id              String          @id @default(cuid())
+  productId       String
+  product         Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  affiliateLinkId String?
+  affiliateLink   AffiliateLink?  @relation(fields: [affiliateLinkId], references: [id], onDelete: SetNull)
+  marketplaceId   String?
+  marketplace     Marketplace?    @relation(fields: [marketplaceId], references: [id], onDelete: SetNull)
+  sessionId       String?
+  session         TrafficSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  destinationUrl  String
+  createdAt       DateTime        @default(now())
+
+  @@index([productId])
+  @@index([affiliateLinkId])
+  @@index([marketplaceId])
+  @@index([sessionId])
+  @@index([createdAt])
+  @@map("affiliate_clicks")
+}
+
+// ---------------------------------------------------------------------------
+// Marketplace import jobs
+// ---------------------------------------------------------------------------
+
+enum ImportStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+enum ImportSourceType {
+  URL
+  EXTERNAL_ID
+  BULK
+}
+
+model ProductImport {
+  id                String           @id @default(cuid())
+  marketplaceId     String
+  marketplace       Marketplace      @relation(fields: [marketplaceId], references: [id], onDelete: Restrict)
+  sourceType        ImportSourceType
+  externalProductId String?
+  sourceUrl         String?
+  status            ImportStatus     @default(PENDING)
+  productId         String?
+  product           Product?         @relation(fields: [productId], references: [id], onDelete: SetNull)
+  errorMessage      String?
+  createdById       String?
+  createdBy         AdminUser?       @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  startedAt         DateTime?
+  finishedAt        DateTime?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  @@index([marketplaceId])
+  @@index([externalProductId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("product_imports")
 }

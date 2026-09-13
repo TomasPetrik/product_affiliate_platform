@@ -10,6 +10,11 @@ export const DATABASE_TABLES = [
   { key: "affiliate_links", label: "Affiliate links", description: "Per-marketplace outbound URLs" },
   { key: "marketplaces", label: "Marketplaces", description: "Amazon, eBay, and other retailers" },
   { key: "product_images", label: "Product images", description: "Image URLs attached to products" },
+  { key: "traffic_sessions", label: "Traffic sessions", description: "Anonymous visitor sessions" },
+  { key: "utm_events", label: "UTM events", description: "Campaign attribution captured with a session" },
+  { key: "product_views", label: "Product views", description: "PDP impressions" },
+  { key: "affiliate_clicks", label: "Affiliate clicks", description: "Outbound marketplace clicks" },
+  { key: "product_imports", label: "Product imports", description: "Marketplace import jobs" },
   { key: "admin_users", label: "Admin users", description: "Dashboard accounts (password hashes hidden)" },
   { key: "audit_logs", label: "Audit logs", description: "Who changed what, and when" },
 ] as const;
@@ -30,16 +35,33 @@ export interface DatabaseTableSummary {
 }
 
 export async function listDatabaseTables(): Promise<DatabaseTableSummary[]> {
-  const [products, categories, affiliateLinks, marketplaces, productImages, adminUsers, auditLogs] =
-    await Promise.all([
-      prisma.product.count(),
-      prisma.category.count(),
-      prisma.affiliateLink.count(),
-      prisma.marketplace.count(),
-      prisma.productImage.count(),
-      prisma.adminUser.count(),
-      prisma.auditLog.count(),
-    ]);
+  const [
+    products,
+    categories,
+    affiliateLinks,
+    marketplaces,
+    productImages,
+    trafficSessions,
+    utmEvents,
+    productViews,
+    affiliateClicks,
+    productImports,
+    adminUsers,
+    auditLogs,
+  ] = await Promise.all([
+    prisma.product.count(),
+    prisma.category.count(),
+    prisma.affiliateLink.count(),
+    prisma.marketplace.count(),
+    prisma.productImage.count(),
+    prisma.trafficSession.count(),
+    prisma.uTMEvent.count(),
+    prisma.productView.count(),
+    prisma.affiliateClick.count(),
+    prisma.productImport.count(),
+    prisma.adminUser.count(),
+    prisma.auditLog.count(),
+  ]);
 
   const counts: Record<DatabaseTableKey, number> = {
     products,
@@ -47,6 +69,11 @@ export async function listDatabaseTables(): Promise<DatabaseTableSummary[]> {
     affiliate_links: affiliateLinks,
     marketplaces,
     product_images: productImages,
+    traffic_sessions: trafficSessions,
+    utm_events: utmEvents,
+    product_views: productViews,
+    affiliate_clicks: affiliateClicks,
+    product_imports: productImports,
     admin_users: adminUsers,
     audit_logs: auditLogs,
   };
@@ -110,6 +137,16 @@ async function loadTableRecords(key: DatabaseTableKey): Promise<Record<string, u
       return prisma.marketplace.findMany({ orderBy: { name: "asc" }, take: 200 });
     case "product_images":
       return prisma.productImage.findMany({ orderBy: { createdAt: "desc" }, take: 200 });
+    case "traffic_sessions":
+      return prisma.trafficSession.findMany({ orderBy: { startedAt: "desc" }, take: 200 });
+    case "utm_events":
+      return prisma.uTMEvent.findMany({ orderBy: { createdAt: "desc" }, take: 200 });
+    case "product_views":
+      return prisma.productView.findMany({ orderBy: { createdAt: "desc" }, take: 200 });
+    case "affiliate_clicks":
+      return prisma.affiliateClick.findMany({ orderBy: { createdAt: "desc" }, take: 200 });
+    case "product_imports":
+      return prisma.productImport.findMany({ orderBy: { createdAt: "desc" }, take: 200 });
     case "admin_users":
       return prisma.adminUser.findMany({
         orderBy: { createdAt: "desc" },
@@ -153,6 +190,16 @@ async function countForKey(key: DatabaseTableKey): Promise<number> {
       return prisma.marketplace.count();
     case "product_images":
       return prisma.productImage.count();
+    case "traffic_sessions":
+      return prisma.trafficSession.count();
+    case "utm_events":
+      return prisma.uTMEvent.count();
+    case "product_views":
+      return prisma.productView.count();
+    case "affiliate_clicks":
+      return prisma.affiliateClick.count();
+    case "product_imports":
+      return prisma.productImport.count();
     case "admin_users":
       return prisma.adminUser.count();
     case "audit_logs":

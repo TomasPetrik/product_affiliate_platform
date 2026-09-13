@@ -19,14 +19,23 @@ function pickGradient(seed: string): string {
 
 interface ProductImagePlaceholderProps {
   seed: string;
+  src?: string | null;
+  alt?: string;
   className?: string;
 }
 
 /**
- * Stands in for real product imagery until product images are populated
- * from manual uploads or the marketplace import pipeline (Phase 5).
+ * Product photo when a URL exists; otherwise a deterministic gradient
+ * placeholder until uploads or marketplace import populate images.
  */
-export function ProductImagePlaceholder({ seed, className }: ProductImagePlaceholderProps) {
+export function ProductImagePlaceholder({ seed, src, alt, className }: ProductImagePlaceholderProps) {
+  if (src) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img src={src} alt={alt ?? ""} className={cn("object-cover", className)} />
+    );
+  }
+
   return (
     <div
       className={cn(

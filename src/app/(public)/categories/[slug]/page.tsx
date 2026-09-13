@@ -11,19 +11,20 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
 import { ProductGrid } from "@/components/public/product-grid";
-import { getAllCategories, getCategoryBySlug, getProductsByCategorySlug } from "@/lib/placeholder-data";
+import { getAllCategories, getCategoryBySlug, getProductsByCategorySlug } from "@/server/services/catalog.service";
 
 interface CategoryPageProps {
   params: Promise<{ slug: string }>;
 }
 
-export function generateStaticParams() {
-  return getAllCategories().map((category) => ({ slug: category.slug }));
+export async function generateStaticParams() {
+  const categories = await getAllCategories();
+  return categories.map((category) => ({ slug: category.slug }));
 }
 
 export async function generateMetadata({ params }: CategoryPageProps): Promise<Metadata> {
   const { slug } = await params;
-  const category = getCategoryBySlug(slug);
+  const category = await getCategoryBySlug(slug);
 
   if (!category) {
     return { title: "Category not found" };
@@ -38,13 +39,13 @@ export async function generateMetadata({ params }: CategoryPageProps): Promise<M
 
 export default async function CategoryPage({ params }: CategoryPageProps) {
   const { slug } = await params;
-  const category = getCategoryBySlug(slug);
+  const category = await getCategoryBySlug(slug);
 
   if (!category) {
     notFound();
   }
 
-  const products = getProductsByCategorySlug(category.slug);
+  const products = await getProductsByCategorySlug(category.slug);
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-10">

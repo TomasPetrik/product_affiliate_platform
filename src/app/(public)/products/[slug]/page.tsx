@@ -17,19 +17,20 @@ import { ProductImagePlaceholder } from "@/components/public/product-image-place
 import { ProductGrid } from "@/components/public/product-grid";
 import { SectionHeading } from "@/components/public/section-heading";
 import { formatCurrency, formatDiscountPercent, formatRating } from "@/lib/format";
-import { getAllProducts, getProductBySlug, getRelatedProducts } from "@/lib/placeholder-data";
+import { getAllProducts, getProductBySlug, getRelatedProducts } from "@/server/services/catalog.service";
 
 interface ProductPageProps {
   params: Promise<{ slug: string }>;
 }
 
-export function generateStaticParams() {
-  return getAllProducts().map((product) => ({ slug: product.slug }));
+export async function generateStaticParams() {
+  const products = await getAllProducts();
+  return products.map((product) => ({ slug: product.slug }));
 }
 
 export async function generateMetadata({ params }: ProductPageProps): Promise<Metadata> {
   const { slug } = await params;
-  const product = getProductBySlug(slug);
+  const product = await getProductBySlug(slug);
 
   if (!product) {
     return { title: "Product not found" };
@@ -55,14 +56,14 @@ export async function generateMetadata({ params }: ProductPageProps): Promise<Me
 
 export default async function ProductPage({ params }: ProductPageProps) {
   const { slug } = await params;
-  const product = getProductBySlug(slug);
+  const product = await getProductBySlug(slug);
 
   if (!product) {
     notFound();
   }
 
   const discount = formatDiscountPercent(product.displayPrice, product.originalPrice);
-  const related = getRelatedProducts(product);
+  const related = await getRelatedProducts(product);
 
   const jsonLd = {
     "@context": "https://schema.org",

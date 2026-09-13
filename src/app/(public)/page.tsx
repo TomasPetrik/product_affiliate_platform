@@ -11,7 +11,7 @@ import {
   getAllCategories,
   getFeaturedProducts,
   getTrendingProducts,
-} from "@/lib/placeholder-data";
+} from "@/server/services/catalog.service";
 
 export const metadata: Metadata = {
   title: "Discover trending & featured products",
@@ -19,10 +19,12 @@ export const metadata: Metadata = {
     "Browse hand-picked, trending and featured products from Amazon, eBay and other marketplaces — then buy directly from the retailer you trust.",
 };
 
-export default function HomePage() {
-  const trending = getTrendingProducts();
-  const featured = getFeaturedProducts();
-  const categories = getAllCategories();
+export default async function HomePage() {
+  const [trending, featured, categories] = await Promise.all([
+    getTrendingProducts(),
+    getFeaturedProducts(),
+    getAllCategories(),
+  ]);
 
   return (
     <div className="flex flex-col gap-16 pb-16">

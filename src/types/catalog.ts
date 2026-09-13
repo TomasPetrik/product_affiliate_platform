@@ -1,13 +1,9 @@
 /**
- * Domain types shared across the public site and the admin dashboard.
- *
- * These intentionally mirror the shape of the Prisma models (see
- * `prisma/schema.prisma`) without importing generated Prisma types directly,
- * because in this phase pages render from `src/lib/placeholder-data.ts`
- * instead of live database queries. Once real data fetching lands (see
- * README / remaining work), these can be re-derived from Prisma's generated
- * types (e.g. `Prisma.ProductGetPayload<...>`) with minimal churn since the
- * field names already match.
+ * View-model types for the public site (and the admin dashboard rows that
+ * mirror it). They intentionally stay decoupled from Prisma's generated
+ * types — `src/server/services/catalog.service.ts` maps Prisma query
+ * results (which include nullable fields, `Decimal` prices, relations,
+ * etc.) into these plain, UI-friendly shapes.
  */
 
 export type MarketplaceCode = "AMAZON" | "EBAY";

@@ -48,7 +48,7 @@ model Category {
   id          String  @id @default(cuid())
   name        String
   slug        String  @unique
-  description String?
+  description String
   imageUrl    String?
   sortOrder   Int     @default(0)
   isActive    Boolean @default(true)
@@ -79,19 +79,19 @@ model Product {
   id                String        @id @default(cuid())
   slug              String        @unique
   title             String
-  shortDescription  String?
-  longDescription   String?
-  brand             String?
+  shortDescription  String
+  longDescription   String
+  brand             String
   status            ProductStatus @default(DRAFT)
   isFeatured        Boolean       @default(false)
   isTrending        Boolean       @default(false)
 
   currency      String   @default("USD")
-  displayPrice  Decimal? @db.Decimal(10, 2)
+  displayPrice  Decimal  @db.Decimal(10, 2)
   originalPrice Decimal? @db.Decimal(10, 2)
 
-  rating      Decimal? @db.Decimal(2, 1)
-  ratingCount Int      @default(0)
+  rating      Decimal @default(0) @db.Decimal(2, 1)
+  ratingCount Int     @default(0)
 
   seoTitle       String?
   seoDescription String?
@@ -99,8 +99,8 @@ model Product {
 
   publishedAt DateTime?
 
-  categoryId String?
-  category   Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Restrict)
 
   createdById String?
   createdBy   AdminUser? @relation("ProductCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)

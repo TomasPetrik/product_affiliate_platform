@@ -31,6 +31,11 @@ const envSchema = z.object({
     .string()
     .url()
     .default("http://localhost:3000"),
+
+  /** Secret used to sign/verify admin session cookies (see src/lib/session.ts). */
+  AUTH_SECRET: z
+    .string()
+    .min(32, "AUTH_SECRET must be at least 32 characters — generate one with `openssl rand -base64 32`"),
 });
 
 export type Env = z.infer<typeof envSchema>;
@@ -40,6 +45,7 @@ function loadEnv(): Env {
     NODE_ENV: process.env.NODE_ENV,
     DATABASE_URL: process.env.DATABASE_URL,
     NEXT_PUBLIC_SITE_URL: process.env.NEXT_PUBLIC_SITE_URL,
+    AUTH_SECRET: process.env.AUTH_SECRET,
   });
 
   if (!parsed.success) {

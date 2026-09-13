@@ -8,6 +8,17 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: __dirname,
   },
+  experimental: {
+    // Static generation spawns several worker processes, each opening its
+    // own Postgres connection pool (see `src/lib/prisma.ts`). Against a
+    // connection-capped database — the local `prisma dev` server used in
+    // development caps at 10 total connections, and many managed
+    // Postgres free/hobby tiers are similarly limited — parallel workers
+    // can exhaust the connection limit mid-build. Building with a single
+    // worker keeps total connections bounded; with a small catalog this
+    // has no meaningful effect on build time.
+    cpus: 1,
+  },
   async headers() {
     // Baseline security headers. A full Content-Security-Policy is
     // intentionally deferred to the hardening phase (Phase 7), where it can

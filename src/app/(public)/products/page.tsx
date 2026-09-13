@@ -7,7 +7,7 @@ import {
   getAllProducts,
   getProductsByCategorySlug,
   searchProducts,
-} from "@/lib/placeholder-data";
+} from "@/server/services/catalog.service";
 import type { ProductSummary } from "@/types/catalog";
 
 export const metadata: Metadata = {
@@ -29,10 +29,10 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
   const query = params.q?.trim() ?? "";
   const categorySlug = params.category ?? "";
 
-  let products: ProductSummary[] = query ? searchProducts(query) : getAllProducts();
+  let products: ProductSummary[] = query ? await searchProducts(query) : await getAllProducts();
 
   if (categorySlug) {
-    const categoryProducts = getProductsByCategorySlug(categorySlug);
+    const categoryProducts = await getProductsByCategorySlug(categorySlug);
     const categoryProductIds = new Set(categoryProducts.map((product) => product.id));
     products = products.filter((product) => categoryProductIds.has(product.id));
   }
@@ -45,7 +45,7 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
     products = products.filter((product) => product.isTrending);
   }
 
-  const categories = getAllCategories();
+  const categories = await getAllCategories();
   const activeCategory = categories.find((category) => category.slug === categorySlug);
 
   return (

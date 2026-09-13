@@ -1,15 +1,15 @@
 import type { Metadata } from "next";
 
 import { CategoryCard } from "@/components/public/category-card";
-import { getAllCategories } from "@/lib/placeholder-data";
+import { getAllCategories } from "@/server/services/catalog.service";
 
 export const metadata: Metadata = {
   title: "Categories",
   description: "Browse curated products organized by category.",
 };
 
-export default function CategoriesPage() {
-  const categories = getAllCategories();
+export default async function CategoriesPage() {
+  const categories = await getAllCategories();
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-10">

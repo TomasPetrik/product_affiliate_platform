@@ -85,7 +85,7 @@ export function CategoryForm({ defaultValues = emptyValues }: CategoryFormProps)
 
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="description">Description</Label>
-        <Textarea id="description" name="description" rows={3} defaultValue={defaultValues.description} />
+        <Textarea id="description" name="description" rows={3} required defaultValue={defaultValues.description} />
       </div>
 
       <div className="flex flex-col gap-1.5">

@@ -94,7 +94,7 @@ export function ProductForm({ defaultValues = emptyProductFormValues, categories
   const [slug, setSlug] = useState(defaultValues.slug);
   const [slugTouched, setSlugTouched] = useState(Boolean(defaultValues.id));
   const [status, setStatus] = useState(defaultValues.status);
-  const [categoryId, setCategoryId] = useState(defaultValues.categoryId);
+  const [categoryId, setCategoryId] = useState(defaultValues.categoryId || categories[0]?.id || "");
   const router = useRouter();
 
   return (
@@ -145,14 +145,14 @@ export function ProductForm({ defaultValues = emptyProductFormValues, categories
           <div className="grid gap-5 sm:grid-cols-2">
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="brand">Brand</Label>
-              <Input id="brand" name="brand" defaultValue={defaultValues.brand} />
+              <Input id="brand" name="brand" required defaultValue={defaultValues.brand} />
             </div>
 
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="category">Category</Label>
               <Select value={categoryId || undefined} onValueChange={(value) => setCategoryId(value ?? "")}>
                 <SelectTrigger id="category" className="w-full">
-                  <SelectValue placeholder="No category" />
+                  <SelectValue placeholder="Select a category" />
                 </SelectTrigger>
                 <SelectContent>
                   {categories.map((category) => (
@@ -162,18 +162,23 @@ export function ProductForm({ defaultValues = emptyProductFormValues, categories
                   ))}
                 </SelectContent>
               </Select>
+              {categories.length === 0 ? (
+                <p className="text-xs text-destructive">
+                  No categories yet — create one first, a category is required.
+                </p>
+              ) : null}
             </div>
           </div>
 
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="shortDescription">Short description</Label>
-            <Textarea id="shortDescription" name="shortDescription" rows={2} defaultValue={defaultValues.shortDescription} />
+            <Textarea id="shortDescription" name="shortDescription" rows={2} required defaultValue={defaultValues.shortDescription} />
             <p className="text-xs text-muted-foreground">Shown on product cards and search results.</p>
           </div>
 
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="longDescription">Long description</Label>
-            <Textarea id="longDescription" name="longDescription" rows={6} defaultValue={defaultValues.longDescription} />
+            <Textarea id="longDescription" name="longDescription" rows={6} required defaultValue={defaultValues.longDescription} />
           </div>
         </CardContent>
       </Card>
@@ -190,7 +195,7 @@ export function ProductForm({ defaultValues = emptyProductFormValues, categories
             </div>
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="displayPrice">Display price</Label>
-              <Input id="displayPrice" name="displayPrice" type="number" step="0.01" min={0} defaultValue={defaultValues.displayPrice} />
+              <Input id="displayPrice" name="displayPrice" type="number" step="0.01" min={0} required defaultValue={defaultValues.displayPrice} />
             </div>
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="originalPrice">Original price (optional)</Label>

@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { requireAdminSession } from "@/lib/auth";
 import { writeAuditLog } from "@/server/services/audit.service";
 import {
+  countProductsInCategory,
   createCategory,
   deleteCategory,
   getCategoryById,
@@ -47,7 +48,7 @@ export async function saveCategoryAction(
   const data = {
     name: parsed.data.name,
     slug: parsed.data.slug,
-    description: parsed.data.description || null,
+    description: parsed.data.description,
     isActive: parsed.data.isActive,
     sortOrder: parsed.data.sortOrder,
   };
@@ -84,6 +85,13 @@ export async function deleteCategoryAction(formData: FormData): Promise<void> {
 
   if (typeof id !== "string" || !id) {
     return;
+  }
+
+  // Product.category uses onDelete: Restrict — every product must belong to
+  // a category, so a category with products can't be deleted outright.
+  const productCount = await countProductsInCategory(id);
+  if (productCount > 0) {
+    redirect(`/admin/categories?error=${encodeURIComponent(`Can't delete: ${productCount} product(s) still use this category. Reassign or delete them first.`)}`);
   }
 
   const before = await getCategoryById(id);

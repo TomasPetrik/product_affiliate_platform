@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Pencil, Plus } from "lucide-react";
 
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -20,11 +21,21 @@ export const metadata: Metadata = {
   title: "Categories",
 };
 
-export default async function AdminCategoriesPage() {
-  const categories = await listCategoriesAdmin();
+interface AdminCategoriesPageProps {
+  searchParams: Promise<{ error?: string }>;
+}
+
+export default async function AdminCategoriesPage({ searchParams }: AdminCategoriesPageProps) {
+  const [categories, { error }] = await Promise.all([listCategoriesAdmin(), searchParams]);
 
   return (
     <div className="flex flex-col gap-6">
+      {error ? (
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      ) : null}
+
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Categories</h1>

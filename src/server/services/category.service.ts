@@ -34,7 +34,7 @@ export async function getCategoryById(id: string) {
 export interface CategoryInput {
   name: string;
   slug: string;
-  description?: string | null;
+  description: string;
   isActive: boolean;
   sortOrder: number;
 }
@@ -49,6 +49,16 @@ export async function updateCategory(id: string, input: CategoryInput) {
 
 export async function deleteCategory(id: string) {
   return prisma.category.delete({ where: { id } });
+}
+
+/**
+ * `Product.category` uses `onDelete: Restrict` (every product must belong to
+ * a category), so deleting a category that still has products would throw a
+ * raw foreign-key error. Check first so the action can show a friendly
+ * message instead.
+ */
+export async function countProductsInCategory(categoryId: string): Promise<number> {
+  return prisma.product.count({ where: { categoryId } });
 }
 
 export async function isCategorySlugTaken(slug: string, excludeId?: string): Promise<boolean> {

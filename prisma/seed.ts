@@ -237,7 +237,10 @@ async function main() {
   const adminUser = await prisma.adminUser.findUnique({ where: { email: adminEmail } });
 
   for (const seed of productSeeds) {
-    const categoryId = categoryBySlug.get(seed.categorySlug) ?? null;
+    const categoryId = categoryBySlug.get(seed.categorySlug);
+    if (!categoryId) {
+      throw new Error(`Seed data error: unknown category slug "${seed.categorySlug}" for product "${seed.slug}"`);
+    }
 
     const product = await prisma.product.upsert({
       where: { slug: seed.slug },

@@ -11,7 +11,7 @@ export const categorySchema = z.object({
     .min(2, "Slug must be at least 2 characters")
     .max(100)
     .regex(slugPattern, "Slug can only contain lowercase letters, numbers and hyphens"),
-  description: z.string().trim().max(500).optional().or(z.literal("")),
+  description: z.string().trim().min(1, "Description is required").max(500),
   isActive: z.boolean(),
   sortOrder: z.coerce.number().int().min(0).max(9999),
 });

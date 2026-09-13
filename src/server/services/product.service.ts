@@ -65,15 +65,15 @@ export async function isProductSlugTaken(slug: string, excludeId?: string): Prom
 export interface ProductFieldsInput {
   title: string;
   slug: string;
-  brand: string | null;
-  categoryId: string | null;
-  shortDescription: string | null;
-  longDescription: string | null;
+  brand: string;
+  categoryId: string;
+  shortDescription: string;
+  longDescription: string;
   status: ProductStatus;
   isFeatured: boolean;
   isTrending: boolean;
   currency: string;
-  displayPrice: number | null;
+  displayPrice: number;
   originalPrice: number | null;
   seoTitle: string | null;
   seoDescription: string | null;

@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { Suspense } from "react";
 import { Star } from "lucide-react";
 
 import {
@@ -12,7 +11,6 @@ import {
 } from "@/components/ui/breadcrumb";
 import { Separator } from "@/components/ui/separator";
 import { AffiliateCtaButton } from "@/components/public/affiliate-cta-button";
-import { TrafficBeacon } from "@/components/public/traffic-beacon";
 import { ProductImagePlaceholder } from "@/components/public/product-image-placeholder";
 import { ProductGrid } from "@/components/public/product-grid";
 import { SectionHeading } from "@/components/public/section-heading";
@@ -43,11 +41,6 @@ export function ProductPageView({ product, related, trackViews = true }: Product
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-10">
-      {trackViews ? (
-        <Suspense fallback={null}>
-          <TrafficBeacon productId={product.id} />
-        </Suspense>
-      ) : null}
       {trackViews ? (
         <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
       ) : null}

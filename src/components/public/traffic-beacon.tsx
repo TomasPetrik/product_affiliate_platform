@@ -3,35 +3,32 @@
 import { useEffect } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 
+import { collectCampaignParams, track } from "@/lib/analytics";
+
 interface TrafficBeaconProps {
   productId?: string;
+  categoryId?: string;
 }
 
-export function TrafficBeacon({ productId }: TrafficBeaconProps) {
+/**
+ * Single public-site beacon. Page classification (product / category /
+ * search) happens server-side from the path so components do not each
+ * emit their own events.
+ */
+export function TrafficBeacon({ productId, categoryId }: TrafficBeaconProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
   useEffect(() => {
-    const payload = {
+    track({
       path: pathname,
+      search: searchParams.get("q"),
       referrer: document.referrer || null,
       productId,
-      source: searchParams.get("utm_source"),
-      medium: searchParams.get("utm_medium"),
-      campaign: searchParams.get("utm_campaign"),
-      term: searchParams.get("utm_term"),
-      content: searchParams.get("utm_content"),
-    };
-
-    void fetch("/api/t", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(payload),
-      keepalive: true,
-    }).catch(() => {
-      // Tracking must never break the page.
+      categoryId,
+      ...collectCampaignParams(searchParams),
     });
-  }, [pathname, productId, searchParams]);
+  }, [pathname, productId, categoryId, searchParams]);
 
   return null;
 }

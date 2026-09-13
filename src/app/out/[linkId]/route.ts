@@ -1,22 +1,33 @@
 import { cookies, headers } from "next/headers";
-import { NextResponse } from "next/server";
+import { NextResponse, userAgent } from "next/server";
 
-import { newVisitorId, recordAffiliateClick, SESSION_COOKIE, TRACKING_COOKIE_MAX_AGE, VISITOR_COOKIE } from "@/server/services/tracking.service";
+import {
+  clientIpFromHeaders,
+  countryFromHeaders,
+  getActiveAffiliateUrl,
+  newVisitorId,
+  normalizeDeviceType,
+  recordAffiliateClick,
+  SESSION_COOKIE,
+  trackingCookieOptions,
+  VISITOR_COOKIE,
+} from "@/server/services/tracking.service";
 
-function cookieOptions() {
-  return {
-    httpOnly: true,
-    sameSite: "lax" as const,
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge: TRACKING_COOKIE_MAX_AGE,
-  };
+function siteOrigin(): string {
+  return process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
 }
 
-export async function GET(_request: Request, context: { params: Promise<{ linkId: string }> }) {
+export async function GET(request: Request, context: { params: Promise<{ linkId: string }> }) {
   const { linkId } = await context.params;
   const cookieStore = await cookies();
   const headerStore = await headers();
+  const ua = userAgent(request);
+  const home = new URL("/", siteOrigin());
+
+  if (ua.isBot) {
+    const destination = await getActiveAffiliateUrl(linkId);
+    return NextResponse.redirect(destination ?? home);
+  }
 
   const recorded = await recordAffiliateClick(linkId, {
     visitorId: cookieStore.get(VISITOR_COOKIE)?.value || newVisitorId(),
@@ -24,15 +35,17 @@ export async function GET(_request: Request, context: { params: Promise<{ linkId
     path: headerStore.get("referer") ?? undefined,
     referrer: headerStore.get("referer"),
     userAgent: headerStore.get("user-agent"),
-    ip: headerStore.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null,
+    ip: clientIpFromHeaders(headerStore),
+    country: countryFromHeaders(headerStore),
+    deviceType: normalizeDeviceType(ua.device.type),
   });
 
   if (!recorded) {
-    return NextResponse.redirect(new URL("/", process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000"));
+    return NextResponse.redirect(home);
   }
 
   const response = NextResponse.redirect(recorded.destinationUrl);
-  response.cookies.set(VISITOR_COOKIE, recorded.visitorId, cookieOptions());
-  response.cookies.set(SESSION_COOKIE, recorded.sessionId, cookieOptions());
+  response.cookies.set(VISITOR_COOKIE, recorded.visitorId, trackingCookieOptions());
+  response.cookies.set(SESSION_COOKIE, recorded.sessionId, trackingCookieOptions());
   return response;
 }

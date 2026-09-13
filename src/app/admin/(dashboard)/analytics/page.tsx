@@ -21,8 +21,8 @@ export default async function AdminAnalyticsPage({ searchParams }: AdminAnalytic
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Analytics</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Product views, unique visitors, affiliate clicks, CTR, and campaign sources from the live
-          event tables.
+          First-party page views, product views, searches, clicks, CTR, sources, and campaigns
+          from the live event tables.
         </p>
       </div>
       <AnalyticsOverview data={analytics} basePath="/admin/analytics" />

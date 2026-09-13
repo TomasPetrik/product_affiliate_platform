@@ -1,4 +1,4 @@
-import { BarChart3, Eye, MousePointerClick, Percent, Users } from "lucide-react";
+import { BarChart3, ExternalLink, Eye, Layers, MousePointerClick, Percent, Search, Users } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DateRangeFilter } from "@/components/admin/date-range-filter";
@@ -28,16 +28,16 @@ export function AnalyticsOverview({ data, basePath }: AnalyticsOverviewProps) {
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
-          label="Product views"
-          value={kpis.productViews.toLocaleString()}
+          label="Page views"
+          value={kpis.pageViews.toLocaleString()}
           icon={Eye}
           hint={dateRangeLabel(range)}
         />
         <StatCard
-          label="Unique visitors"
-          value={kpis.uniqueVisitors.toLocaleString()}
-          icon={Users}
-          hint="Distinct anonymous sessions"
+          label="Product views"
+          value={kpis.productViews.toLocaleString()}
+          icon={Eye}
+          hint="Deduped PDP impressions"
         />
         <StatCard
           label="Affiliate clicks"
@@ -49,7 +49,31 @@ export function AnalyticsOverview({ data, basePath }: AnalyticsOverviewProps) {
           label="Affiliate CTR"
           value={formatCtr(kpis.affiliateCtr)}
           icon={Percent}
-          hint={kpis.affiliateCtr === null ? "Needs at least one view" : "Clicks ÷ views"}
+          hint={kpis.affiliateCtr === null ? "Needs at least one view" : "Clicks ÷ product views"}
+        />
+        <StatCard
+          label="Unique visitors"
+          value={kpis.uniqueVisitors.toLocaleString()}
+          icon={Users}
+          hint="Anonymous visitor IDs"
+        />
+        <StatCard
+          label="Category views"
+          value={kpis.categoryViews.toLocaleString()}
+          icon={Layers}
+          hint="Category landing pages"
+        />
+        <StatCard
+          label="Searches"
+          value={kpis.searches.toLocaleString()}
+          icon={Search}
+          hint="Product search submissions"
+        />
+        <StatCard
+          label="Outbound clicks"
+          value={kpis.outboundClicks.toLocaleString()}
+          icon={ExternalLink}
+          hint="Non-affiliate external hops"
         />
       </div>
 
@@ -57,7 +81,7 @@ export function AnalyticsOverview({ data, basePath }: AnalyticsOverviewProps) {
         <EmptyState
           icon={BarChart3}
           title="No traffic in this range"
-          description="Views, clicks, and campaign data will appear here once visitors land on product pages or follow affiliate links."
+          description="Page views, product views, searches, and campaign data will appear here once visitors use the public site."
         />
       ) : (
         <>
@@ -67,8 +91,8 @@ export function AnalyticsOverview({ data, basePath }: AnalyticsOverviewProps) {
                 <CardTitle className="text-sm">Views over time</CardTitle>
               </CardHeader>
               <CardContent>
-                {kpis.productViews === 0 ? (
-                  <p className="py-10 text-center text-sm text-muted-foreground">No product views yet.</p>
+                {kpis.pageViews === 0 && kpis.productViews === 0 ? (
+                  <p className="py-10 text-center text-sm text-muted-foreground">No views yet.</p>
                 ) : (
                   <TimeSeriesChart data={data.series} dataKey="views" />
                 )}
@@ -110,12 +134,7 @@ export function AnalyticsOverview({ data, basePath }: AnalyticsOverviewProps) {
                 <CardTitle className="text-sm">Top traffic sources</CardTitle>
               </CardHeader>
               <CardContent className="px-0">
-                <RankedTable
-                  rows={data.topSources}
-                  emptyLabel="No UTM sources in this range."
-                  showClicks={false}
-                  metricLabel="Events"
-                />
+                <RankedTable rows={data.topSources} emptyLabel="No traffic sources in this range." />
               </CardContent>
             </Card>
             <Card>
@@ -123,12 +142,28 @@ export function AnalyticsOverview({ data, basePath }: AnalyticsOverviewProps) {
                 <CardTitle className="text-sm">Top UTM campaigns</CardTitle>
               </CardHeader>
               <CardContent className="px-0">
+                <RankedTable rows={data.topCampaigns} emptyLabel="No UTM campaigns in this range." />
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm">Top searches</CardTitle>
+              </CardHeader>
+              <CardContent className="px-0">
                 <RankedTable
-                  rows={data.topCampaigns}
-                  emptyLabel="No UTM campaigns in this range."
+                  rows={data.topSearches}
+                  emptyLabel="No searches in this range."
                   showClicks={false}
-                  metricLabel="Events"
+                  metricLabel="Searches"
                 />
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm">Devices</CardTitle>
+              </CardHeader>
+              <CardContent className="px-0">
+                <RankedTable rows={data.devices} emptyLabel="No device data in this range." />
               </CardContent>
             </Card>
           </div>

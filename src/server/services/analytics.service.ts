@@ -2,9 +2,13 @@ import { prisma } from "@/lib/prisma";
 import { eachUtcDay, formatIsoDate, type ResolvedDateRange } from "@/lib/date-range";
 
 export interface AnalyticsKpis {
+  pageViews: number;
   productViews: number;
+  categoryViews: number;
+  searches: number;
   uniqueVisitors: number;
   affiliateClicks: number;
+  outboundClicks: number;
   affiliateCtr: number | null;
 }
 
@@ -29,11 +33,14 @@ export interface DashboardAnalytics {
   topCategories: RankedRow[];
   topSources: RankedRow[];
   topCampaigns: RankedRow[];
+  topSearches: RankedRow[];
+  devices: RankedRow[];
   series: SeriesPoint[];
   hasData: boolean;
 }
 
 type DayCount = { day: Date; count: number };
+type NamedCount = { key: string | null; views: number; clicks: number };
 
 function inRange(start: Date, end: Date) {
   return { gte: start, lte: end };
@@ -48,15 +55,54 @@ function toCountMap(rows: DayCount[]): Map<string, number> {
   return map;
 }
 
+function rankedFromNamed(rows: NamedCount[], fallbackLabel: string): RankedRow[] {
+  return rows.map((row, index) => ({
+    id: row.key?.trim() || `${fallbackLabel}-${index}`,
+    label: row.key?.trim() || fallbackLabel,
+    views: Number(row.views),
+    clicks: Number(row.clicks),
+  }));
+}
+
 export async function getDashboardAnalytics(range: ResolvedDateRange): Promise<DashboardAnalytics> {
   const createdAt = inRange(range.start, range.end);
 
-  const [productViews, affiliateClicks, uniqueVisitorRows, viewDays, clickDays, viewsByProduct, clicksByProduct, viewsByCategory, clicksByCategory, sourceRows, campaignRows] =
-    await Promise.all([
-      prisma.productView.count({ where: { createdAt } }),
-      prisma.affiliateClick.count({ where: { createdAt } }),
-      prisma.$queryRaw<Array<{ count: bigint }>>`
-        SELECT COUNT(DISTINCT "anonymousId")::bigint AS count
+  const [
+    pageViews,
+    productViews,
+    categoryViews,
+    searches,
+    affiliateClicks,
+    outboundClicks,
+    uniqueVisitorRows,
+    pageViewDays,
+    productViewDays,
+    clickDays,
+    viewsByProduct,
+    clicksByProduct,
+    categoryViewRows,
+    viewsByCategoryFallback,
+    clicksByCategory,
+    eventSourceRows,
+    eventCampaignRows,
+    utmSourceRows,
+    utmCampaignRows,
+    searchRows,
+    deviceRows,
+  ] = await Promise.all([
+    prisma.analyticsEvent.count({ where: { type: "PAGE_VIEW", createdAt } }),
+    prisma.productView.count({ where: { createdAt } }),
+    prisma.analyticsEvent.count({ where: { type: "CATEGORY_VIEW", createdAt } }),
+    prisma.analyticsEvent.count({ where: { type: "SEARCH", createdAt } }),
+    prisma.affiliateClick.count({ where: { createdAt } }),
+    prisma.analyticsEvent.count({ where: { type: "OUTBOUND_CLICK", createdAt } }),
+    prisma.$queryRaw<Array<{ count: bigint }>>`
+      SELECT COUNT(*)::bigint AS count FROM (
+        SELECT DISTINCT "visitorId" AS id
+        FROM "analytics_events"
+        WHERE "createdAt" >= ${range.start} AND "createdAt" <= ${range.end}
+        UNION
+        SELECT DISTINCT "anonymousId" AS id
         FROM "traffic_sessions"
         WHERE id IN (
           SELECT "sessionId" FROM "product_views"
@@ -68,66 +114,123 @@ export async function getDashboardAnalytics(range: ResolvedDateRange): Promise<D
           SELECT id FROM "traffic_sessions"
           WHERE "startedAt" >= ${range.start} AND "startedAt" <= ${range.end}
         )
-      `,
-      prisma.$queryRaw<DayCount[]>`
-        SELECT date_trunc('day', "createdAt") AS day, COUNT(*)::int AS count
-        FROM "product_views"
-        WHERE "createdAt" >= ${range.start} AND "createdAt" <= ${range.end}
-        GROUP BY 1
-        ORDER BY 1
-      `,
-      prisma.$queryRaw<DayCount[]>`
-        SELECT date_trunc('day', "createdAt") AS day, COUNT(*)::int AS count
-        FROM "affiliate_clicks"
-        WHERE "createdAt" >= ${range.start} AND "createdAt" <= ${range.end}
-        GROUP BY 1
-        ORDER BY 1
-      `,
-      prisma.productView.groupBy({
-        by: ["productId"],
-        where: { createdAt },
-        _count: { id: true },
-      }),
-      prisma.affiliateClick.groupBy({
-        by: ["productId"],
-        where: { createdAt },
-        _count: { id: true },
-      }),
-      prisma.$queryRaw<Array<{ categoryId: string; count: number }>>`
-        SELECT p."categoryId" AS "categoryId", COUNT(v.id)::int AS count
-        FROM "product_views" v
-        JOIN "products" p ON p.id = v."productId"
-        WHERE v."createdAt" >= ${range.start} AND v."createdAt" <= ${range.end}
-        GROUP BY p."categoryId"
-      `,
-      prisma.$queryRaw<Array<{ categoryId: string; count: number }>>`
-        SELECT p."categoryId" AS "categoryId", COUNT(c.id)::int AS count
-        FROM "affiliate_clicks" c
-        JOIN "products" p ON p.id = c."productId"
-        WHERE c."createdAt" >= ${range.start} AND c."createdAt" <= ${range.end}
-        GROUP BY p."categoryId"
-      `,
-      prisma.$queryRaw<Array<{ source: string | null; count: number }>>`
-        SELECT "source", COUNT(*)::int AS count
-        FROM "utm_events"
-        WHERE "createdAt" >= ${range.start} AND "createdAt" <= ${range.end}
-        GROUP BY "source"
-        ORDER BY count DESC
-        LIMIT 8
-      `,
-      prisma.$queryRaw<Array<{ campaign: string | null; count: number }>>`
-        SELECT "campaign", COUNT(*)::int AS count
-        FROM "utm_events"
-        WHERE "createdAt" >= ${range.start} AND "createdAt" <= ${range.end}
-          AND "campaign" IS NOT NULL AND "campaign" <> ''
-        GROUP BY "campaign"
-        ORDER BY count DESC
-        LIMIT 8
-      `,
-    ]);
+      ) visitors
+    `,
+    prisma.$queryRaw<DayCount[]>`
+      SELECT date_trunc('day', "createdAt") AS day, COUNT(*)::int AS count
+      FROM "analytics_events"
+      WHERE type = 'PAGE_VIEW' AND "createdAt" >= ${range.start} AND "createdAt" <= ${range.end}
+      GROUP BY 1
+      ORDER BY 1
+    `,
+    prisma.$queryRaw<DayCount[]>`
+      SELECT date_trunc('day', "createdAt") AS day, COUNT(*)::int AS count
+      FROM "product_views"
+      WHERE "createdAt" >= ${range.start} AND "createdAt" <= ${range.end}
+      GROUP BY 1
+      ORDER BY 1
+    `,
+    prisma.$queryRaw<DayCount[]>`
+      SELECT date_trunc('day', "createdAt") AS day, COUNT(*)::int AS count
+      FROM "affiliate_clicks"
+      WHERE "createdAt" >= ${range.start} AND "createdAt" <= ${range.end}
+      GROUP BY 1
+      ORDER BY 1
+    `,
+    prisma.productView.groupBy({
+      by: ["productId"],
+      where: { createdAt },
+      _count: { id: true },
+    }),
+    prisma.affiliateClick.groupBy({
+      by: ["productId"],
+      where: { createdAt },
+      _count: { id: true },
+    }),
+    prisma.$queryRaw<Array<{ categoryId: string; count: number }>>`
+      SELECT "categoryId", COUNT(*)::int AS count
+      FROM "analytics_events"
+      WHERE type = 'CATEGORY_VIEW'
+        AND "categoryId" IS NOT NULL
+        AND "createdAt" >= ${range.start} AND "createdAt" <= ${range.end}
+      GROUP BY "categoryId"
+    `,
+    prisma.$queryRaw<Array<{ categoryId: string; count: number }>>`
+      SELECT p."categoryId" AS "categoryId", COUNT(v.id)::int AS count
+      FROM "product_views" v
+      JOIN "products" p ON p.id = v."productId"
+      WHERE v."createdAt" >= ${range.start} AND v."createdAt" <= ${range.end}
+      GROUP BY p."categoryId"
+    `,
+    prisma.$queryRaw<Array<{ categoryId: string; count: number }>>`
+      SELECT p."categoryId" AS "categoryId", COUNT(c.id)::int AS count
+      FROM "affiliate_clicks" c
+      JOIN "products" p ON p.id = c."productId"
+      WHERE c."createdAt" >= ${range.start} AND c."createdAt" <= ${range.end}
+      GROUP BY p."categoryId"
+    `,
+    prisma.$queryRaw<NamedCount[]>`
+      SELECT "utmSource" AS key,
+        COUNT(*) FILTER (WHERE type IN ('PAGE_VIEW', 'PRODUCT_VIEW', 'CATEGORY_VIEW'))::int AS views,
+        COUNT(*) FILTER (WHERE type = 'AFFILIATE_CLICK')::int AS clicks
+      FROM "analytics_events"
+      WHERE "createdAt" >= ${range.start} AND "createdAt" <= ${range.end}
+      GROUP BY "utmSource"
+      ORDER BY views DESC, clicks DESC
+      LIMIT 8
+    `,
+    prisma.$queryRaw<NamedCount[]>`
+      SELECT "utmCampaign" AS key,
+        COUNT(*) FILTER (WHERE type IN ('PAGE_VIEW', 'PRODUCT_VIEW', 'CATEGORY_VIEW'))::int AS views,
+        COUNT(*) FILTER (WHERE type = 'AFFILIATE_CLICK')::int AS clicks
+      FROM "analytics_events"
+      WHERE "createdAt" >= ${range.start} AND "createdAt" <= ${range.end}
+        AND "utmCampaign" IS NOT NULL AND "utmCampaign" <> ''
+      GROUP BY "utmCampaign"
+      ORDER BY views DESC, clicks DESC
+      LIMIT 8
+    `,
+    prisma.$queryRaw<Array<{ source: string | null; count: number }>>`
+      SELECT "source", COUNT(*)::int AS count
+      FROM "utm_events"
+      WHERE "createdAt" >= ${range.start} AND "createdAt" <= ${range.end}
+      GROUP BY "source"
+      ORDER BY count DESC
+      LIMIT 8
+    `,
+    prisma.$queryRaw<Array<{ campaign: string | null; count: number }>>`
+      SELECT "campaign", COUNT(*)::int AS count
+      FROM "utm_events"
+      WHERE "createdAt" >= ${range.start} AND "createdAt" <= ${range.end}
+        AND "campaign" IS NOT NULL AND "campaign" <> ''
+      GROUP BY "campaign"
+      ORDER BY count DESC
+      LIMIT 8
+    `,
+    prisma.$queryRaw<Array<{ query: string; count: number }>>`
+      SELECT "searchQuery" AS query, COUNT(*)::int AS count
+      FROM "analytics_events"
+      WHERE type = 'SEARCH'
+        AND "searchQuery" IS NOT NULL
+        AND "createdAt" >= ${range.start} AND "createdAt" <= ${range.end}
+      GROUP BY "searchQuery"
+      ORDER BY count DESC
+      LIMIT 8
+    `,
+    prisma.$queryRaw<NamedCount[]>`
+      SELECT CAST("deviceType" AS text) AS key,
+        COUNT(*) FILTER (WHERE type IN ('PAGE_VIEW', 'PRODUCT_VIEW', 'CATEGORY_VIEW'))::int AS views,
+        COUNT(*) FILTER (WHERE type = 'AFFILIATE_CLICK')::int AS clicks
+      FROM "analytics_events"
+      WHERE "createdAt" >= ${range.start} AND "createdAt" <= ${range.end}
+      GROUP BY "deviceType"
+      ORDER BY views DESC
+    `,
+  ]);
 
   const uniqueVisitors = Number(uniqueVisitorRows[0]?.count ?? 0);
   const affiliateCtr = productViews > 0 ? (affiliateClicks / productViews) * 100 : null;
+  const viewsByCategory = categoryViewRows.length > 0 ? categoryViewRows : viewsByCategoryFallback;
 
   const productIds = [...new Set([...viewsByProduct.map((row) => row.productId), ...clicksByProduct.map((row) => row.productId)])];
   const categoryIds = [...new Set([...viewsByCategory.map((row) => row.categoryId), ...clicksByCategory.map((row) => row.categoryId)])];
@@ -180,7 +283,33 @@ export async function getDashboardAnalytics(range: ResolvedDateRange): Promise<D
     .sort((a, b) => b.views - a.views || b.clicks - a.clicks)
     .slice(0, 8);
 
-  const viewMap = toCountMap(viewDays);
+  const topSources =
+    eventSourceRows.some((row) => row.views + row.clicks > 0)
+      ? rankedFromNamed(eventSourceRows, "(direct)")
+      : utmSourceRows.map((row, index) => ({
+          id: row.source ?? `direct-${index}`,
+          label: row.source?.trim() || "(direct)",
+          views: row.count,
+          clicks: 0,
+        }));
+
+  const topCampaigns =
+    eventCampaignRows.some((row) => row.views + row.clicks > 0)
+      ? rankedFromNamed(eventCampaignRows, "(none)")
+      : utmCampaignRows.map((row, index) => ({
+          id: row.campaign ?? `campaign-${index}`,
+          label: row.campaign ?? "(none)",
+          views: row.count,
+          clicks: 0,
+        }));
+
+  const deviceLabels: Record<string, string> = {
+    DESKTOP: "Desktop",
+    MOBILE: "Mobile",
+    TABLET: "Tablet",
+  };
+
+  const viewMap = toCountMap(pageViews > 0 ? pageViewDays : productViewDays);
   const clickMap = toCountMap(clickDays);
   const series = eachUtcDay(range.start, range.end).map((date) => ({
     date,
@@ -191,27 +320,43 @@ export async function getDashboardAnalytics(range: ResolvedDateRange): Promise<D
   return {
     range,
     kpis: {
+      pageViews,
       productViews,
+      categoryViews,
+      searches,
       uniqueVisitors,
       affiliateClicks,
+      outboundClicks,
       affiliateCtr,
     },
     topProducts,
     topCategories,
-    topSources: sourceRows.map((row, index) => ({
-      id: row.source ?? `direct-${index}`,
-      label: row.source?.trim() || "(direct)",
+    topSources,
+    topCampaigns,
+    topSearches: searchRows.map((row) => ({
+      id: row.query,
+      label: row.query,
       views: row.count,
       clicks: 0,
     })),
-    topCampaigns: campaignRows.map((row, index) => ({
-      id: row.campaign ?? `campaign-${index}`,
-      label: row.campaign ?? "(none)",
-      views: row.count,
-      clicks: 0,
+    devices: deviceRows.map((row) => ({
+      id: row.key ?? "unknown",
+      label: row.key ? (deviceLabels[row.key] ?? row.key) : "Unknown",
+      views: Number(row.views),
+      clicks: Number(row.clicks),
     })),
     series,
-    hasData: productViews + affiliateClicks + uniqueVisitors + sourceRows.length + campaignRows.length > 0,
+    hasData:
+      pageViews +
+        productViews +
+        categoryViews +
+        searches +
+        affiliateClicks +
+        outboundClicks +
+        uniqueVisitors +
+        topSources.length +
+        topCampaigns.length >
+      0,
   };
 }
 

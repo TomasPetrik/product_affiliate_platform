@@ -332,9 +332,18 @@ async function main() {
 }
 
 async function seedAnalyticsIfEmpty() {
-  const existingViews = await prisma.productView.count();
-  if (existingViews > 0) {
+  const [existingViews, existingEvents] = await Promise.all([
+    prisma.productView.count(),
+    prisma.analyticsEvent.count(),
+  ]);
+
+  if (existingEvents > 0) {
     console.log("Analytics events already present — skipping event seed.");
+    return;
+  }
+
+  if (existingViews > 0) {
+    await backfillAnalyticsEventsFromLegacy();
     return;
   }
 
@@ -351,6 +360,9 @@ async function seedAnalyticsIfEmpty() {
     { source: "twitter", medium: "social", campaign: "launch" },
     { source: null, medium: null, campaign: null },
   ] as const;
+  const devices = ["DESKTOP", "MOBILE", "TABLET"] as const;
+  const countries = ["US", "GB", "DE", "SK", null] as const;
+  const queries = ["french press", "headphones", "desk lamp", "yoga mat"];
 
   const now = Date.now();
   const dayMs = 86_400_000;
@@ -360,6 +372,8 @@ async function seedAnalyticsIfEmpty() {
     const createdAt = new Date(now - daysAgo * dayMs - (index % 10) * 3_600_000);
     const utm = sources[index % sources.length];
     const product = products[index % products.length];
+    const deviceType = devices[index % devices.length];
+    const country = countries[index % countries.length];
 
     const session = await prisma.trafficSession.create({
       data: {
@@ -367,6 +381,8 @@ async function seedAnalyticsIfEmpty() {
         landingPath: `/products/${product.slug}`,
         referrer: utm.source ? `https://${utm.source}.com` : null,
         userAgent: "FindItSeed/1.0",
+        deviceType,
+        country,
         startedAt: createdAt,
         lastSeenAt: createdAt,
         createdAt,
@@ -412,9 +428,218 @@ async function seedAnalyticsIfEmpty() {
         },
       });
     }
+
+    await seedSessionEvents({
+      sessionId: session.id,
+      visitorId: session.anonymousId,
+      product,
+      link: link && index % 3 === 0 ? link : null,
+      utm,
+      deviceType,
+      country,
+      createdAt,
+      searchQuery: index % 4 === 0 ? queries[index % queries.length] : null,
+      includeCategory: index % 2 === 0,
+      includeOutbound: index % 7 === 0,
+    });
   }
 
   console.log("Sample analytics events seeded.");
+}
+
+async function backfillAnalyticsEventsFromLegacy() {
+  const sessions = await prisma.trafficSession.findMany({
+    include: {
+      productViews: { include: { product: { select: { categoryId: true, slug: true } } } },
+      affiliateClicks: true,
+      utmEvents: { orderBy: { createdAt: "asc" }, take: 1 },
+    },
+    take: 200,
+  });
+
+  for (const session of sessions) {
+    const utm = session.utmEvents[0];
+    const firstView = session.productViews[0];
+
+    await prisma.analyticsEvent.create({
+      data: {
+        type: "PAGE_VIEW",
+        visitorId: session.anonymousId,
+        sessionId: session.id,
+        productId: firstView?.productId,
+        categoryId: firstView?.product.categoryId,
+        path: session.landingPath,
+        landingPath: session.landingPath,
+        referrer: session.referrer,
+        utmSource: utm?.source,
+        utmMedium: utm?.medium,
+        utmCampaign: utm?.campaign,
+        utmContent: utm?.content,
+        utmTerm: utm?.term,
+        deviceType: session.deviceType,
+        country: session.country,
+        dedupeKey: `backfill:page_view:${session.id}`,
+        createdAt: session.startedAt,
+      },
+    });
+
+    for (const view of session.productViews) {
+      await prisma.analyticsEvent.create({
+        data: {
+          type: "PRODUCT_VIEW",
+          visitorId: session.anonymousId,
+          sessionId: session.id,
+          productId: view.productId,
+          categoryId: view.product.categoryId,
+          path: view.path,
+          landingPath: session.landingPath,
+          referrer: session.referrer,
+          utmSource: utm?.source,
+          utmMedium: utm?.medium,
+          utmCampaign: utm?.campaign,
+          deviceType: session.deviceType,
+          country: session.country,
+          dedupeKey: `backfill:product_view:${view.id}`,
+          createdAt: view.createdAt,
+        },
+      });
+    }
+
+    for (const click of session.affiliateClicks) {
+      await prisma.analyticsEvent.create({
+        data: {
+          type: "AFFILIATE_CLICK",
+          visitorId: session.anonymousId,
+          sessionId: session.id,
+          productId: click.productId,
+          affiliateLinkId: click.affiliateLinkId,
+          destinationUrl: click.destinationUrl,
+          path: session.landingPath,
+          landingPath: session.landingPath,
+          referrer: session.referrer,
+          utmSource: utm?.source,
+          utmMedium: utm?.medium,
+          utmCampaign: utm?.campaign,
+          deviceType: session.deviceType,
+          country: session.country,
+          dedupeKey: `backfill:affiliate_click:${click.id}`,
+          createdAt: click.createdAt,
+        },
+      });
+    }
+  }
+
+  console.log("Analytics events backfilled from existing views and clicks.");
+}
+
+async function seedSessionEvents({
+  sessionId,
+  visitorId,
+  product,
+  link,
+  utm,
+  deviceType,
+  country,
+  createdAt,
+  searchQuery,
+  includeCategory,
+  includeOutbound,
+}: {
+  sessionId: string;
+  visitorId: string;
+  product: { id: string; slug: string; categoryId: string };
+  link: { id: string; affiliateUrl: string } | null;
+  utm: { source: string | null; medium: string | null; campaign: string | null };
+  deviceType: "DESKTOP" | "MOBILE" | "TABLET";
+  country: string | null;
+  createdAt: Date;
+  searchQuery: string | null;
+  includeCategory: boolean;
+  includeOutbound: boolean;
+}) {
+  const path = `/products/${product.slug}`;
+  const attribution = {
+    visitorId,
+    sessionId,
+    productId: product.id,
+    categoryId: product.categoryId,
+    path,
+    landingPath: path,
+    referrer: utm.source ? `https://${utm.source}.com` : null,
+    utmSource: utm.source,
+    utmMedium: utm.medium,
+    utmCampaign: utm.campaign,
+    deviceType,
+    country,
+  };
+
+  await prisma.analyticsEvent.create({
+    data: {
+      type: "PAGE_VIEW",
+      ...attribution,
+      dedupeKey: `seed:page_view:${sessionId}`,
+      createdAt,
+    },
+  });
+
+  await prisma.analyticsEvent.create({
+    data: {
+      type: "PRODUCT_VIEW",
+      ...attribution,
+      dedupeKey: `seed:product_view:${sessionId}:${product.id}`,
+      createdAt: new Date(createdAt.getTime() + 5_000),
+    },
+  });
+
+  if (includeCategory) {
+    await prisma.analyticsEvent.create({
+      data: {
+        type: "CATEGORY_VIEW",
+        ...attribution,
+        path: `/categories`,
+        dedupeKey: `seed:category_view:${sessionId}:${product.categoryId}`,
+        createdAt: new Date(createdAt.getTime() + 8_000),
+      },
+    });
+  }
+
+  if (searchQuery) {
+    await prisma.analyticsEvent.create({
+      data: {
+        type: "SEARCH",
+        ...attribution,
+        path: "/products",
+        searchQuery,
+        dedupeKey: `seed:search:${sessionId}:${searchQuery}`,
+        createdAt: new Date(createdAt.getTime() + 12_000),
+      },
+    });
+  }
+
+  if (link) {
+    await prisma.analyticsEvent.create({
+      data: {
+        type: "AFFILIATE_CLICK",
+        ...attribution,
+        affiliateLinkId: link.id,
+        destinationUrl: link.affiliateUrl,
+        dedupeKey: `seed:affiliate_click:${sessionId}:${link.id}`,
+        createdAt: new Date(createdAt.getTime() + 90_000),
+      },
+    });
+  }
+
+  if (includeOutbound) {
+    await prisma.analyticsEvent.create({
+      data: {
+        type: "OUTBOUND_CLICK",
+        ...attribution,
+        destinationUrl: "https://www.amazon.com",
+        dedupeKey: `seed:outbound_click:${sessionId}`,
+        createdAt: new Date(createdAt.getTime() + 100_000),
+      },
+    });
+  }
 }
 
 main()

@@ -14,6 +14,7 @@ export const DATABASE_TABLES = [
   { key: "utm_events", label: "UTM events", description: "Campaign attribution captured with a session" },
   { key: "product_views", label: "Product views", description: "PDP impressions" },
   { key: "affiliate_clicks", label: "Affiliate clicks", description: "Outbound marketplace clicks" },
+  { key: "analytics_events", label: "Analytics events", description: "First-party page, product, search, and click events" },
   { key: "product_imports", label: "Product imports", description: "Marketplace import jobs" },
   { key: "revenue_entries", label: "Revenue entries", description: "Manual commission imports (no click attribution)" },
   { key: "admin_users", label: "Admin users", description: "Dashboard accounts (password hashes hidden)" },
@@ -46,6 +47,7 @@ export async function listDatabaseTables(): Promise<DatabaseTableSummary[]> {
     utmEvents,
     productViews,
     affiliateClicks,
+    analyticsEvents,
     productImports,
     revenueEntries,
     adminUsers,
@@ -60,6 +62,7 @@ export async function listDatabaseTables(): Promise<DatabaseTableSummary[]> {
     prisma.uTMEvent.count(),
     prisma.productView.count(),
     prisma.affiliateClick.count(),
+    prisma.analyticsEvent.count(),
     prisma.productImport.count(),
     prisma.revenueEntry.count(),
     prisma.adminUser.count(),
@@ -76,6 +79,7 @@ export async function listDatabaseTables(): Promise<DatabaseTableSummary[]> {
     utm_events: utmEvents,
     product_views: productViews,
     affiliate_clicks: affiliateClicks,
+    analytics_events: analyticsEvents,
     product_imports: productImports,
     revenue_entries: revenueEntries,
     admin_users: adminUsers,
@@ -149,6 +153,8 @@ async function loadTableRecords(key: DatabaseTableKey): Promise<Record<string, u
       return prisma.productView.findMany({ orderBy: { createdAt: "desc" }, take: 200 });
     case "affiliate_clicks":
       return prisma.affiliateClick.findMany({ orderBy: { createdAt: "desc" }, take: 200 });
+    case "analytics_events":
+      return prisma.analyticsEvent.findMany({ orderBy: { createdAt: "desc" }, take: 200 });
     case "product_imports":
       return prisma.productImport.findMany({ orderBy: { createdAt: "desc" }, take: 200 });
     case "revenue_entries":
@@ -204,6 +210,8 @@ async function countForKey(key: DatabaseTableKey): Promise<number> {
       return prisma.productView.count();
     case "affiliate_clicks":
       return prisma.affiliateClick.count();
+    case "analytics_events":
+      return prisma.analyticsEvent.count();
     case "product_imports":
       return prisma.productImport.count();
     case "revenue_entries":

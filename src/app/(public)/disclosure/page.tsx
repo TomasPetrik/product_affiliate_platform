@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 
+import { OutboundLink } from "@/components/public/outbound-link";
+
 export const metadata: Metadata = {
   title: "Affiliate disclosure",
   description: "How FindIt earns money and why we recommend the products we do.",
@@ -17,8 +19,11 @@ export default function DisclosurePage() {
           (for example Amazon or eBay), under that marketplace&apos;s own terms.
         </p>
         <p className="font-medium text-foreground">
-          As an Amazon Associate we earn from qualifying purchases. We are also a member of the eBay
-          Partner Network and other affiliate programs.
+          As an Amazon Associate we earn from qualifying purchases. We are also a member of the{" "}
+          <OutboundLink href="https://partnernetwork.ebay.com/" className="underline underline-offset-2">
+            eBay Partner Network
+          </OutboundLink>{" "}
+          and other affiliate programs.
         </p>
         <p>
           This means that when you click a &quot;View on Amazon&quot;, &quot;View on eBay&quot; or

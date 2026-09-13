@@ -61,7 +61,8 @@ model Category {
   parent   Category?  @relation("CategoryHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
   children Category[] @relation("CategoryHierarchy")
 
-  products Product[]
+  products        Product[]
+  analyticsEvents AnalyticsEvent[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -107,12 +108,13 @@ model Product {
   createdById String?
   createdBy   AdminUser? @relation("ProductCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
 
-  images          ProductImage[]
-  affiliateLinks  AffiliateLink[]
-  productViews    ProductView[]
-  affiliateClicks AffiliateClick[]
-  imports         ProductImport[]
-  revenueEntries  RevenueEntry[]
+  images           ProductImage[]
+  affiliateLinks   AffiliateLink[]
+  productViews     ProductView[]
+  affiliateClicks  AffiliateClick[]
+  analyticsEvents  AnalyticsEvent[]
+  imports          ProductImport[]
+  revenueEntries   RevenueEntry[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -188,7 +190,8 @@ model AffiliateLink {
   lastKnownPriceCurrency String?
   lastKnownAvailability  String?
 
-  clicks AffiliateClick[]
+  clicks          AffiliateClick[]
+  analyticsEvents AnalyticsEvent[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -229,20 +232,38 @@ model AuditLog {
 // Analytics / attribution
 // ---------------------------------------------------------------------------
 
+enum DeviceType {
+  DESKTOP
+  MOBILE
+  TABLET
+}
+
+enum AnalyticsEventType {
+  PAGE_VIEW
+  PRODUCT_VIEW
+  CATEGORY_VIEW
+  SEARCH
+  AFFILIATE_CLICK
+  OUTBOUND_CLICK
+}
+
 model TrafficSession {
-  id          String   @id @default(cuid())
+  id          String      @id @default(cuid())
   anonymousId String
   landingPath String?
   referrer    String?
   userAgent   String?
   ipHash      String?
-  startedAt   DateTime @default(now())
-  lastSeenAt  DateTime @default(now())
-  createdAt   DateTime @default(now())
+  deviceType  DeviceType?
+  country     String?     @db.Char(2)
+  startedAt   DateTime    @default(now())
+  lastSeenAt  DateTime    @default(now())
+  createdAt   DateTime    @default(now())
 
   productViews    ProductView[]
   affiliateClicks AffiliateClick[]
   utmEvents       UTMEvent[]
+  analyticsEvents AnalyticsEvent[]
 
   @@index([anonymousId])
   @@index([startedAt])
@@ -304,6 +325,51 @@ model AffiliateClick {
   @@index([sessionId])
   @@index([createdAt])
   @@map("affiliate_clicks")
+}
+
+model AnalyticsEvent {
+  id     String             @id @default(cuid())
+  type   AnalyticsEventType
+  visitorId String
+  sessionId String?
+  session   TrafficSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+
+  productId String?
+  product   Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  categoryId String?
+  category   Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  affiliateLinkId String?
+  affiliateLink   AffiliateLink? @relation(fields: [affiliateLinkId], references: [id], onDelete: SetNull)
+
+  path           String?
+  landingPath    String?
+  referrer       String?
+  searchQuery    String?
+  destinationUrl String?
+
+  utmSource   String?
+  utmMedium   String?
+  utmCampaign String?
+  utmContent  String?
+  utmTerm     String?
+
+  deviceType DeviceType?
+  country    String?     @db.Char(2)
+
+  /// Time-bucketed uniqueness key used to drop refresh / double-click inflation.
+  dedupeKey String @unique
+
+  createdAt DateTime @default(now())
+
+  @@index([type, createdAt])
+  @@index([visitorId, createdAt])
+  @@index([sessionId])
+  @@index([productId, createdAt])
+  @@index([categoryId, createdAt])
+  @@index([utmSource, createdAt])
+  @@index([utmCampaign, createdAt])
+  @@index([createdAt])
+  @@map("analytics_events")
 }
 
 // ---------------------------------------------------------------------------

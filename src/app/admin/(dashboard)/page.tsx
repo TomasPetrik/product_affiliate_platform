@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Eye, FolderTree, MousePointerClick, Package } from "lucide-react";
+import { Database, Eye, FolderTree, MousePointerClick, Package } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -13,6 +13,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { PgAdminButton } from "@/components/admin/pgadmin-button";
 import { StatCard } from "@/components/admin/stat-card";
 import { formatCurrency } from "@/lib/format";
 import { listCategoriesAdmin } from "@/server/services/category.service";
@@ -30,6 +31,17 @@ export default async function AdminDashboardPage() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
         <p className="mt-1 text-sm text-muted-foreground">Overview of your catalog.</p>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        <PgAdminButton />
+        <Button variant="outline" nativeButton={false} render={<Link href="/admin/database" />}>
+          <Database className="h-4 w-4" />
+          Browse tables here
+        </Button>
+        <Button variant="outline" nativeButton={false} render={<Link href="/admin/audit-log" />}>
+          Open audit log
+        </Button>
       </div>
 
       <Alert>

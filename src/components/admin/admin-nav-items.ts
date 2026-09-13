@@ -3,6 +3,7 @@ import {
   BarChart3,
   ClipboardList,
   Compass,
+  Database,
   DollarSign,
   FolderTree,
   LayoutDashboard,
@@ -31,7 +32,8 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
   { href: "/admin/imports", label: "Imports", icon: UploadCloud, comingSoon: true },
   { href: "/admin/analytics", label: "Analytics", icon: BarChart3, comingSoon: true },
   { href: "/admin/revenue", label: "Revenue", icon: DollarSign, comingSoon: true },
-  { href: "/admin/audit-log", label: "Audit log", icon: ClipboardList, comingSoon: true },
+  { href: "/admin/audit-log", label: "Audit log", icon: ClipboardList },
+  { href: "/admin/database", label: "Database", icon: Database },
   { href: "/admin/settings", label: "Settings", icon: Settings, comingSoon: true },
 ];
 

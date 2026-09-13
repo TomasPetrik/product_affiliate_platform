@@ -1,25 +1,31 @@
 import type { Metadata } from "next";
-import { BarChart3 } from "lucide-react";
 
-import { ComingSoon } from "@/components/admin/coming-soon";
+import { AnalyticsOverview } from "@/components/admin/analytics-overview";
+import { resolveDateRange, type DateRangeSearchParams } from "@/lib/date-range";
+import { getDashboardAnalytics } from "@/server/services/analytics.service";
 
 export const metadata: Metadata = { title: "Analytics" };
 
-export default function AdminAnalyticsPage() {
+export const dynamic = "force-dynamic";
+
+interface AdminAnalyticsPageProps {
+  searchParams: Promise<DateRangeSearchParams>;
+}
+
+export default async function AdminAnalyticsPage({ searchParams }: AdminAnalyticsPageProps) {
+  const range = resolveDateRange(await searchParams);
+  const analytics = await getDashboardAnalytics(range);
+
   return (
     <div className="flex flex-col gap-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Analytics</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Page views, CTA/affiliate clicks, CTR, traffic sources and UTM attribution.
+          Product views, unique visitors, affiliate clicks, CTR, and campaign sources from the live
+          event tables.
         </p>
       </div>
-      <ComingSoon
-        icon={BarChart3}
-        title="Analytics dashboard"
-        description="Event tracking, date-range filtering, top products/categories and traffic-source breakdowns, backed by the analytics event model from the approved architecture."
-        phase="Phase 4 / 6 — Analytics event pipeline"
-      />
+      <AnalyticsOverview data={analytics} basePath="/admin/analytics" />
     </div>
   );
 }

@@ -62,7 +62,11 @@ export default async function AdminProductsPage() {
           <TableBody>
             {products.map((product) => (
               <TableRow key={product.id}>
-                <TableCell className="font-medium">{product.title}</TableCell>
+                <TableCell className="font-medium">
+                  <Link href={`/admin/products/${product.id}`} className="underline-offset-2 hover:underline">
+                    {product.title}
+                  </Link>
+                </TableCell>
                 <TableCell className="text-muted-foreground">{product.categoryName ?? "—"}</TableCell>
                 <TableCell>
                   <div className="flex items-center gap-2">

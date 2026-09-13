@@ -54,7 +54,10 @@ export async function listCategoriesForSelect() {
 export async function getProductByIdAdmin(id: string) {
   return prisma.product.findUnique({
     where: { id },
-    include: { affiliateLinks: true },
+    include: {
+      category: { select: { name: true } },
+      affiliateLinks: { include: { marketplace: { select: { name: true, code: true } } } },
+    },
   });
 }
 

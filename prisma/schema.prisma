@@ -36,6 +36,7 @@ model AdminUser {
   createdProducts Product[]       @relation("ProductCreatedBy")
   auditLogs       AuditLog[]
   productImports  ProductImport[]
+  revenueEntries  RevenueEntry[]
 
   @@map("admin_users")
 }
@@ -111,6 +112,7 @@ model Product {
   productViews    ProductView[]
   affiliateClicks AffiliateClick[]
   imports         ProductImport[]
+  revenueEntries  RevenueEntry[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -158,6 +160,7 @@ model Marketplace {
   affiliateLinks  AffiliateLink[]
   affiliateClicks AffiliateClick[]
   productImports  ProductImport[]
+  revenueEntries  RevenueEntry[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -343,4 +346,38 @@ model ProductImport {
   @@index([status])
   @@index([createdAt])
   @@map("product_imports")
+}
+
+// ---------------------------------------------------------------------------
+// Manual commission / revenue imports (no network order attribution yet)
+// ---------------------------------------------------------------------------
+
+enum RevenueSource {
+  MANUAL_IMPORT
+  NETWORK_REPORT
+}
+
+model RevenueEntry {
+  id               String        @id @default(cuid())
+  marketplaceId    String?
+  marketplace      Marketplace?  @relation(fields: [marketplaceId], references: [id], onDelete: SetNull)
+  productId        String?
+  product          Product?      @relation(fields: [productId], references: [id], onDelete: SetNull)
+  source           RevenueSource @default(MANUAL_IMPORT)
+  amount           Decimal       @db.Decimal(12, 2)
+  currency         String        @default("USD")
+  orderCount       Int?
+  reportedClicks   Int?
+  occurredOn       DateTime      @db.Date
+  notes            String?
+  createdById      String?
+  createdBy        AdminUser?    @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  @@index([marketplaceId])
+  @@index([productId])
+  @@index([occurredOn])
+  @@index([createdAt])
+  @@map("revenue_entries")
 }

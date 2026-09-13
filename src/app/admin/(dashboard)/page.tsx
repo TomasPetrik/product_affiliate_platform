@@ -1,8 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Database, Eye, FolderTree, MousePointerClick, Package } from "lucide-react";
+import { Database } from "lucide-react";
 
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,51 +12,47 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { AnalyticsOverview } from "@/components/admin/analytics-overview";
 import { PgAdminButton } from "@/components/admin/pgadmin-button";
-import { StatCard } from "@/components/admin/stat-card";
 import { formatCurrency } from "@/lib/format";
-import { listCategoriesAdmin } from "@/server/services/category.service";
+import { resolveDateRange, type DateRangeSearchParams } from "@/lib/date-range";
+import { getDashboardAnalytics } from "@/server/services/analytics.service";
 import { listProductsAdmin } from "@/server/services/product.service";
 
 export const metadata: Metadata = {
   title: "Dashboard",
 };
 
-export default async function AdminDashboardPage() {
-  const [products, categories] = await Promise.all([listProductsAdmin(), listCategoriesAdmin()]);
+export const dynamic = "force-dynamic";
+
+interface AdminDashboardPageProps {
+  searchParams: Promise<DateRangeSearchParams>;
+}
+
+export default async function AdminDashboardPage({ searchParams }: AdminDashboardPageProps) {
+  const params = await searchParams;
+  const range = resolveDateRange(params);
+  const [analytics, products] = await Promise.all([getDashboardAnalytics(range), listProductsAdmin()]);
 
   return (
-    <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Overview of your catalog.</p>
+    <div className="flex flex-col gap-8">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Live traffic and catalog overview. Revenue attribution is not included.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <PgAdminButton />
+          <Button variant="outline" nativeButton={false} render={<Link href="/admin/database" />}>
+            <Database className="h-4 w-4" />
+            Browse tables
+          </Button>
+        </div>
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        <PgAdminButton />
-        <Button variant="outline" nativeButton={false} render={<Link href="/admin/database" />}>
-          <Database className="h-4 w-4" />
-          Browse tables here
-        </Button>
-        <Button variant="outline" nativeButton={false} render={<Link href="/admin/audit-log" />}>
-          Open audit log
-        </Button>
-      </div>
-
-      <Alert>
-        <AlertTitle>Analytics not wired up yet</AlertTitle>
-        <AlertDescription>
-          Page views, CTR, traffic sources and revenue reporting are part of a later phase of the
-          approved roadmap. Catalog data below is live from the database.
-        </AlertDescription>
-      </Alert>
-
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Total products" value={String(products.length)} icon={Package} />
-        <StatCard label="Categories" value={String(categories.length)} icon={FolderTree} />
-        <StatCard label="Page views" value="—" icon={Eye} hint="Available in a later phase" />
-        <StatCard label="Affiliate clicks" value="—" icon={MousePointerClick} hint="Available in a later phase" />
-      </div>
+      <AnalyticsOverview data={analytics} basePath="/admin" />
 
       <div className="rounded-xl border">
         <div className="flex items-center justify-between p-4">
@@ -78,7 +73,11 @@ export default async function AdminDashboardPage() {
           <TableBody>
             {products.slice(0, 5).map((product) => (
               <TableRow key={product.id}>
-                <TableCell className="font-medium">{product.title}</TableCell>
+                <TableCell className="font-medium">
+                  <Link href={`/admin/products/${product.id}`} className="underline-offset-2 hover:underline">
+                    {product.title}
+                  </Link>
+                </TableCell>
                 <TableCell className="text-muted-foreground">{product.categoryName ?? "—"}</TableCell>
                 <TableCell>
                   <Badge variant="secondary">{product.status}</Badge>
@@ -91,7 +90,11 @@ export default async function AdminDashboardPage() {
             {products.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={4} className="py-10 text-center text-muted-foreground">
-                  No products yet — <Link href="/admin/products/new" className="underline">create one</Link>.
+                  No products yet —{" "}
+                  <Link href="/admin/products/new" className="underline">
+                    create one
+                  </Link>
+                  .
                 </TableCell>
               </TableRow>
             ) : null}

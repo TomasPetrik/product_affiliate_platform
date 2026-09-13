@@ -31,7 +31,7 @@ function toMarketplaceLinks(product: ProductWithRelations): MarketplaceLink[] {
   return product.affiliateLinks.map((link) => ({
     marketplace: link.marketplace.code,
     label: link.marketplace.name,
-    href: link.affiliateUrl,
+    href: `/out/${link.id}`,
   }));
 }
 

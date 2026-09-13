@@ -327,7 +327,94 @@ async function main() {
   }
 
   console.log(`Products ready: ${productSeeds.length}`);
+  await seedAnalyticsIfEmpty();
   console.log("Seed complete.");
+}
+
+async function seedAnalyticsIfEmpty() {
+  const existingViews = await prisma.productView.count();
+  if (existingViews > 0) {
+    console.log("Analytics events already present — skipping event seed.");
+    return;
+  }
+
+  const products = await prisma.product.findMany({
+    include: { affiliateLinks: true },
+  });
+
+  if (products.length === 0) return;
+
+  const sources = [
+    { source: "google", medium: "organic", campaign: null },
+    { source: "google", medium: "cpc", campaign: "spring-picks" },
+    { source: "newsletter", medium: "email", campaign: "weekly-digest" },
+    { source: "twitter", medium: "social", campaign: "launch" },
+    { source: null, medium: null, campaign: null },
+  ] as const;
+
+  const now = Date.now();
+  const dayMs = 86_400_000;
+
+  for (let index = 0; index < 56; index += 1) {
+    const daysAgo = index < 8 ? 0 : (index * 11) % 70;
+    const createdAt = new Date(now - daysAgo * dayMs - (index % 10) * 3_600_000);
+    const utm = sources[index % sources.length];
+    const product = products[index % products.length];
+
+    const session = await prisma.trafficSession.create({
+      data: {
+        anonymousId: `seed-visitor-${(index % 22) + 1}`,
+        landingPath: `/products/${product.slug}`,
+        referrer: utm.source ? `https://${utm.source}.com` : null,
+        userAgent: "FindItSeed/1.0",
+        startedAt: createdAt,
+        lastSeenAt: createdAt,
+        createdAt,
+      },
+    });
+
+    if (utm.source) {
+      await prisma.uTMEvent.create({
+        data: {
+          sessionId: session.id,
+          source: utm.source,
+          medium: utm.medium,
+          campaign: utm.campaign,
+          landingPath: `/products/${product.slug}`,
+          referrer: `https://${utm.source}.com`,
+          createdAt,
+        },
+      });
+    }
+
+    const viewCount = 1 + (index % 3);
+    for (let viewIndex = 0; viewIndex < viewCount; viewIndex += 1) {
+      await prisma.productView.create({
+        data: {
+          productId: product.id,
+          sessionId: session.id,
+          path: `/products/${product.slug}`,
+          createdAt: new Date(createdAt.getTime() + viewIndex * 45_000),
+        },
+      });
+    }
+
+    const link = product.affiliateLinks[0];
+    if (link && index % 3 === 0) {
+      await prisma.affiliateClick.create({
+        data: {
+          productId: product.id,
+          affiliateLinkId: link.id,
+          marketplaceId: link.marketplaceId,
+          sessionId: session.id,
+          destinationUrl: link.affiliateUrl,
+          createdAt: new Date(createdAt.getTime() + 90_000),
+        },
+      });
+    }
+  }
+
+  console.log("Sample analytics events seeded.");
 }
 
 main()

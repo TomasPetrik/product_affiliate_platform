@@ -13,10 +13,7 @@ export type ProductStatus = "DRAFT" | "PUBLISHED" | "ARCHIVED";
 export interface MarketplaceLink {
   marketplace: MarketplaceCode;
   label: string;
-  /**
-   * Placeholder destination only. Real affiliate URLs (with tracking tags)
-   * are wired up in the marketplace integration phase.
-   */
+  /** Local `/out/[linkId]` URL that records the click, then redirects. */
   href: string;
 }
 

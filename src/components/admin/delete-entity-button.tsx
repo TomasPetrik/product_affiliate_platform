@@ -21,6 +21,7 @@ interface DeleteEntityButtonProps {
   hiddenFieldName: string;
   hiddenFieldValue: string;
   entityLabel: string;
+  extraFields?: Record<string, string>;
 }
 
 /**
@@ -29,13 +30,24 @@ interface DeleteEntityButtonProps {
  * so the submit button is linked back to it via the HTML `form` attribute
  * rather than DOM nesting.
  */
-export function DeleteEntityButton({ action, hiddenFieldName, hiddenFieldValue, entityLabel }: DeleteEntityButtonProps) {
+export function DeleteEntityButton({
+  action,
+  hiddenFieldName,
+  hiddenFieldValue,
+  entityLabel,
+  extraFields,
+}: DeleteEntityButtonProps) {
   const formId = useId();
 
   return (
     <AlertDialog>
       <form id={formId} action={action}>
         <input type="hidden" name={hiddenFieldName} value={hiddenFieldValue} />
+        {extraFields
+          ? Object.entries(extraFields).map(([name, value]) => (
+              <input key={name} type="hidden" name={name} value={value} />
+            ))
+          : null}
       </form>
 
       <AlertDialogTrigger

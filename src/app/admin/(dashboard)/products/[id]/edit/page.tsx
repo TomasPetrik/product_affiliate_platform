@@ -29,6 +29,7 @@ export default async function EditProductPage({ params }: EditProductPageProps) 
   }
 
   const links: Record<string, ProductFormLinkValues> = {};
+  let primaryMarketplaceId = "";
   for (const link of product.affiliateLinks) {
     links[link.marketplaceId] = {
       affiliateUrl: link.affiliateUrl,
@@ -37,6 +38,9 @@ export default async function EditProductPage({ params }: EditProductPageProps) 
       trackingTag: link.trackingTag ?? "",
       isActive: link.isActive,
     };
+    if (link.isPrimary) {
+      primaryMarketplaceId = link.marketplaceId;
+    }
   }
 
   return (
@@ -64,7 +68,14 @@ export default async function EditProductPage({ params }: EditProductPageProps) 
           originalPrice: product.originalPrice ? String(product.originalPrice) : "",
           seoTitle: product.seoTitle ?? "",
           seoDescription: product.seoDescription ?? "",
+          ogImageUrl: product.ogImageUrl ?? "",
+          images: product.images.map((image) => ({
+            url: image.url,
+            altText: image.altText ?? "",
+            isPrimary: image.isPrimary,
+          })),
           links,
+          primaryMarketplaceId,
         }}
       />
     </div>

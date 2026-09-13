@@ -72,9 +72,13 @@ function toProductSummary(product: ProductWithRelations, categoryProductCount: n
 }
 
 function toProductDetail(product: ProductWithRelations, categoryProductCount: number): ProductDetail {
+  const summary = toProductSummary(product, categoryProductCount);
   return {
-    ...toProductSummary(product, categoryProductCount),
+    ...summary,
     longDescription: product.longDescription ?? product.shortDescription ?? "",
+    seoTitle: product.seoTitle,
+    seoDescription: product.seoDescription,
+    ogImageUrl: product.ogImageUrl ?? summary.imageUrl,
   };
 }
 

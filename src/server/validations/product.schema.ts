@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { isApprovedImageUrl, isHttpUrl } from "@/lib/approved-image-url";
+
 const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 export const productStatusValues = ["DRAFT", "PUBLISHED", "ARCHIVED"] as const;
@@ -25,17 +27,67 @@ export const productSchema = z.object({
   originalPrice: z.coerce.number().min(0).max(999999).optional().nullable(),
   seoTitle: z.string().trim().max(150).optional().or(z.literal("")),
   seoDescription: z.string().trim().max(300).optional().or(z.literal("")),
+  ogImageUrl: z
+    .string()
+    .trim()
+    .max(2000)
+    .optional()
+    .or(z.literal(""))
+    .refine((value) => !value || isApprovedImageUrl(value), "OG image must be an https URL or an uploaded image"),
 });
 
 export type ProductFormValues = z.infer<typeof productSchema>;
 
-export const affiliateLinkSchema = z.object({
-  marketplaceId: z.string().min(1),
-  affiliateUrl: z.string().trim().max(2000).optional().or(z.literal("")),
-  rawProductUrl: z.string().trim().max(2000).optional().or(z.literal("")),
-  externalProductId: z.string().trim().max(200).optional().or(z.literal("")),
-  trackingTag: z.string().trim().max(100).optional().or(z.literal("")),
-  isActive: z.boolean(),
-});
+export const affiliateLinkSchema = z
+  .object({
+    marketplaceId: z.string().min(1),
+    affiliateUrl: z.string().trim().max(2000).optional().or(z.literal("")),
+    rawProductUrl: z.string().trim().max(2000).optional().or(z.literal("")),
+    externalProductId: z.string().trim().max(200).optional().or(z.literal("")),
+    trackingTag: z.string().trim().max(100).optional().or(z.literal("")),
+    isActive: z.boolean(),
+  })
+  .superRefine((value, ctx) => {
+    const url = value.affiliateUrl ?? "";
+    const raw = value.rawProductUrl ?? "";
+    const hasListing = url.length > 0 || raw.length > 0 || Boolean(value.externalProductId);
+
+    if (url && !isHttpUrl(url)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["affiliateUrl"],
+        message: "Affiliate URL must be a valid http(s) URL",
+      });
+    }
+
+    if (raw && !isHttpUrl(raw)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["rawProductUrl"],
+        message: "Raw product URL must be a valid http(s) URL",
+      });
+    }
+
+    if (hasListing && !url) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["affiliateUrl"],
+        message: "Affiliate URL is required when adding a marketplace listing",
+      });
+    }
+  });
 
 export type AffiliateLinkFormValues = z.infer<typeof affiliateLinkSchema>;
+
+export const productImageSchema = z.object({
+  url: z
+    .string()
+    .trim()
+    .min(1, "Image URL is required")
+    .max(2000)
+    .refine(isApprovedImageUrl, "Use an https image URL or upload a file"),
+  altText: z.string().trim().max(200).optional().or(z.literal("")),
+  isPrimary: z.boolean(),
+});
+
+export type ProductImageFormValues = z.infer<typeof productImageSchema>;

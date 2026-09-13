@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -17,6 +18,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { ProductImagesField, type ProductImageFieldValue } from "@/components/admin/product-images-field";
 import { saveProductAction, type ProductActionState } from "@/server/actions/product.actions";
 
 function slugify(value: string): string {
@@ -52,7 +54,10 @@ export interface ProductFormValues {
   originalPrice: string;
   seoTitle: string;
   seoDescription: string;
+  ogImageUrl: string;
+  images: ProductImageFieldValue[];
   links: Record<string, ProductFormLinkValues>;
+  primaryMarketplaceId: string;
 }
 
 const emptyLink: ProductFormLinkValues = {
@@ -78,7 +83,10 @@ export const emptyProductFormValues: ProductFormValues = {
   originalPrice: "",
   seoTitle: "",
   seoDescription: "",
+  ogImageUrl: "",
+  images: [],
   links: {},
+  primaryMarketplaceId: "",
 };
 
 interface ProductFormProps {
@@ -235,6 +243,15 @@ export function ProductForm({ defaultValues = emptyProductFormValues, categories
 
       <Card>
         <CardHeader>
+          <CardTitle className="text-base">Images</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ProductImagesField defaultImages={defaultValues.images} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
           <CardTitle className="text-base">Affiliate links</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-6">
@@ -242,17 +259,32 @@ export function ProductForm({ defaultValues = emptyProductFormValues, categories
             const link = defaultValues.links[marketplace.id] ?? emptyLink;
             return (
               <div key={marketplace.id} className="flex flex-col gap-3 rounded-lg border p-3">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-3">
                   <p className="text-sm font-semibold">{marketplace.name}</p>
-                  <div className="flex items-center gap-2">
-                    <Switch
-                      id={`link_${marketplace.id}_isActive`}
-                      name={`link_${marketplace.id}_isActive`}
-                      defaultChecked={link.isActive}
-                    />
-                    <Label htmlFor={`link_${marketplace.id}_isActive`} className="text-xs">
-                      Active
-                    </Label>
+                  <div className="flex items-center gap-4">
+                    <label className="flex items-center gap-2 text-xs">
+                      <input
+                        type="radio"
+                        name="primaryMarketplaceId"
+                        value={marketplace.id}
+                        defaultChecked={
+                          defaultValues.primaryMarketplaceId
+                            ? defaultValues.primaryMarketplaceId === marketplace.id
+                            : !defaultValues.primaryMarketplaceId && marketplace.id === marketplaces[0]?.id
+                        }
+                      />
+                      Primary
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        id={`link_${marketplace.id}_isActive`}
+                        name={`link_${marketplace.id}_isActive`}
+                        defaultChecked={link.isActive}
+                      />
+                      <Label htmlFor={`link_${marketplace.id}_isActive`} className="text-xs">
+                        Active
+                      </Label>
+                    </div>
                   </div>
                 </div>
 
@@ -319,13 +351,32 @@ export function ProductForm({ defaultValues = emptyProductFormValues, categories
             <Label htmlFor="seoDescription">SEO description</Label>
             <Textarea id="seoDescription" name="seoDescription" rows={2} defaultValue={defaultValues.seoDescription} />
           </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="ogImageUrl">OG image URL</Label>
+            <Input
+              id="ogImageUrl"
+              name="ogImageUrl"
+              defaultValue={defaultValues.ogImageUrl}
+              placeholder="Defaults to the primary product image"
+            />
+          </div>
         </CardContent>
       </Card>
 
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         <Button type="submit" disabled={pending}>
           {pending ? "Saving…" : defaultValues.id ? "Save changes" : "Create product"}
         </Button>
+        {defaultValues.id ? (
+          <Button
+            type="button"
+            variant="outline"
+            nativeButton={false}
+            render={<Link href={`/admin/products/${defaultValues.id}/preview`} target="_blank" rel="noreferrer" />}
+          >
+            Preview
+          </Button>
+        ) : null}
         <Button type="button" variant="outline" onClick={() => router.push("/admin/products")}>
           Cancel
         </Button>

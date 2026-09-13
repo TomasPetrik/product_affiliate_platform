@@ -17,7 +17,7 @@ import { PgAdminButton } from "@/components/admin/pgadmin-button";
 import { formatCurrency } from "@/lib/format";
 import { resolveDateRange, type DateRangeSearchParams } from "@/lib/date-range";
 import { getDashboardAnalytics } from "@/server/services/analytics.service";
-import { listProductsAdmin } from "@/server/services/product.service";
+import { listRecentProductsAdmin } from "@/server/services/product.service";
 
 export const metadata: Metadata = {
   title: "Dashboard",
@@ -32,7 +32,7 @@ interface AdminDashboardPageProps {
 export default async function AdminDashboardPage({ searchParams }: AdminDashboardPageProps) {
   const params = await searchParams;
   const range = resolveDateRange(params);
-  const [analytics, products] = await Promise.all([getDashboardAnalytics(range), listProductsAdmin()]);
+  const [analytics, products] = await Promise.all([getDashboardAnalytics(range), listRecentProductsAdmin(5)]);
 
   return (
     <div className="flex flex-col gap-8">
@@ -71,7 +71,7 @@ export default async function AdminDashboardPage({ searchParams }: AdminDashboar
             </TableRow>
           </TableHeader>
           <TableBody>
-            {products.slice(0, 5).map((product) => (
+            {products.map((product) => (
               <TableRow key={product.id}>
                 <TableCell className="font-medium">
                   <Link href={`/admin/products/${product.id}`} className="underline-offset-2 hover:underline">

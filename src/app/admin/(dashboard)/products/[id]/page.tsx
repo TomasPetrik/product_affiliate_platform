@@ -39,10 +39,16 @@ export default async function AdminProductDetailPage({ params }: ProductDetailPa
           <h1 className="text-2xl font-bold tracking-tight">{product.title}</h1>
           <p className="mt-1 text-sm text-muted-foreground">/{product.slug}</p>
         </div>
-        <Button nativeButton={false} render={<Link href={`/admin/products/${product.id}/edit`} />}>
-          <Pencil className="h-4 w-4" />
-          Edit
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" nativeButton={false} render={<Link href={`/admin/products/${product.id}/preview`} />}>
+            <Eye className="h-4 w-4" />
+            Preview
+          </Button>
+          <Button nativeButton={false} render={<Link href={`/admin/products/${product.id}/edit`} />}>
+            <Pencil className="h-4 w-4" />
+            Edit
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">

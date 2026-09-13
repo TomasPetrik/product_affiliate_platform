@@ -47,4 +47,7 @@ export interface ProductSummary {
 
 export interface ProductDetail extends ProductSummary {
   longDescription: string;
+  seoTitle: string | null;
+  seoDescription: string | null;
+  ogImageUrl: string | null;
 }

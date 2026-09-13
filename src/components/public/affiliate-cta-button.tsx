@@ -15,8 +15,8 @@ interface AffiliateCtaButtonProps {
  * ever render a link to a marketplace, so compliance-required link
  * attributes (`sponsored nofollow`) live here once, not scattered per page.
  *
- * `href` is the local `/out/[linkId]` recorder, which then 302s to the
- * marketplace URL with `rel="sponsored nofollow"`.
+ * `href` is the local `/go/[productSlug]` recorder, which then 302s to the
+ * marketplace URL. `rel="sponsored nofollow"` stays on this element.
  */
 export function AffiliateCtaButton({ link, className, variant = "default" }: AffiliateCtaButtonProps) {
   return (

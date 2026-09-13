@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { requireAdminSession } from "@/lib/auth";
 import { writeAuditLog } from "@/server/services/audit.service";
 import { updateMarketplace } from "@/server/services/marketplace.service";
+import { revalidateAffiliateRedirectCache } from "@/server/services/revalidate";
 import { marketplaceUpdateSchema } from "@/server/validations/marketplace.schema";
 
 export interface MarketplaceActionState {
@@ -46,5 +47,6 @@ export async function updateMarketplaceAction(
 
   revalidatePath("/admin/marketplaces");
   revalidatePath("/admin/settings");
+  revalidateAffiliateRedirectCache();
   return { success: true };
 }

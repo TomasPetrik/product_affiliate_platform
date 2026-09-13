@@ -327,20 +327,30 @@ export async function recordSearch(query: string, context: TrackingContext, sess
 export async function getActiveAffiliateUrl(linkId: string): Promise<string | null> {
   const link = await prisma.affiliateLink.findUnique({
     where: { id: linkId },
-    select: { affiliateUrl: true, isActive: true },
+    select: {
+      affiliateUrl: true,
+      isActive: true,
+      product: { select: { status: true } },
+      marketplace: { select: { isActive: true } },
+    },
   });
 
-  if (!link || !link.isActive) return null;
+  if (!link || !link.isActive || !link.marketplace.isActive || link.product.status !== "PUBLISHED") {
+    return null;
+  }
   return link.affiliateUrl;
 }
 
 export async function recordAffiliateClick(linkId: string, context: TrackingContext) {
   const link = await prisma.affiliateLink.findUnique({
     where: { id: linkId },
-    include: { marketplace: { select: { id: true } }, product: { select: { categoryId: true } } },
+    include: {
+      marketplace: { select: { id: true, isActive: true } },
+      product: { select: { categoryId: true, status: true } },
+    },
   });
 
-  if (!link || !link.isActive) {
+  if (!link || !link.isActive || !link.marketplace.isActive || link.product.status !== "PUBLISHED") {
     return null;
   }
 

@@ -1,51 +1,32 @@
-import { cookies, headers } from "next/headers";
-import { NextResponse, userAgent } from "next/server";
+import { NextResponse } from "next/server";
 
-import {
-  clientIpFromHeaders,
-  countryFromHeaders,
-  getActiveAffiliateUrl,
-  newVisitorId,
-  normalizeDeviceType,
-  recordAffiliateClick,
-  SESSION_COOKIE,
-  trackingCookieOptions,
-  VISITOR_COOKIE,
-} from "@/server/services/tracking.service";
+import { env } from "@/lib/env";
+import { resolveAffiliateGoPathFromLinkId } from "@/server/services/affiliate-redirect.service";
 
-function siteOrigin(): string {
-  return process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
-}
+export const dynamic = "force-dynamic";
 
+/**
+ * Legacy hop that used internal affiliate-link ids.
+ * Forwards to `/go/[productSlug]` so clicks are recorded on the public route.
+ */
 export async function GET(request: Request, context: { params: Promise<{ linkId: string }> }) {
   const { linkId } = await context.params;
-  const cookieStore = await cookies();
-  const headerStore = await headers();
-  const ua = userAgent(request);
-  const home = new URL("/", siteOrigin());
+  const home = new URL("/", env.NEXT_PUBLIC_SITE_URL);
+  const path = await resolveAffiliateGoPathFromLinkId(linkId);
 
-  if (ua.isBot) {
-    const destination = await getActiveAffiliateUrl(linkId);
-    return NextResponse.redirect(destination ?? home);
+  if (!path) {
+    return NextResponse.redirect(home, 302);
   }
 
-  const recorded = await recordAffiliateClick(linkId, {
-    visitorId: cookieStore.get(VISITOR_COOKIE)?.value || newVisitorId(),
-    sessionId: cookieStore.get(SESSION_COOKIE)?.value ?? null,
-    path: headerStore.get("referer") ?? undefined,
-    referrer: headerStore.get("referer"),
-    userAgent: headerStore.get("user-agent"),
-    ip: clientIpFromHeaders(headerStore),
-    country: countryFromHeaders(headerStore),
-    deviceType: normalizeDeviceType(ua.device.type),
-  });
-
-  if (!recorded) {
-    return NextResponse.redirect(home);
+  const destination = new URL(path, env.NEXT_PUBLIC_SITE_URL);
+  const incoming = new URL(request.url);
+  for (const key of ["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content"]) {
+    const value = incoming.searchParams.get(key);
+    if (value) destination.searchParams.set(key, value);
   }
 
-  const response = NextResponse.redirect(recorded.destinationUrl);
-  response.cookies.set(VISITOR_COOKIE, recorded.visitorId, trackingCookieOptions());
-  response.cookies.set(SESSION_COOKIE, recorded.sessionId, trackingCookieOptions());
+  const response = NextResponse.redirect(destination, 302);
+  response.headers.set("Cache-Control", "private, no-store, max-age=0, must-revalidate");
+  response.headers.set("X-Robots-Tag", "noindex, nofollow");
   return response;
 }

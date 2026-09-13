@@ -13,7 +13,7 @@ export type ProductStatus = "DRAFT" | "PUBLISHED" | "ARCHIVED";
 export interface MarketplaceLink {
   marketplace: MarketplaceCode;
   label: string;
-  /** Local `/out/[linkId]` URL that records the click, then redirects. */
+  /** Local `/go/[productSlug]` hop that records the click, then redirects. */
   href: string;
 }
 

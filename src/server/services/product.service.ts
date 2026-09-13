@@ -1,5 +1,6 @@
 import type { Prisma } from "@/generated/prisma/client";
 import type { MarketplaceCode, ProductStatus } from "@/generated/prisma/enums";
+import { affiliateGoHref } from "@/lib/affiliate-go";
 import { computeDiscountPercentage } from "@/lib/format";
 import type { ProductAdminQuery } from "@/lib/product-admin-query";
 import { prisma } from "@/lib/prisma";
@@ -394,7 +395,7 @@ export async function getProductPreviewById(id: string): Promise<ProductDetail |
   const marketplaces: MarketplaceLink[] = product.affiliateLinks.map((link) => ({
     marketplace: link.marketplace.code,
     label: link.marketplace.name,
-    href: `/out/${link.id}`,
+    href: affiliateGoHref(product.slug, link.marketplace.code),
   }));
 
   const imageUrl = product.images[0]?.url ?? product.ogImageUrl ?? null;

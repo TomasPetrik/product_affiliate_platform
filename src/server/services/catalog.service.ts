@@ -1,4 +1,5 @@
 import { Prisma } from "@/generated/prisma/client";
+import { affiliateGoHref } from "@/lib/affiliate-go";
 import { prisma } from "@/lib/prisma";
 import type { CategorySummary, MarketplaceLink, ProductDetail, ProductStatus, ProductSummary } from "@/types/catalog";
 
@@ -31,7 +32,7 @@ function toMarketplaceLinks(product: ProductWithRelations): MarketplaceLink[] {
   return product.affiliateLinks.map((link) => ({
     marketplace: link.marketplace.code,
     label: link.marketplace.name,
-    href: `/out/${link.id}`,
+    href: affiliateGoHref(product.slug, link.marketplace.code),
   }));
 }
 

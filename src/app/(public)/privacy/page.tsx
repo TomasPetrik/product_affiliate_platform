@@ -184,9 +184,10 @@ export default function PrivacyPage() {
           </ul>
           <p>
             Where GDPR or UK GDPR applies, we rely on our legitimate interests in running an
-            informational affiliate site, measuring traffic, attributing referrals, and keeping the
-            Site secure. Staff login data is processed to provide the admin service. We do not use
-            public visitor data to build a marketing list or send promotional email.
+            informational affiliate site, attributing referrals you request, and keeping the
+            Site secure. Optional analytics cookies and the associated page-view beacon are used
+            only with your consent. Staff login data is processed to provide the admin service. We
+            do not use public visitor data to build a marketing list or send promotional email.
           </p>
         </Section>
 
@@ -203,9 +204,11 @@ export default function PrivacyPage() {
             measurement services and, where they operate ads, to target or measure advertising.
           </p>
           <p>
-            Our own analytics uses first-party cookies and a small request made from this Site. When
-            you click an affiliate button, we record that click on our servers before sending you on
-            to Amazon, eBay, or another retailer.
+            Our own analytics uses first-party cookies and a small request made from this Site. In
+            the EU/UK those analytics cookies are optional and stay off until you accept them (or
+            confirm them in Privacy Settings). In the US they may run until you reject them or send
+            a Global Privacy Control (GPC) opt-out. When you click an affiliate button, we record
+            that click on our servers before sending you on to Amazon, eBay, or another retailer.
           </p>
           <div className="overflow-x-auto rounded-lg border">
             <table className="w-full min-w-[36rem] text-left text-xs sm:text-sm">
@@ -227,6 +230,15 @@ export default function PrivacyPage() {
                 </tr>
               </thead>
               <tbody>
+                <tr className="border-b">
+                  <td className="px-3 py-2 text-foreground">Consent cookie</td>
+                  <td className="px-3 py-2">{SITE_NAME}</td>
+                  <td className="px-3 py-2">
+                    Stores your Accept, Reject, or custom privacy choices for this browser so we
+                    know whether optional analytics cookies are allowed
+                  </td>
+                  <td className="px-3 py-2">Up to 1 year</td>
+                </tr>
                 <tr className="border-b">
                   <td className="px-3 py-2 text-foreground">Visitor cookie</td>
                   <td className="px-3 py-2">{SITE_NAME}</td>
@@ -276,9 +288,11 @@ export default function PrivacyPage() {
             </table>
           </div>
           <p>
-            You can delete or block cookies in your browser settings. Blocking cookies may stop
-            affiliate attribution (we may not be paid for a purchase you still make) and will limit
-            our analytics. Essential redirects will still work.
+            You can delete or block cookies in your browser settings, or use Privacy Settings in the
+            site footer (also linked from the privacy notice) to accept, reject, or customize
+            optional cookies. Blocking cookies may stop affiliate attribution (we may not be paid
+            for a purchase you still make) and will limit our analytics. Essential redirects will
+            still work.
           </p>
         </Section>
 
@@ -412,8 +426,9 @@ export default function PrivacyPage() {
           </ul>
           <p>
             You can also use your browser to block or delete cookies, or use a browser setting that
-            limits cross-site tracking. We do not currently respond to the Global Privacy Control
-            (GPC) signal as a site-wide opt-out mechanism.
+            limits cross-site tracking. If your browser sends the Global Privacy Control (GPC)
+            signal, we treat it as an opt-out of analytics cookies and of the “sale” or “sharing”
+            of personal information.
           </p>
         </Section>
 
@@ -475,8 +490,10 @@ export default function PrivacyPage() {
             . We will not discriminate against you for exercising privacy rights.
           </p>
           <p>
-            We do not sell personal information. If you want us to delete first-party analytics
-            cookies, you can clear cookies for this Site in your browser.
+            We do not sell personal information. To opt out of sale or sharing, or to turn off
+            analytics cookies, use Privacy Settings or the “Do Not Sell or Share My Personal
+            Information” link in the footer. You can also clear cookies for this Site in your
+            browser.
           </p>
         </Section>
 

@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { Container } from "@/components/public/container";
+import { PrivacySettingsLink } from "@/components/public/privacy-settings-link";
 import { SiteLogo } from "@/components/public/site-logo";
 import { PRODUCT_COLLECTIONS } from "@/lib/collections";
 import { SITE_DESCRIPTION, SITE_NAME } from "@/lib/brand";
@@ -29,6 +30,7 @@ const FOOTER_LINK_GROUPS = [
     links: [
       { href: "/disclosure", label: "Affiliate disclosure" },
       { href: "/privacy", label: "Privacy Policy" },
+      { href: "/privacy#cookies", label: "Cookie Policy" },
     ],
   },
 ] as const;
@@ -77,6 +79,8 @@ export function SiteFooter() {
             <Link href="/privacy" className="underline-offset-2 hover:text-foreground hover:underline">
               Privacy Policy
             </Link>
+            <PrivacySettingsLink>Privacy Settings</PrivacySettingsLink>
+            <PrivacySettingsLink>Do Not Sell or Share My Personal Information</PrivacySettingsLink>
             <Link href="/disclosure" className="underline-offset-2 hover:text-foreground hover:underline">
               Affiliate disclosure
             </Link>

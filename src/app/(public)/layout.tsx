@@ -2,9 +2,22 @@ import type { ReactNode } from "react";
 import { Suspense } from "react";
 
 import { DisclosureBanner } from "@/components/public/disclosure-banner";
+import { PrivacyConsent } from "@/components/public/privacy-consent";
 import { SiteHeader } from "@/components/public/site-header";
 import { SiteFooter } from "@/components/public/site-footer";
 import { TrafficBeacon } from "@/components/public/traffic-beacon";
+import { readRequestConsent } from "@/server/consent";
+
+async function ConsentAndBeacon() {
+  const snapshot = await readRequestConsent();
+
+  return (
+    <>
+      <TrafficBeacon region={snapshot.region} initialConsent={snapshot.consent} gpc={snapshot.gpc} />
+      <PrivacyConsent region={snapshot.region} initialConsent={snapshot.consent} gpc={snapshot.gpc} />
+    </>
+  );
+}
 
 export default function PublicLayout({ children }: { children: ReactNode }) {
   return (
@@ -16,7 +29,7 @@ export default function PublicLayout({ children }: { children: ReactNode }) {
         Skip to content
       </a>
       <Suspense fallback={null}>
-        <TrafficBeacon />
+        <ConsentAndBeacon />
       </Suspense>
       <DisclosureBanner />
       <SiteHeader />

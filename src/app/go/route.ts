@@ -2,7 +2,9 @@ import { cookies, headers } from "next/headers";
 import { NextResponse, userAgent } from "next/server";
 
 import { env } from "@/lib/env";
+import { readRequestConsent } from "@/server/consent";
 import {
+  applyAnalyticsCookies,
   clientIpFromHeaders,
   countryFromHeaders,
   newVisitorId,
@@ -10,7 +12,6 @@ import {
   parseOutboundUrl,
   recordOutboundClick,
   SESSION_COOKIE,
-  trackingCookieOptions,
   VISITOR_COOKIE,
 } from "@/server/services/tracking.service";
 
@@ -30,6 +31,7 @@ export async function GET(request: Request) {
 
   const cookieStore = await cookies();
   const headerStore = await headers();
+  const { allowAnalytics } = await readRequestConsent();
 
   const recorded = await recordOutboundClick(destination.toString(), {
     visitorId: cookieStore.get(VISITOR_COOKIE)?.value || newVisitorId(),
@@ -44,8 +46,7 @@ export async function GET(request: Request) {
 
   const response = NextResponse.redirect(recorded?.destinationUrl ?? destination);
   if (recorded) {
-    response.cookies.set(VISITOR_COOKIE, recorded.visitorId, trackingCookieOptions());
-    response.cookies.set(SESSION_COOKIE, recorded.sessionId, trackingCookieOptions());
+    applyAnalyticsCookies(response, recorded, allowAnalytics);
   }
   return response;
 }

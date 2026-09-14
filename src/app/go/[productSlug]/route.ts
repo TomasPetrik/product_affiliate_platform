@@ -8,14 +8,15 @@ import {
   resolvePublishedAffiliateTarget,
   sanitizeAffiliateDestination,
 } from "@/server/services/affiliate-redirect.service";
+import { readRequestConsent } from "@/server/consent";
 import {
+  applyAnalyticsCookies,
   clientIpFromHeaders,
   countryFromHeaders,
   newVisitorId,
   normalizeDeviceType,
   recordAffiliateClick,
   SESSION_COOKIE,
-  trackingCookieOptions,
   VISITOR_COOKIE,
 } from "@/server/services/tracking.service";
 
@@ -61,6 +62,7 @@ export async function GET(request: Request, context: { params: Promise<{ product
   const cookieStore = await cookies();
   const headerStore = await headers();
   const campaign = collectCampaignParams(requestUrl.searchParams);
+  const { allowAnalytics } = await readRequestConsent();
 
   const recorded = await recordAffiliateClick(target.linkId, {
     visitorId: cookieStore.get(VISITOR_COOKIE)?.value || newVisitorId(),
@@ -84,7 +86,6 @@ export async function GET(request: Request, context: { params: Promise<{ product
   }
 
   const response = noStoreRedirect(destination);
-  response.cookies.set(VISITOR_COOKIE, recorded.visitorId, trackingCookieOptions());
-  response.cookies.set(SESSION_COOKIE, recorded.sessionId, trackingCookieOptions());
+  applyAnalyticsCookies(response, recorded, allowAnalytics);
   return response;
 }

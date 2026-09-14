@@ -2,15 +2,16 @@ import { cookies, headers } from "next/headers";
 import { NextResponse, userAgent } from "next/server";
 import { z } from "zod";
 
+import { readRequestConsent } from "@/server/consent";
 import {
   ANALYTICS_EVENT_NAMES,
+  applyAnalyticsCookies,
   clientIpFromHeaders,
   countryFromHeaders,
   newVisitorId,
   normalizeDeviceType,
   recordBeaconEvents,
   SESSION_COOKIE,
-  trackingCookieOptions,
   VISITOR_COOKIE,
 } from "@/server/services/tracking.service";
 
@@ -50,6 +51,11 @@ export async function POST(request: Request) {
 
   const cookieStore = await cookies();
   const headerStore = await headers();
+  const { allowAnalytics } = await readRequestConsent();
+
+  if (!allowAnalytics) {
+    return NextResponse.json({ ok: true });
+  }
 
   const session = await recordBeaconEvents(parsed.data, {
     visitorId: cookieStore.get(VISITOR_COOKIE)?.value || newVisitorId(),
@@ -68,7 +74,6 @@ export async function POST(request: Request) {
   });
 
   const response = NextResponse.json({ ok: true });
-  response.cookies.set(VISITOR_COOKIE, session.visitorId, trackingCookieOptions());
-  response.cookies.set(SESSION_COOKIE, session.sessionId, trackingCookieOptions());
+  applyAnalyticsCookies(response, session, true);
   return response;
 }

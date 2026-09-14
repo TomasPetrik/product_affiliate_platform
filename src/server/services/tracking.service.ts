@@ -72,6 +72,25 @@ export function trackingCookieOptions() {
   };
 }
 
+export function applyAnalyticsCookies(
+  response: { cookies: { set(name: string, value: string, options: ReturnType<typeof trackingCookieOptions>): unknown } },
+  session: { visitorId: string; sessionId: string },
+  allowed: boolean,
+) {
+  if (!allowed) return;
+
+  response.cookies.set(VISITOR_COOKIE, session.visitorId, trackingCookieOptions());
+  response.cookies.set(SESSION_COOKIE, session.sessionId, trackingCookieOptions());
+}
+
+export function clearAnalyticsCookies(response: {
+  cookies: { set(name: string, value: string, options: ReturnType<typeof trackingCookieOptions>): unknown };
+}) {
+  const expired = { ...trackingCookieOptions(), maxAge: 0 };
+  response.cookies.set(VISITOR_COOKIE, "", expired);
+  response.cookies.set(SESSION_COOKIE, "", expired);
+}
+
 export function newVisitorId(): string {
   return randomUUID();
 }

@@ -26,7 +26,7 @@ export function AdminSidebar({ className, onNavigate }: AdminSidebarProps) {
 
   return (
     <div className={cn("flex h-full flex-col gap-6", className)}>
-      <Link href={ADMIN_BRAND.href} className="flex items-center gap-2 px-2 font-semibold" onClick={onNavigate}>
+      <Link href={ADMIN_BRAND.href} className="flex items-center gap-2 px-2 font-heading font-bold tracking-tight" onClick={onNavigate}>
         <BrandIcon className="h-5 w-5 text-primary" aria-hidden="true" />
         <span>{ADMIN_BRAND.label}</span>
       </Link>

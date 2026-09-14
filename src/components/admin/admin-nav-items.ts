@@ -2,7 +2,6 @@ import type { LucideIcon } from "lucide-react";
 import {
   BarChart3,
   ClipboardList,
-  Compass,
   Database,
   DollarSign,
   FolderTree,
@@ -12,7 +11,9 @@ import {
   Store,
   UploadCloud,
 } from "lucide-react";
+import type { ComponentType } from "react";
 
+import { RadarMark } from "@/components/public/site-logo";
 import { SITE_NAME_ADMIN } from "@/lib/brand";
 
 export interface AdminNavItem {
@@ -44,5 +45,5 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
 export const ADMIN_BRAND = {
   href: "/admin",
   label: SITE_NAME_ADMIN,
-  icon: Compass,
+  icon: RadarMark as ComponentType<{ className?: string }>,
 };

@@ -88,6 +88,12 @@ async function countPublishedInCategory(categoryId: string | null): Promise<numb
   return prisma.product.count({ where: { categoryId, status: "PUBLISHED" } });
 }
 
+async function toSummaries(products: ProductWithRelations[]): Promise<ProductSummary[]> {
+  return Promise.all(
+    products.map(async (product) => toProductSummary(product, await countPublishedInCategory(product.categoryId))),
+  );
+}
+
 export async function getAllCategories(): Promise<CategorySummary[]> {
   const categories = await prisma.category.findMany({
     where: { isActive: true },
@@ -128,9 +134,7 @@ export async function getAllProducts(): Promise<ProductSummary[]> {
     include: productInclude,
   });
 
-  return Promise.all(
-    products.map(async (product) => toProductSummary(product, await countPublishedInCategory(product.categoryId))),
-  );
+  return toSummaries(products);
 }
 
 export async function getProductBySlug(slug: string): Promise<ProductDetail | undefined> {
@@ -152,9 +156,7 @@ export async function getFeaturedProducts(limit = 4): Promise<ProductSummary[]> 
     include: productInclude,
   });
 
-  return Promise.all(
-    products.map(async (product) => toProductSummary(product, await countPublishedInCategory(product.categoryId))),
-  );
+  return toSummaries(products);
 }
 
 export async function getTrendingProducts(limit = 4): Promise<ProductSummary[]> {
@@ -165,9 +167,43 @@ export async function getTrendingProducts(limit = 4): Promise<ProductSummary[]> 
     include: productInclude,
   });
 
-  return Promise.all(
-    products.map(async (product) => toProductSummary(product, await countPublishedInCategory(product.categoryId))),
-  );
+  return toSummaries(products);
+}
+
+export async function getBestSellerProducts(limit = 4): Promise<ProductSummary[]> {
+  const products = await prisma.product.findMany({
+    where: { status: "PUBLISHED", ratingCount: { gt: 0 } },
+    orderBy: [{ ratingCount: "desc" }, { rating: "desc" }],
+    take: limit,
+    include: productInclude,
+  });
+
+  return toSummaries(products);
+}
+
+export async function getNewProducts(limit = 4): Promise<ProductSummary[]> {
+  const products = await prisma.product.findMany({
+    where: { status: "PUBLISHED" },
+    orderBy: { publishedAt: "desc" },
+    take: limit,
+    include: productInclude,
+  });
+
+  return toSummaries(products);
+}
+
+export async function getProductsUnderPrice(maxPrice: number, limit = 4): Promise<ProductSummary[]> {
+  const products = await prisma.product.findMany({
+    where: {
+      status: "PUBLISHED",
+      displayPrice: { gt: 0, lte: maxPrice },
+    },
+    orderBy: { displayPrice: "asc" },
+    take: limit,
+    include: productInclude,
+  });
+
+  return toSummaries(products);
 }
 
 export async function getProductsByCategorySlug(slug: string): Promise<ProductSummary[]> {
@@ -177,9 +213,7 @@ export async function getProductsByCategorySlug(slug: string): Promise<ProductSu
     include: productInclude,
   });
 
-  return Promise.all(
-    products.map(async (product) => toProductSummary(product, await countPublishedInCategory(product.categoryId))),
-  );
+  return toSummaries(products);
 }
 
 export async function searchProducts(query: string): Promise<ProductSummary[]> {
@@ -203,9 +237,7 @@ export async function searchProducts(query: string): Promise<ProductSummary[]> {
     include: productInclude,
   });
 
-  return Promise.all(
-    products.map(async (product) => toProductSummary(product, await countPublishedInCategory(product.categoryId))),
-  );
+  return toSummaries(products);
 }
 
 export async function getRelatedProducts(product: ProductSummary, limit = 4): Promise<ProductSummary[]> {
@@ -220,7 +252,5 @@ export async function getRelatedProducts(product: ProductSummary, limit = 4): Pr
     include: productInclude,
   });
 
-  return Promise.all(
-    related.map(async (item) => toProductSummary(item, await countPublishedInCategory(item.categoryId))),
-  );
+  return toSummaries(related);
 }

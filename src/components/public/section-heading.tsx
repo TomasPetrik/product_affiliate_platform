@@ -1,27 +1,44 @@
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 
+import { cn } from "@/lib/utils";
+
 interface SectionHeadingProps {
   title: string;
   description?: string;
+  eyebrow?: string;
   viewAllHref?: string;
+  viewAllLabel?: string;
+  id?: string;
 }
 
 /** Reusable "Title + optional 'see all' link" header used above product rails/grids. */
-export function SectionHeading({ title, description, viewAllHref }: SectionHeadingProps) {
+export function SectionHeading({
+  title,
+  description,
+  eyebrow,
+  viewAllHref,
+  viewAllLabel = "View all",
+  id,
+}: SectionHeadingProps) {
   return (
     <div className="flex items-end justify-between gap-4">
-      <div>
-        <h2 className="text-xl font-semibold tracking-tight sm:text-2xl">{title}</h2>
-        {description ? <p className="mt-1 text-sm text-muted-foreground">{description}</p> : null}
+      <div className="min-w-0">
+        {eyebrow ? <p className="text-eyebrow">{eyebrow}</p> : null}
+        <h2 id={id} className={cn("text-section", eyebrow && "mt-2")}>
+          {title}
+        </h2>
+        {description ? (
+          <p className="mt-1.5 max-w-xl text-sm leading-relaxed text-muted-foreground">{description}</p>
+        ) : null}
       </div>
       {viewAllHref ? (
         <Link
           href={viewAllHref}
-          className="flex shrink-0 items-center gap-1 text-sm font-medium text-primary transition-colors hover:underline"
+          className="mb-0.5 hidden shrink-0 items-center gap-1 text-sm font-semibold text-foreground/70 transition-colors hover:text-primary sm:inline-flex"
         >
-          View all
-          <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+          {viewAllLabel}
+          <ArrowRight className="size-3.5" aria-hidden="true" />
         </Link>
       ) : null}
     </div>

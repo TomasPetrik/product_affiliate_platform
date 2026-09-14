@@ -24,10 +24,11 @@ export function AffiliateCtaButton({ link, className, variant = "default" }: Aff
       render={<a href={link.href} target="_blank" rel="sponsored nofollow noopener" />}
       nativeButton={false}
       variant={variant}
-      className={cn("gap-2", className)}
+      size="cta"
+      className={cn("w-full sm:w-auto", className)}
     >
-      View on {link.label}
-      <ExternalLink className="h-4 w-4" aria-hidden="true" />
+      Check price on {link.label}
+      <ExternalLink className="size-4" aria-hidden="true" />
     </Button>
   );
 }

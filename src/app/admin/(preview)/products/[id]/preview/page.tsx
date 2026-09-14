@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { ProductPageView } from "@/components/public/product-page-view";
+import { Container } from "@/components/public/container";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { getRelatedProducts } from "@/server/services/catalog.service";
@@ -29,8 +30,8 @@ export default async function ProductPreviewPage({ params }: ProductPreviewPageP
 
   return (
     <>
-      <div className="border-b bg-amber-50">
-        <div className="mx-auto flex max-w-6xl flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="border-b border-border bg-muted/70">
+        <Container className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex flex-wrap items-center gap-2 text-sm">
             <Badge variant="outline">{product.status}</Badge>
             <p className="font-medium">Admin preview</p>
@@ -57,7 +58,7 @@ export default async function ProductPreviewPage({ params }: ProductPreviewPageP
               </Button>
             ) : null}
           </div>
-        </div>
+        </Container>
       </div>
       <ProductPageView product={product} related={related} trackViews={false} />
     </>

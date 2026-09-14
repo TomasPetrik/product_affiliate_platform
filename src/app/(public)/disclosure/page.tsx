@@ -11,10 +11,10 @@ export const metadata: Metadata = {
 
 export default function DisclosurePage() {
   return (
-    <div className="mx-auto max-w-3xl px-4 py-12">
-      <h1 className="text-2xl font-bold tracking-tight">Affiliate disclosure</h1>
+    <div className="mx-auto max-w-3xl px-4 py-12 sm:px-6 sm:py-16">
+      <h1 className="text-page-title">Affiliate disclosure</h1>
 
-      <div className="mt-6 space-y-4 text-sm leading-relaxed text-muted-foreground">
+      <div className="mt-6 space-y-4 text-sm leading-relaxed text-muted-foreground sm:text-[0.95rem]">
         <p>
           {SITE_NAME} is a product discovery and review site. We do not sell products, and we never
           process payments ourselves — every purchase you make happens directly on the marketplace

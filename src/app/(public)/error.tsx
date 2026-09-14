@@ -25,14 +25,16 @@ export default function PublicError({ error, reset }: PublicErrorProps) {
 
   return (
     <div className="mx-auto flex max-w-xl flex-col items-center px-4 py-24 text-center">
-      <AlertTriangle className="h-10 w-10 text-destructive" aria-hidden="true" />
-      <h1 className="mt-4 text-xl font-semibold">Something went wrong</h1>
-      <p className="mt-2 text-sm text-muted-foreground">
+      <AlertTriangle className="size-10 text-muted-foreground" aria-hidden="true" />
+      <h1 className="mt-4 text-page-title">Something went wrong</h1>
+      <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
         We hit an unexpected error loading this page. You can try again, or head back home.
       </p>
-      <div className="mt-6 flex gap-3">
-        <Button onClick={reset}>Try again</Button>
-        <Button variant="outline" nativeButton={false} render={<Link href="/" />}>
+      <div className="mt-8 flex gap-3">
+        <Button onClick={reset} size="cta">
+          Try again
+        </Button>
+        <Button variant="outline" nativeButton={false} render={<Link href="/" />} size="cta">
           Go home
         </Button>
       </div>

@@ -1,12 +1,13 @@
 import { Search } from "lucide-react";
 
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
 interface SearchBarProps {
   defaultValue?: string;
   className?: string;
+  compact?: boolean;
 }
 
 /**
@@ -14,23 +15,29 @@ interface SearchBarProps {
  * keeps the query in the URL (`?q=`), which is what the listing page reads
  * to filter results server-side.
  */
-export function SearchBar({ defaultValue, className }: SearchBarProps) {
+export function SearchBar({ defaultValue, className, compact = false }: SearchBarProps) {
   return (
-    <form action="/products" method="get" className={cn("flex w-full items-center gap-2", className)}>
+    <form action="/products" method="get" className={cn("flex w-full items-center gap-2", className)} role="search">
       <div className="relative w-full">
-        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
         <Input
           type="search"
           name="q"
-          placeholder="Search products…"
+          placeholder="Search products"
           defaultValue={defaultValue}
-          className="pl-8"
+          className={cn("border-border bg-card pl-9", compact ? "h-10 rounded-lg" : "h-11 rounded-lg")}
           aria-label="Search products"
         />
       </div>
-      <Button type="submit" size="sm" variant="secondary" className="shrink-0">
-        Search
-      </Button>
+      {compact ? (
+        <Button type="submit" size="icon" variant="outline" className="size-10 shrink-0" aria-label="Search">
+          <Search className="size-4" />
+        </Button>
+      ) : (
+        <Button type="submit" size="cta" variant="secondary" className="h-11 shrink-0 px-4">
+          Search
+        </Button>
+      )}
     </form>
   );
 }

@@ -1,20 +1,22 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Inter, Manrope } from "next/font/google";
 import type { ReactNode } from "react";
 
-import { SITE_NAME } from "@/lib/brand";
+import { SITE_DESCRIPTION, SITE_NAME, SITE_TAGLINE } from "@/lib/brand";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const inter = Inter({
   subsets: ["latin"],
+  variable: "--font-inter",
+  display: "swap",
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const manrope = Manrope({
   subsets: ["latin"],
+  variable: "--font-manrope",
+  display: "swap",
 });
 
 const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
@@ -22,20 +24,16 @@ const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: {
-    default: `${SITE_NAME} — Discover the best products, buy where you trust`,
+    default: `${SITE_NAME} — ${SITE_TAGLINE.replace(/\.$/, "")}`,
     template: `%s | ${SITE_NAME}`,
   },
-  description:
-    `${SITE_NAME} curates and reviews products from Amazon, eBay and other marketplaces so you can decide fast, then buy directly from the retailer you trust.`,
+  description: `${SITE_DESCRIPTION} Discover high-quality products from trusted US retailers.`,
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html
-      lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-    >
-      <body className="min-h-full flex flex-col">
+    <html lang="en-US" className={`${inter.variable} ${manrope.variable} h-full antialiased`}>
+      <body className={`${inter.className} min-h-full flex flex-col`}>
         <TooltipProvider delay={150}>{children}</TooltipProvider>
       </body>
     </html>

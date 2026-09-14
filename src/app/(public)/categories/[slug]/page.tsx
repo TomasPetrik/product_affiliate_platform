@@ -10,6 +10,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
+import { Container } from "@/components/public/container";
 import { ProductGrid } from "@/components/public/product-grid";
 import { getAllCategories, getCategoryBySlug, getProductsByCategorySlug } from "@/server/services/catalog.service";
 
@@ -48,7 +49,7 @@ export default async function CategoryPage({ params }: CategoryPageProps) {
   const products = await getProductsByCategorySlug(category.slug);
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-10">
+    <Container className="py-10 sm:py-14">
       <Breadcrumb>
         <BreadcrumbList>
           <BreadcrumbItem>
@@ -61,12 +62,17 @@ export default async function CategoryPage({ params }: CategoryPageProps) {
         </BreadcrumbList>
       </Breadcrumb>
 
-      <h1 className="mt-4 text-2xl font-bold tracking-tight">{category.name}</h1>
-      <p className="mt-1 max-w-2xl text-sm text-muted-foreground">{category.description}</p>
+      <h1 className="mt-6 text-page-title">{category.name}</h1>
+      <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground sm:text-base">
+        {category.description}
+      </p>
+      <p className="mt-2 text-sm text-muted-foreground">
+        {products.length} {products.length === 1 ? "product" : "products"}
+      </p>
 
       <div className="mt-8">
         <ProductGrid products={products} emptyMessage="No products in this category yet." />
       </div>
-    </div>
+    </Container>
   );
 }

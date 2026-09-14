@@ -1,84 +1,137 @@
 import Link from "next/link";
-import { Star, TrendingUp } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardFooter } from "@/components/ui/card";
-import { MarketplaceBadge } from "@/components/public/marketplace-badge";
+import { ProductBadge, badgeForProduct } from "@/components/public/product-badge";
 import { ProductImagePlaceholder } from "@/components/public/product-image-placeholder";
-import { formatCurrency, formatDiscountPercent, formatRating } from "@/lib/format";
+import { ProductRating } from "@/components/public/product-rating";
+import { formatCurrency } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import type { ProductSummary } from "@/types/catalog";
 
 interface ProductCardProps {
   product: ProductSummary;
+  className?: string;
 }
 
 /**
- * Reusable product card used across the homepage rails, listing grid and
- * category pages. Links to the product detail page — the affiliate CTA
- * itself only lives on the PDP, keeping outbound intent explicit.
+ * Editorial product card used across homepage rails, listing grids and
+ * category pages. Links to the product detail page — affiliate CTAs live
+ * on the PDP so outbound intent stays explicit.
  */
-export function ProductCard({ product }: ProductCardProps) {
-  const discount = formatDiscountPercent(product.displayPrice, product.originalPrice);
-
-  const marketplaces = [...product.marketplaces].sort((a, b) =>
-    a.marketplace.localeCompare(b.marketplace),
-  );
+export function ProductCard({ product, className }: ProductCardProps) {
+  const badge = badgeForProduct(product);
+  const showPrice = product.displayPrice > 0;
 
   return (
-    <Card className="group h-full gap-0 overflow-hidden pt-0 transition-shadow hover:shadow-md">
-      <Link href={`/products/${product.slug}`} className="block shrink-0">
-        <div className="relative overflow-hidden">
+    <article
+      className={cn(
+        "group h-full overflow-hidden rounded-xl border border-border bg-card shadow-[var(--shadow-card)] transition-[box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:shadow-[var(--shadow-card-hover)]",
+        className,
+      )}
+    >
+      <Link href={`/products/${product.slug}`} className="flex h-full flex-col">
+        <div className="relative overflow-hidden bg-muted">
           <ProductImagePlaceholder
             seed={product.slug}
             src={product.imageUrl}
             alt={product.title}
-            className="aspect-square w-full rounded-none"
+            className="aspect-square w-full rounded-none transition-transform duration-300 ease-out group-hover:scale-[1.04]"
           />
-          <div className="absolute left-2 top-2 flex flex-wrap gap-1.5">
-            {product.isTrending ? (
-              <Badge className="gap-1 bg-orange-600 text-white hover:bg-orange-600">
-                <TrendingUp className="h-3 w-3" /> Trending
-              </Badge>
-            ) : null}
-            {product.isFeatured ? <Badge variant="secondary">Featured</Badge> : null}
-          </div>
-          {discount ? (
-            <Badge className="absolute right-2 top-2 bg-emerald-600 text-white hover:bg-emerald-600">
-              -{discount}%
-            </Badge>
+          {badge ? (
+            <div className="absolute left-2.5 top-2.5">
+              <ProductBadge kind={badge} />
+            </div>
           ) : null}
         </div>
-      </Link>
 
-      <CardContent className="flex flex-1 flex-col pt-4 pb-3">
-        <p className="truncate text-xs font-medium text-muted-foreground">{product.category.name}</p>
-        <Link href={`/products/${product.slug}`}>
-          <h3 className="mt-1 line-clamp-2 min-h-10 text-sm font-semibold leading-5 transition-colors group-hover:text-primary">
+        <div className="flex flex-1 flex-col p-3 sm:p-4">
+          <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+            {product.category.name}
+          </p>
+          <h3 className="mt-1.5 line-clamp-2 break-words text-sm font-semibold leading-snug text-foreground sm:text-[0.95rem]">
             {product.title}
           </h3>
-        </Link>
+          {product.shortDescription ? (
+            <p className="mt-1.5 hidden line-clamp-2 text-sm leading-relaxed text-muted-foreground sm:block">
+              {product.shortDescription}
+            </p>
+          ) : null}
 
-        <div className="mt-2 flex h-5 items-center gap-1 text-xs text-muted-foreground">
-          <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
-          <span className="font-medium text-foreground">{formatRating(product.rating)}</span>
-          <span>({product.ratingCount.toLocaleString()})</span>
-        </div>
+          <div className="mt-2 min-h-5">
+            <ProductRating rating={product.rating} count={product.ratingCount} />
+          </div>
 
-        <div className="mt-2 flex h-7 items-baseline gap-2">
-          <span className="text-lg font-semibold">{formatCurrency(product.displayPrice, product.currency)}</span>
-          {product.originalPrice ? (
-            <span className="text-sm text-muted-foreground line-through">
-              {formatCurrency(product.originalPrice, product.currency)}
+          <div className="mt-auto pt-3">
+            {showPrice ? (
+              <p className="text-base font-bold tracking-tight text-foreground">
+                {formatCurrency(product.displayPrice, product.currency)}
+                {product.originalPrice ? (
+                  <span className="ml-2 text-sm font-normal text-muted-foreground line-through">
+                    {formatCurrency(product.originalPrice, product.currency)}
+                  </span>
+                ) : null}
+              </p>
+            ) : (
+              <p className="text-sm font-medium text-muted-foreground">Check current price</p>
+            )}
+
+            <span className="mt-3 inline-flex h-10 w-full items-center justify-center rounded-lg bg-foreground text-sm font-semibold text-background transition-colors group-hover:bg-foreground/90">
+              View Product
             </span>
+          </div>
+        </div>
+      </Link>
+    </article>
+  );
+}
+
+interface SpotlightProductCardProps {
+  product: ProductSummary;
+}
+
+/** Wide editorial card for featured / editor's-pick rails. */
+export function SpotlightProductCard({ product }: SpotlightProductCardProps) {
+  const badge = badgeForProduct(product);
+  const showPrice = product.displayPrice > 0;
+
+  return (
+    <article className="group overflow-hidden rounded-xl border border-border bg-card shadow-[var(--shadow-card)] transition-[box-shadow] duration-200 hover:shadow-[var(--shadow-card-hover)]">
+      <Link href={`/products/${product.slug}`} className="grid md:grid-cols-2">
+        <div className="relative overflow-hidden bg-muted">
+          <ProductImagePlaceholder
+            seed={product.slug}
+            src={product.imageUrl}
+            alt={product.title}
+            className="aspect-[4/3] w-full rounded-none md:aspect-auto md:h-full md:min-h-[20rem] transition-transform duration-300 ease-out group-hover:scale-[1.03]"
+          />
+          {badge ? (
+            <div className="absolute left-3 top-3">
+              <ProductBadge kind={badge} />
+            </div>
           ) : null}
         </div>
-      </CardContent>
-
-      <CardFooter className="mt-auto h-12 shrink-0 flex-nowrap items-center gap-1.5 rounded-none p-0 px-4">
-        {marketplaces.map((link) => (
-          <MarketplaceBadge key={link.marketplace} marketplace={link.marketplace} />
-        ))}
-      </CardFooter>
-    </Card>
+        <div className="flex flex-col justify-center p-5 sm:p-8">
+          <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+            {product.category.name}
+          </p>
+          <h3 className="mt-2 font-heading text-2xl font-bold tracking-tight sm:text-3xl">{product.title}</h3>
+          {product.shortDescription ? (
+            <p className="mt-3 max-w-md text-sm leading-relaxed text-muted-foreground sm:text-base">
+              {product.shortDescription}
+            </p>
+          ) : null}
+          <div className="mt-4">
+            <ProductRating rating={product.rating} count={product.ratingCount} />
+          </div>
+          {showPrice ? (
+            <p className="mt-4 text-2xl font-bold tracking-tight">
+              {formatCurrency(product.displayPrice, product.currency)}
+            </p>
+          ) : null}
+          <span className="mt-6 inline-flex h-11 w-full max-w-xs items-center justify-center rounded-lg bg-foreground text-sm font-semibold text-background transition-colors group-hover:bg-foreground/90 sm:w-auto sm:px-6">
+            View Product
+          </span>
+        </div>
+      </Link>
+    </article>
   );
 }

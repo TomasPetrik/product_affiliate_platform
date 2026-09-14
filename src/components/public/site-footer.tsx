@@ -1,14 +1,27 @@
 import Link from "next/link";
-import { Compass } from "lucide-react";
 
-import { SITE_NAME } from "@/lib/brand";
+import { Container } from "@/components/public/container";
+import { SiteLogo } from "@/components/public/site-logo";
+import { PRODUCT_COLLECTIONS } from "@/lib/collections";
+import { SITE_DESCRIPTION, SITE_NAME } from "@/lib/brand";
 
 const FOOTER_LINK_GROUPS = [
   {
-    title: "Browse",
+    title: "Discover",
     links: [
       { href: "/products", label: "All products" },
       { href: "/categories", label: "Categories" },
+      { href: PRODUCT_COLLECTIONS.trending.href, label: PRODUCT_COLLECTIONS.trending.shortTitle },
+      { href: PRODUCT_COLLECTIONS.featured.href, label: PRODUCT_COLLECTIONS.featured.shortTitle },
+    ],
+  },
+  {
+    title: "Collections",
+    links: [
+      { href: PRODUCT_COLLECTIONS.bestsellers.href, label: PRODUCT_COLLECTIONS.bestsellers.title },
+      { href: PRODUCT_COLLECTIONS.newest.href, label: PRODUCT_COLLECTIONS.newest.title },
+      { href: PRODUCT_COLLECTIONS.under50.href, label: PRODUCT_COLLECTIONS.under50.shortTitle },
+      { href: PRODUCT_COLLECTIONS.under100.href, label: PRODUCT_COLLECTIONS.under100.shortTitle },
     ],
   },
   {
@@ -24,25 +37,22 @@ export function SiteFooter() {
   const year = new Date().getFullYear();
 
   return (
-    <footer className="border-t bg-muted/30">
-      <div className="mx-auto max-w-6xl px-4 py-10">
-        <div className="grid gap-8 sm:grid-cols-[2fr_1fr_1fr]">
+    <footer className="mt-auto border-t border-border bg-card">
+      <Container className="py-12 sm:py-16">
+        <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-[1.4fr_repeat(3,minmax(0,1fr))]">
           <div>
-            <Link href="/" className="flex items-center gap-2 font-semibold">
-              <Compass className="h-5 w-5 text-primary" aria-hidden="true" />
-              <span>{SITE_NAME}</span>
-            </Link>
-            <p className="mt-3 max-w-sm text-sm text-muted-foreground">
-              {SITE_NAME} helps you decide fast by curating and reviewing products from marketplaces like
-              Amazon and eBay. We don&apos;t sell products or process payments — every purchase
-              happens directly on the retailer&apos;s site.
+            <SiteLogo />
+            <p className="mt-4 max-w-sm text-sm leading-relaxed text-muted-foreground">{SITE_DESCRIPTION}</p>
+            <p className="mt-3 max-w-sm text-sm leading-relaxed text-muted-foreground">
+              {SITE_NAME} does not sell products or process payments. Every purchase happens on the
+              retailer&apos;s site.
             </p>
           </div>
 
           {FOOTER_LINK_GROUPS.map((group) => (
             <div key={group.title}>
-              <h3 className="text-sm font-semibold">{group.title}</h3>
-              <ul className="mt-3 space-y-2">
+              <h2 className="text-sm font-semibold text-foreground">{group.title}</h2>
+              <ul className="mt-3 space-y-2.5">
                 {group.links.map((link) => (
                   <li key={link.href}>
                     <Link
@@ -58,12 +68,12 @@ export function SiteFooter() {
           ))}
         </div>
 
-        <div className="mt-10 flex flex-col gap-2 border-t pt-6 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+        <div className="mt-12 flex flex-col gap-2 border-t border-border pt-6 text-xs leading-relaxed text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
           <p>
             © {year} {SITE_NAME}. As an Amazon Associate and eBay Partner Network member, we earn from
             qualifying purchases.
           </p>
-          <p className="flex flex-wrap gap-x-3 gap-y-1">
+          <p className="flex flex-wrap gap-x-4 gap-y-1">
             <Link href="/privacy" className="underline-offset-2 hover:text-foreground hover:underline">
               Privacy Policy
             </Link>
@@ -72,7 +82,7 @@ export function SiteFooter() {
             </Link>
           </p>
         </div>
-      </div>
+      </Container>
     </footer>
   );
 }

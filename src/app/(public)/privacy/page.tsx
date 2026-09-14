@@ -57,7 +57,7 @@ function Section({
 }) {
   return (
     <section id={id} className="scroll-mt-24 space-y-3">
-      <h2 className="text-lg font-semibold text-foreground">{title}</h2>
+      <h2 className="font-heading text-lg font-bold tracking-tight text-foreground">{title}</h2>
       {children}
     </section>
   );
@@ -67,8 +67,8 @@ export default function PrivacyPage() {
   const email = privacyEmail();
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-12">
-      <h1 className="text-2xl font-bold tracking-tight">Privacy Policy</h1>
+    <div className="mx-auto max-w-3xl px-4 py-12 sm:px-6 sm:py-16">
+      <h1 className="text-page-title">Privacy Policy</h1>
       <p className="mt-2 text-sm text-muted-foreground">Last updated: {LAST_UPDATED}</p>
 
       <div className="mt-6 space-y-4 text-sm leading-relaxed text-muted-foreground">
@@ -91,7 +91,7 @@ export default function PrivacyPage() {
         </p>
       </div>
 
-      <nav aria-label="Privacy Policy contents" className="mt-8 rounded-lg border bg-muted/30 p-4">
+      <nav aria-label="Privacy Policy contents" className="mt-8 rounded-xl border border-border bg-card p-4">
         <p className="text-sm font-semibold text-foreground">Contents</p>
         <ol className="mt-3 grid gap-1.5 text-sm text-muted-foreground sm:grid-cols-2">
           {TOC.map((item, index) => (

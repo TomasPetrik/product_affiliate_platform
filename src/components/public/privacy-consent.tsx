@@ -78,13 +78,13 @@ export function PrivacyConsent({ region, initialConsent, gpc }: PrivacyConsentPr
           aria-label="Privacy notice"
           className="fixed inset-x-0 bottom-0 z-50 border-t border-border bg-background/95 shadow-[0_-12px_40px_oklch(0.2_0.02_55_/_0.08)] backdrop-blur-md"
         >
-          <div className="mx-auto grid max-w-6xl gap-8 px-4 py-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:px-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_12.5rem] lg:items-start lg:gap-10 lg:py-6">
+          <div className="mx-auto grid w-full max-w-6xl grid-cols-1 gap-4 px-4 py-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_12.5rem] lg:items-start lg:gap-10 lg:py-6">
             <div className="space-y-2 text-sm leading-relaxed text-muted-foreground">
               <p className="font-heading text-base font-bold text-foreground">Privacy Notice</p>
               {region === "eu" ? <EuBannerCopy /> : <UsBannerCopy />}
             </div>
 
-            <div className="space-y-2 text-sm leading-relaxed text-muted-foreground">
+            <div className="hidden space-y-2 text-sm leading-relaxed text-muted-foreground lg:block">
               <p className="font-heading text-base font-bold text-foreground">Ways we may use your data</p>
               <ul className="list-disc space-y-1 pl-5">
                 <li>Remember this privacy choice on your device</li>
@@ -103,18 +103,18 @@ export function PrivacyConsent({ region, initialConsent, gpc }: PrivacyConsentPr
             </div>
 
             <div className="flex flex-col gap-2">
-              <Button size="lg" className="w-full" disabled={saving} onClick={() => persist(acceptAllConsent())}>
+              <Button size="cta" className="w-full" disabled={saving} onClick={() => persist(acceptAllConsent())}>
                 Accept
               </Button>
               <Button
-                size="lg"
+                size="cta"
                 className="w-full"
                 disabled={saving}
                 onClick={() => persist(rejectNonEssentialConsent())}
               >
                 Reject Non-Essential
               </Button>
-              <Button size="lg" variant="outline" className="w-full" disabled={saving} onClick={openSettingsFromBanner}>
+              <Button size="cta" variant="outline" className="w-full" disabled={saving} onClick={openSettingsFromBanner}>
                 Manage Settings
               </Button>
             </div>
@@ -196,7 +196,7 @@ function PrivacyCenter({
         <Dialog.Popup className="fixed top-[50%] left-[50%] z-[60] flex max-h-[min(44rem,calc(100vh-2rem))] w-[calc(100%-1.5rem)] max-w-lg origin-center -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl bg-background text-foreground shadow-lg ring-1 ring-foreground/10 outline-none data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0">
           <div className="flex items-center justify-between gap-3 border-b border-border px-5 py-4">
             <div className="flex items-center gap-2 font-heading text-lg font-bold tracking-tight">
-              <RadarMark className="size-6 text-primary" />
+              <RadarMark className="size-6 text-foreground" />
               {SITE_NAME}
             </div>
             <Dialog.Close

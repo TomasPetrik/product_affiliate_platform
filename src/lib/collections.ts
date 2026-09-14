@@ -3,8 +3,8 @@ export const PRODUCT_COLLECTIONS = {
     key: "trending",
     title: "Trending Products",
     shortTitle: "Trending",
-    eyebrow: "People are looking",
-    description: "The products readers are talking about, saving, and coming back to.",
+    eyebrow: "Right now",
+    description: "What's catching people's attention right now.",
     href: "/products?trending=1",
   },
   bestsellers: {
@@ -12,23 +12,23 @@ export const PRODUCT_COLLECTIONS = {
     title: "Best Sellers",
     shortTitle: "Best Sellers",
     eyebrow: "Most loved",
-    description: "High-rated picks with a track record people actually buy.",
+    description: "Popular for a reason.",
     href: "/products?bestsellers=1",
   },
   featured: {
     key: "featured",
     title: "Editor's Picks",
     shortTitle: "Best Picks",
-    eyebrow: "From the editors",
-    description: "Hand-selected products we'd recommend to a friend.",
+    eyebrow: "The shortlist",
+    description: "Products we'd actually recommend to a friend.",
     href: "/products?featured=1",
   },
   newest: {
     key: "newest",
     title: "New & Interesting",
     shortTitle: "New",
-    eyebrow: "Just in",
-    description: "Fresh finds worth a look before they hit the mainstream.",
+    eyebrow: "Just landed",
+    description: "Fresh finds worth discovering before everyone else.",
     href: "/products?new=1",
   },
   under50: {
@@ -36,7 +36,7 @@ export const PRODUCT_COLLECTIONS = {
     title: "Products Under $50",
     shortTitle: "Under $50",
     eyebrow: "Smart spend",
-    description: "Useful, well-reviewed products that stay under fifty dollars.",
+    description: "Good finds without the big price tag.",
     href: "/products?maxPrice=50",
   },
   under100: {
@@ -44,7 +44,7 @@ export const PRODUCT_COLLECTIONS = {
     title: "Products Under $100",
     shortTitle: "Under $100",
     eyebrow: "High value",
-    description: "Quality picks that deliver more than their price suggests.",
+    description: "More value without going overboard.",
     href: "/products?maxPrice=100",
   },
 } as const;
@@ -52,6 +52,7 @@ export const PRODUCT_COLLECTIONS = {
 export type ProductCollectionKey = keyof typeof PRODUCT_COLLECTIONS;
 
 export const NAV_LINKS = [
+  { href: "/products", label: "Discover" },
   { href: "/categories", label: "Categories" },
   { href: PRODUCT_COLLECTIONS.trending.href, label: "Trending" },
   { href: PRODUCT_COLLECTIONS.featured.href, label: "Best Picks" },
@@ -74,7 +75,7 @@ export function listingCopy(filters: ProductListingFilters, categoryName?: strin
   if (filters.query) {
     return {
       title: `Results for “${filters.query}”`,
-      description: "Matching products from the RadarCut catalog.",
+      description: "Products that match what you're looking for.",
     };
   }
 
@@ -123,12 +124,12 @@ export function listingCopy(filters: ProductListingFilters, categoryName?: strin
   if (categoryName) {
     return {
       title: categoryName,
-      description: "Curated products in this category.",
+      description: "Finds from this aisle that earned a spot on our radar.",
     };
   }
 
   return {
-    title: "All products",
-    description: "Browse every product RadarCut currently recommends.",
+    title: "Discover products",
+    description: "Browse the full RadarCut catalog — products worth finding.",
   };
 }

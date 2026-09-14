@@ -18,7 +18,6 @@ import { SITE_NAME } from "@/lib/brand";
 
 const MOBILE_LINKS = [
   ...NAV_LINKS,
-  { href: "/products", label: "All products" },
   { href: PRODUCT_COLLECTIONS.bestsellers.href, label: PRODUCT_COLLECTIONS.bestsellers.shortTitle },
   { href: PRODUCT_COLLECTIONS.newest.href, label: PRODUCT_COLLECTIONS.newest.shortTitle },
   { href: PRODUCT_COLLECTIONS.under50.href, label: PRODUCT_COLLECTIONS.under50.shortTitle },
@@ -29,16 +28,16 @@ const MOBILE_LINKS = [
  * links collapse into a slide-out sheet below the `md` breakpoint. */
 export function SiteHeader() {
   return (
-    <header className="sticky top-0 z-40 w-full border-b border-border bg-background/90 backdrop-blur-md supports-[backdrop-filter]:bg-background/80">
+    <header className="sticky top-0 z-40 w-full min-w-0 border-b border-border bg-background/90 backdrop-blur-md supports-[backdrop-filter]:bg-background/80">
       <Container className="flex h-16 items-center gap-6 lg:h-[4.25rem]">
         <SiteLogo />
 
-        <nav className="hidden items-center gap-7 md:flex" aria-label="Primary">
+        <nav className="hidden items-center gap-8 md:flex" aria-label="Primary">
           {NAV_LINKS.map((link) => (
             <Link
               key={link.href}
               href={link.href}
-              className="text-sm font-medium text-foreground/70 transition-colors hover:text-foreground"
+              className="text-sm font-medium text-foreground/70 transition-colors duration-200 hover:text-foreground"
             >
               {link.label}
             </Link>

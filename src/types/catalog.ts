@@ -23,6 +23,7 @@ export interface CategorySummary {
   name: string;
   description: string;
   productCount: number;
+  imageUrl: string | null;
 }
 
 export interface ProductSummary {

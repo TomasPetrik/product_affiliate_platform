@@ -1,15 +1,89 @@
 import Link from "next/link";
+import { ArrowRight } from "lucide-react";
 
-import { ProductBadge, badgeForProduct } from "@/components/public/product-badge";
+import { ProductBadge, badgeForProduct, discountBadgeLabel } from "@/components/public/product-badge";
 import { ProductImagePlaceholder } from "@/components/public/product-image-placeholder";
 import { ProductRating } from "@/components/public/product-rating";
-import { formatCurrency, formatDiscountPercent } from "@/lib/format";
+import { formatCurrency } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { ProductSummary } from "@/types/catalog";
 
 interface ProductCardProps {
   product: ProductSummary;
   className?: string;
+}
+
+function CardMedia({
+  product,
+  badge,
+  discountLabel,
+  aspectClassName = "aspect-square",
+}: {
+  product: ProductSummary;
+  badge: ReturnType<typeof badgeForProduct>;
+  discountLabel: string | null;
+  aspectClassName?: string;
+}) {
+  return (
+    <div className={cn("relative overflow-hidden bg-image-well", aspectClassName)}>
+      <ProductImagePlaceholder
+        seed={product.slug}
+        src={product.imageUrl}
+        alt={product.title}
+        fit="contain"
+        className="size-full rounded-none"
+      />
+      {badge ? (
+        <div className="absolute left-3 top-3">
+          <ProductBadge
+            kind={badge}
+            label={badge === "discount" && discountLabel ? discountLabel : undefined}
+          />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ViewProductCta({ className }: { className?: string }) {
+  return (
+    <span
+      className={cn(
+        "mt-4 inline-flex h-11 w-full touch-manipulation items-center justify-center gap-1.5 rounded-[14px] bg-primary text-sm font-semibold text-primary-foreground transition-colors duration-200 group-hover:bg-cta-hover",
+        className,
+      )}
+    >
+      View Product
+      <ArrowRight className="size-4" aria-hidden="true" />
+    </span>
+  );
+}
+
+function PriceBlock({
+  product,
+  className,
+  size = "default",
+}: {
+  product: ProductSummary;
+  className?: string;
+  size?: "default" | "lg";
+}) {
+  const showPrice = product.displayPrice > 0;
+
+  if (!showPrice) {
+    return <p className={cn("text-sm font-medium text-muted-foreground", className)}>Check current price</p>;
+  }
+
+  return (
+    <p className={cn("text-price tracking-tight text-foreground", size === "lg" ? "text-2xl" : "text-base", className)}>
+      {formatCurrency(product.displayPrice, product.currency)}
+      {product.originalPrice ? (
+        <span className="ml-2 text-sm font-medium text-muted-foreground line-through">
+          {formatCurrency(product.originalPrice, product.currency)}
+        </span>
+      ) : null}
+    </p>
+  );
 }
 
 /**
@@ -19,64 +93,38 @@ interface ProductCardProps {
  */
 export function ProductCard({ product, className }: ProductCardProps) {
   const badge = badgeForProduct(product);
-  const showPrice = product.displayPrice > 0;
+  const discountLabel = discountBadgeLabel(product.displayPrice, product.originalPrice);
 
   return (
     <article
       className={cn(
-        "group h-full overflow-hidden rounded-xl border border-border bg-card shadow-[var(--shadow-card)] transition-[box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:shadow-[var(--shadow-card-hover)]",
+        "group h-full min-w-0 w-full overflow-hidden rounded-[16px] border border-border bg-card shadow-[var(--shadow-card)] transition-[box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:shadow-[var(--shadow-card-hover)]",
         className,
       )}
     >
       <Link href={`/products/${product.slug}`} className="flex h-full flex-col">
-        <div className="relative overflow-hidden bg-muted">
-          <ProductImagePlaceholder
-            seed={product.slug}
-            src={product.imageUrl}
-            alt={product.title}
-            className="aspect-square w-full rounded-none transition-transform duration-300 ease-out group-hover:scale-[1.04]"
-          />
-          {badge ? (
-            <div className="absolute left-2.5 top-2.5">
-              <ProductBadge kind={badge} />
-            </div>
-          ) : null}
-        </div>
+        <CardMedia product={product} badge={badge} discountLabel={discountLabel} />
 
-        <div className="flex flex-1 flex-col p-3 sm:p-4">
+        <div className="flex flex-1 flex-col px-3.5 pb-3.5 pt-4 sm:px-4 sm:pb-4">
           <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
             {product.category.name}
           </p>
-          <h3 className="mt-1.5 line-clamp-2 break-words text-sm font-semibold leading-snug text-foreground sm:text-[0.95rem]">
+          <h3 className="text-product-title mt-1.5 line-clamp-2 break-words text-sm text-foreground [overflow-wrap:anywhere] sm:text-[0.95rem]">
             {product.title}
           </h3>
           {product.shortDescription ? (
-            <p className="mt-1.5 hidden line-clamp-2 text-sm leading-relaxed text-muted-foreground sm:block">
+            <p className="mt-1.5 line-clamp-1 text-sm leading-relaxed text-muted-foreground sm:line-clamp-2">
               {product.shortDescription}
             </p>
           ) : null}
 
-          <div className="mt-2 min-h-5">
+          <div className="mt-2.5 min-h-5">
             <ProductRating rating={product.rating} count={product.ratingCount} />
           </div>
 
           <div className="mt-auto pt-3">
-            {showPrice ? (
-              <p className="text-base font-bold tracking-tight text-foreground">
-                {formatCurrency(product.displayPrice, product.currency)}
-                {product.originalPrice ? (
-                  <span className="ml-2 text-sm font-normal text-muted-foreground line-through">
-                    {formatCurrency(product.originalPrice, product.currency)}
-                  </span>
-                ) : null}
-              </p>
-            ) : (
-              <p className="text-sm font-medium text-muted-foreground">Check current price</p>
-            )}
-
-            <span className="mt-3 inline-flex h-10 w-full items-center justify-center rounded-lg bg-foreground text-sm font-semibold text-background transition-colors group-hover:bg-foreground/90">
-              View Product
-            </span>
+            <PriceBlock product={product} />
+            <ViewProductCta />
           </div>
         </div>
       </Link>
@@ -92,49 +140,32 @@ interface CompactProductCardProps {
 /** Image-forward card for the homepage hero mosaic. */
 export function CompactProductCard({ product, className }: CompactProductCardProps) {
   const badge = badgeForProduct(product);
+  const discountLabel = discountBadgeLabel(product.displayPrice, product.originalPrice);
   const showPrice = product.displayPrice > 0;
-  const discount = formatDiscountPercent(product.displayPrice, product.originalPrice);
 
   return (
     <article
       className={cn(
-        "group h-full overflow-hidden rounded-xl border border-border bg-card shadow-[var(--shadow-card)] transition-[box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:shadow-[var(--shadow-card-hover)]",
+        "group h-full min-w-0 w-full overflow-hidden rounded-[16px] border border-border bg-card shadow-[var(--shadow-card)] transition-[box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:shadow-[var(--shadow-card-hover)]",
         className,
       )}
     >
       <Link href={`/products/${product.slug}`} className="flex h-full flex-col">
-        <div className="relative overflow-hidden bg-muted">
-          <ProductImagePlaceholder
-            seed={product.slug}
-            src={product.imageUrl}
-            alt={product.title}
-            className="aspect-square w-full rounded-none transition-transform duration-300 ease-out group-hover:scale-[1.04]"
-          />
-          {badge ? (
-            <div className="absolute left-2.5 top-2.5">
-              <ProductBadge kind={badge} />
-            </div>
-          ) : null}
-          {discount ? (
-            <span className="absolute right-2.5 top-2.5 rounded-md bg-primary px-2 py-0.5 text-[11px] font-semibold text-primary-foreground">
-              {discount}% off
-            </span>
-          ) : null}
-        </div>
+        <CardMedia product={product} badge={badge} discountLabel={discountLabel} />
 
-        <div className="flex flex-1 flex-col gap-1.5 p-3">
+        <div className="flex flex-1 flex-col gap-1.5 px-3 py-3">
           <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
             {product.category.name}
           </p>
-          <h3 className="line-clamp-2 break-words text-sm font-semibold leading-snug text-foreground">
+          <h3 className="text-product-title line-clamp-2 overflow-hidden break-words text-sm text-foreground [overflow-wrap:anywhere]">
             {product.title}
           </h3>
           <div className="mt-auto flex items-end justify-between gap-2 pt-1">
             {showPrice ? (
-              <p className="text-sm font-bold tracking-tight text-foreground sm:text-base">
+              <p className="text-price text-sm tracking-tight text-foreground sm:text-base">
                 {formatCurrency(product.displayPrice, product.currency)}
                 {product.originalPrice ? (
-                  <span className="ml-1.5 text-xs font-normal text-muted-foreground line-through">
+                  <span className="ml-1.5 text-xs font-medium text-muted-foreground line-through">
                     {formatCurrency(product.originalPrice, product.currency)}
                   </span>
                 ) : null}
@@ -162,29 +193,22 @@ interface SpotlightProductCardProps {
 /** Wide editorial card for featured / editor's-pick rails. */
 export function SpotlightProductCard({ product }: SpotlightProductCardProps) {
   const badge = badgeForProduct(product);
-  const showPrice = product.displayPrice > 0;
+  const discountLabel = discountBadgeLabel(product.displayPrice, product.originalPrice);
 
   return (
-    <article className="group overflow-hidden rounded-xl border border-border bg-card shadow-[var(--shadow-card)] transition-[box-shadow] duration-200 hover:shadow-[var(--shadow-card-hover)]">
+    <article className="group overflow-hidden rounded-[16px] border border-border bg-card shadow-[var(--shadow-card)] transition-[box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:shadow-[var(--shadow-card-hover)]">
       <Link href={`/products/${product.slug}`} className="grid md:grid-cols-2">
-        <div className="relative overflow-hidden bg-muted">
-          <ProductImagePlaceholder
-            seed={product.slug}
-            src={product.imageUrl}
-            alt={product.title}
-            className="aspect-[4/3] w-full rounded-none md:aspect-auto md:h-full md:min-h-[20rem] transition-transform duration-300 ease-out group-hover:scale-[1.03]"
-          />
-          {badge ? (
-            <div className="absolute left-3 top-3">
-              <ProductBadge kind={badge} />
-            </div>
-          ) : null}
-        </div>
-        <div className="flex flex-col justify-center p-5 sm:p-8">
+        <CardMedia
+          product={product}
+          badge={badge}
+          discountLabel={discountLabel}
+          aspectClassName="aspect-[4/3] md:aspect-auto md:h-full md:min-h-[22rem]"
+        />
+        <div className="flex flex-col justify-center p-5 sm:p-8 lg:p-10">
           <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
             {product.category.name}
           </p>
-          <h3 className="mt-2 font-heading text-2xl font-bold tracking-tight sm:text-3xl">{product.title}</h3>
+          <h3 className="text-product-title mt-2 text-2xl font-bold tracking-tight sm:text-3xl">{product.title}</h3>
           {product.shortDescription ? (
             <p className="mt-3 max-w-md text-sm leading-relaxed text-muted-foreground sm:text-base">
               {product.shortDescription}
@@ -193,14 +217,8 @@ export function SpotlightProductCard({ product }: SpotlightProductCardProps) {
           <div className="mt-4">
             <ProductRating rating={product.rating} count={product.ratingCount} />
           </div>
-          {showPrice ? (
-            <p className="mt-4 text-2xl font-bold tracking-tight">
-              {formatCurrency(product.displayPrice, product.currency)}
-            </p>
-          ) : null}
-          <span className="mt-6 inline-flex h-11 w-full max-w-xs items-center justify-center rounded-lg bg-foreground text-sm font-semibold text-background transition-colors group-hover:bg-foreground/90 sm:w-auto sm:px-6">
-            View Product
-          </span>
+          <PriceBlock product={product} size="lg" className="mt-4" />
+          <ViewProductCta className="mt-6 max-w-xs sm:w-auto sm:px-6" />
         </div>
       </Link>
     </article>

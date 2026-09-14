@@ -10,6 +10,18 @@ export function formatRating(rating: number): string {
   return rating.toFixed(1);
 }
 
+export function formatCompactCount(count: number): string {
+  if (count < 1000) {
+    return count.toLocaleString("en-US");
+  }
+
+  return new Intl.NumberFormat("en-US", {
+    notation: "compact",
+    compactDisplay: "short",
+    maximumFractionDigits: 1,
+  }).format(count);
+}
+
 export function formatDiscountPercent(displayPrice: number, originalPrice: number | null): number | null {
   if (!originalPrice || originalPrice <= displayPrice) {
     return null;

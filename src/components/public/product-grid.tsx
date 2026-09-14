@@ -10,14 +10,14 @@ interface ProductGridProps {
 export function ProductGrid({ products, emptyMessage = "No products found." }: ProductGridProps) {
   if (products.length === 0) {
     return (
-      <div className="rounded-xl border border-dashed border-border px-6 py-16 text-center">
+      <div className="rounded-[16px] border border-dashed border-border px-6 py-16 text-center">
         <p className="text-sm text-muted-foreground">{emptyMessage}</p>
       </div>
     );
   }
 
   return (
-    <div className="grid grid-cols-2 items-stretch gap-3 sm:gap-5 lg:grid-cols-3 xl:grid-cols-4">
+    <div className="grid min-w-0 grid-cols-2 items-stretch gap-4 sm:gap-6 lg:grid-cols-3 xl:grid-cols-4">
       {products.map((product) => (
         <ProductCard key={product.id} product={product} />
       ))}

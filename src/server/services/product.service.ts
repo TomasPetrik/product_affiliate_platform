@@ -390,6 +390,7 @@ export async function getProductPreviewById(id: string): Promise<ProductDetail |
     name: product.category.name,
     description: product.category.description,
     productCount: categoryProductCount,
+    imageUrl: product.category.imageUrl ?? null,
   };
 
   const marketplaces: MarketplaceLink[] = product.affiliateLinks.map((link) => ({

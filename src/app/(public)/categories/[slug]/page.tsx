@@ -49,7 +49,7 @@ export default async function CategoryPage({ params }: CategoryPageProps) {
   const products = await getProductsByCategorySlug(category.slug);
 
   return (
-    <Container className="py-10 sm:py-14">
+    <Container className="py-12 sm:py-16">
       <Breadcrumb>
         <BreadcrumbList>
           <BreadcrumbItem>
@@ -62,15 +62,15 @@ export default async function CategoryPage({ params }: CategoryPageProps) {
         </BreadcrumbList>
       </Breadcrumb>
 
-      <h1 className="mt-6 text-page-title">{category.name}</h1>
-      <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground sm:text-base">
+      <h1 className="mt-8 text-page-title">{category.name}</h1>
+      <p className="mt-3 max-w-2xl text-sm leading-relaxed text-muted-foreground sm:text-base">
         {category.description}
       </p>
-      <p className="mt-2 text-sm text-muted-foreground">
-        {products.length} {products.length === 1 ? "product" : "products"}
+      <p className="mt-3 text-sm text-muted-foreground">
+        {products.length} {products.length === 1 ? "find" : "finds"} in this aisle
       </p>
 
-      <div className="mt-8">
+      <div className="mt-10">
         <ProductGrid products={products} emptyMessage="No products in this category yet." />
       </div>
     </Container>

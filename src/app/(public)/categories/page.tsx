@@ -7,21 +7,21 @@ import { getAllCategories } from "@/server/services/catalog.service";
 
 export const metadata: Metadata = {
   title: "Categories",
-  description: "Browse curated products organized by category.",
+  description: "Browse by aisle — then wander.",
 };
 
 export default async function CategoriesPage() {
   const categories = await getAllCategories();
 
   return (
-    <Container className="py-10 sm:py-14">
+    <Container className="py-12 sm:py-16">
       <PageHeader
         eyebrow="Browse"
         title="Categories"
-        description={`${categories.length} categories, updated as new products are added.`}
+        description={`${categories.length} places to start looking.`}
       />
 
-      <div className="mt-10 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="mt-10 grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {categories.map((category) => (
           <CategoryCard key={category.id} category={category} />
         ))}

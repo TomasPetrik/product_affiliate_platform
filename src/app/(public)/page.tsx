@@ -7,6 +7,7 @@ import { ProductCollection } from "@/components/public/product-collection";
 import { SectionHeading } from "@/components/public/section-heading";
 import { SITE_DESCRIPTION } from "@/lib/brand";
 import { PRODUCT_COLLECTIONS } from "@/lib/collections";
+import { composeHomepageCollections, pickUniqueProducts } from "@/lib/homepage";
 import {
   getAllCategories,
   getBestSellerProducts,
@@ -15,40 +16,33 @@ import {
   getProductsUnderPrice,
   getTrendingProducts,
 } from "@/server/services/catalog.service";
-import type { ProductSummary } from "@/types/catalog";
-
-function pickUniqueProducts(limit: number, ...groups: ProductSummary[][]): ProductSummary[] {
-  const seen = new Set<string>();
-  const picked: ProductSummary[] = [];
-
-  for (const group of groups) {
-    for (const product of group) {
-      if (seen.has(product.id)) continue;
-      seen.add(product.id);
-      picked.push(product);
-      if (picked.length >= limit) return picked;
-    }
-  }
-
-  return picked;
-}
 
 export const metadata: Metadata = {
   description: SITE_DESCRIPTION,
 };
 
 export default async function HomePage() {
-  const [trending, featured, bestsellers, newest, under50, under100, categories] = await Promise.all([
-    getTrendingProducts(8),
-    getFeaturedProducts(4),
-    getBestSellerProducts(4),
-    getNewProducts(4),
-    getProductsUnderPrice(50, 4),
-    getProductsUnderPrice(100, 4),
-    getAllCategories(),
-  ]);
+  const [trendingPool, featuredPool, bestsellersPool, newestPool, under50Pool, under100Pool, categories] =
+    await Promise.all([
+      getTrendingProducts(16),
+      getFeaturedProducts(12),
+      getBestSellerProducts(12),
+      getNewProducts(12),
+      getProductsUnderPrice(50, 12),
+      getProductsUnderPrice(100, 12),
+      getAllCategories(),
+    ]);
 
-  const heroProducts = pickUniqueProducts(4, featured.slice(0, 2), trending, bestsellers, featured);
+  const { trending, featured, bestsellers, newest, under50, under100 } = composeHomepageCollections({
+    trending: trendingPool,
+    featured: featuredPool,
+    bestsellers: bestsellersPool,
+    newest: newestPool,
+    under50: under50Pool,
+    under100: under100Pool,
+  });
+
+  const heroProducts = pickUniqueProducts(4, featuredPool.slice(0, 2), trendingPool, bestsellersPool, featuredPool);
 
   return (
     <div className="flex flex-col">
@@ -113,15 +107,16 @@ export default async function HomePage() {
       />
 
       {categories.length > 0 ? (
-        <section aria-labelledby="categories-heading" className="py-8 sm:py-12">
+        <section aria-labelledby="categories-heading" className="py-14 sm:py-20">
           <Container>
             <SectionHeading
               id="categories-heading"
               eyebrow="Browse"
               title="Shop by category"
+              description="Start with a world you care about."
               viewAllHref="/categories"
             />
-            <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="mt-10 grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {categories.map((category) => (
                 <CategoryCard key={category.id} category={category} />
               ))}

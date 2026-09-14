@@ -29,13 +29,15 @@ export function SectionHeading({
           {title}
         </h2>
         {description ? (
-          <p className="mt-1.5 max-w-xl text-sm leading-relaxed text-muted-foreground">{description}</p>
+          <p className="mt-2.5 max-w-xl text-sm leading-relaxed text-muted-foreground sm:text-[0.95rem]">
+            {description}
+          </p>
         ) : null}
       </div>
       {viewAllHref ? (
         <Link
           href={viewAllHref}
-          className="mb-0.5 hidden shrink-0 items-center gap-1 text-sm font-semibold text-foreground/70 transition-colors hover:text-primary sm:inline-flex"
+          className="mb-0.5 hidden shrink-0 items-center gap-1 text-sm font-semibold text-foreground/70 transition-colors duration-200 hover:text-foreground sm:inline-flex"
         >
           {viewAllLabel}
           <ArrowRight className="size-3.5" aria-hidden="true" />

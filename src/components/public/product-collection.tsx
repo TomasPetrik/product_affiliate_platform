@@ -39,7 +39,7 @@ export function ProductCollection({
   return (
     <section
       aria-labelledby={headingId}
-      className={cn("py-8 sm:py-12", tone === "muted" && "bg-muted/50")}
+      className={cn("py-14 sm:py-20", tone === "muted" && "bg-muted/70")}
     >
       <Container>
         <SectionHeading
@@ -49,12 +49,12 @@ export function ProductCollection({
           description={description}
           viewAllHref={href}
         />
-        <div className="mt-8">
+        <div className="mt-10">
           {layout === "spotlight" && spotlight ? (
-            <div className="flex flex-col gap-5">
+            <div className="flex flex-col gap-6">
               <SpotlightProductCard product={spotlight} />
               {rest.length > 0 ? (
-                <div className="grid grid-cols-2 items-stretch gap-3 sm:gap-5 lg:grid-cols-3">
+                <div className="grid min-w-0 grid-cols-2 items-stretch gap-4 sm:gap-6 lg:grid-cols-3">
                   {rest.map((product) => (
                     <ProductCard key={product.id} product={product} />
                   ))}
@@ -67,7 +67,7 @@ export function ProductCollection({
         </div>
         <Link
           href={href}
-          className="mt-6 inline-flex items-center gap-1 text-sm font-semibold text-foreground/70 transition-colors hover:text-primary sm:hidden"
+          className="mt-8 inline-flex items-center gap-1 text-sm font-semibold text-foreground/70 transition-colors duration-200 hover:text-foreground sm:hidden"
         >
           View all
           <ArrowRight className="size-3.5" aria-hidden="true" />

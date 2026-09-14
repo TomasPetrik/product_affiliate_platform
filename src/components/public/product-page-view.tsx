@@ -12,8 +12,8 @@ import { AffiliateCtaButton } from "@/components/public/affiliate-cta-button";
 import { Container } from "@/components/public/container";
 import { ProductCollection } from "@/components/public/product-collection";
 import { ProductImagePlaceholder } from "@/components/public/product-image-placeholder";
-import { ProductRating } from "@/components/public/product-rating";
-import { ProductBadge, badgeForProduct } from "@/components/public/product-badge";
+import { ProductBadge, badgeForProduct, discountBadgeLabel } from "@/components/public/product-badge";
+import { RadarScore } from "@/components/public/radar-score";
 import { formatCurrency, formatDiscountPercent } from "@/lib/format";
 import type { ProductDetail, ProductSummary } from "@/types/catalog";
 
@@ -23,10 +23,19 @@ interface ProductPageViewProps {
   trackViews?: boolean;
 }
 
+function editorialNote(product: ProductDetail): string | null {
+  if (product.isFeatured) return "The one we'd pick.";
+  if (product.ratingCount >= 4000) return "People keep coming back to this one.";
+  if (product.isTrending) return "Worth the hype? We think so.";
+  return null;
+}
+
 export function ProductPageView({ product, related, trackViews = true }: ProductPageViewProps) {
   const discount = formatDiscountPercent(product.displayPrice, product.originalPrice);
+  const discountLabel = discountBadgeLabel(product.displayPrice, product.originalPrice);
   const badge = badgeForProduct(product);
   const showPrice = product.displayPrice > 0;
+  const note = editorialNote(product);
 
   const jsonLd = {
     "@context": "https://schema.org",
@@ -50,7 +59,7 @@ export function ProductPageView({ product, related, trackViews = true }: Product
         <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
       ) : null}
 
-      <Container className="pt-8 sm:pt-10">
+      <Container className="pt-8 sm:pt-12">
         <Breadcrumb>
           <BreadcrumbList>
             <BreadcrumbItem>
@@ -69,17 +78,21 @@ export function ProductPageView({ product, related, trackViews = true }: Product
           </BreadcrumbList>
         </Breadcrumb>
 
-        <div className="mt-8 grid items-start gap-8 lg:grid-cols-[1.05fr_0.95fr] lg:gap-12">
-          <div className="relative overflow-hidden rounded-xl border border-border bg-card">
+        <div className="mt-10 grid items-start gap-10 lg:grid-cols-[1.05fr_0.95fr] lg:gap-14">
+          <div className="relative overflow-hidden rounded-[16px] border border-border bg-image-well">
             <ProductImagePlaceholder
               seed={product.slug}
               src={product.imageUrl}
               alt={product.title}
-              className="aspect-square w-full rounded-none"
+              fit="contain"
+              className="aspect-square w-full rounded-none p-8 sm:p-12"
             />
             {badge ? (
-              <div className="absolute left-3 top-3">
-                <ProductBadge kind={badge} />
+              <div className="absolute left-4 top-4">
+                <ProductBadge
+                  kind={badge}
+                  label={badge === "discount" && discountLabel ? discountLabel : undefined}
+                />
               </div>
             ) : null}
           </div>
@@ -89,27 +102,26 @@ export function ProductPageView({ product, related, trackViews = true }: Product
               {product.brand || product.category.name}
             </p>
             <h1 className="mt-2 text-page-title">{product.title}</h1>
+            {note ? <p className="mt-3 text-sm font-medium text-foreground/80">{note}</p> : null}
 
-            <div className="mt-4">
-              <ProductRating rating={product.rating} count={product.ratingCount} />
+            <div className="mt-5">
+              <RadarScore rating={product.rating} count={product.ratingCount} />
             </div>
 
             {showPrice ? (
-              <div className="mt-5 flex flex-wrap items-baseline gap-3">
-                <span className="text-3xl font-bold tracking-tight">
+              <div className="mt-6 flex flex-wrap items-baseline gap-3">
+                <span className="text-price text-3xl tracking-tight">
                   {formatCurrency(product.displayPrice, product.currency)}
                 </span>
                 {product.originalPrice ? (
-                  <span className="text-lg text-muted-foreground line-through">
+                  <span className="text-lg font-medium text-muted-foreground line-through">
                     {formatCurrency(product.originalPrice, product.currency)}
                   </span>
                 ) : null}
-                {discount ? (
-                  <span className="text-sm font-medium text-muted-foreground">Save {discount}%</span>
-                ) : null}
+                {discount ? <span className="text-sm font-medium text-muted-foreground">{discount}% off</span> : null}
               </div>
             ) : (
-              <p className="mt-5 text-base font-medium text-muted-foreground">Price shown on the retailer&apos;s site</p>
+              <p className="mt-6 text-base font-medium text-muted-foreground">Price shown on the retailer&apos;s site</p>
             )}
             <p className="mt-1.5 text-xs text-muted-foreground">
               Reference price only — always confirm on the marketplace before you buy.
@@ -149,8 +161,9 @@ export function ProductPageView({ product, related, trackViews = true }: Product
         </div>
 
         {product.longDescription ? (
-          <div className="mt-14 max-w-3xl border-t border-border pt-10">
-            <h2 className="text-section">About this product</h2>
+          <div className="mt-16 max-w-3xl border-t border-border pt-12">
+            <p className="text-eyebrow">On the radar</p>
+            <h2 className="text-section mt-2">Why it&apos;s on our radar</h2>
             <p className="mt-4 whitespace-pre-line text-sm leading-relaxed text-muted-foreground sm:text-base">
               {product.longDescription}
             </p>
@@ -162,9 +175,9 @@ export function ProductPageView({ product, related, trackViews = true }: Product
         <div className="mt-8">
           <ProductCollection
             id="related"
-            eyebrow="Keep looking"
-            title="You might also like"
-            description={`More from ${product.category.name}`}
+            eyebrow="Keep exploring"
+            title="More finds like this"
+            description={`One of our favorite aisles: ${product.category.name}.`}
             href={`/categories/${product.category.slug}`}
             products={related}
             tone="muted"

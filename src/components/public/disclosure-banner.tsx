@@ -14,9 +14,9 @@ interface DisclosureBannerProps {
  */
 export function DisclosureBanner({ className }: DisclosureBannerProps) {
   return (
-    <div className={cn("w-full border-b border-border bg-muted/70", className)}>
+    <div className={cn("w-full min-w-0 border-b border-border bg-muted/70", className)}>
       <Container>
-        <p className="py-2 text-center text-[11px] leading-relaxed text-muted-foreground sm:text-xs">
+        <p className="mx-auto max-w-[calc(100vw-2.5rem)] py-2 text-center text-[11px] leading-relaxed text-muted-foreground [overflow-wrap:anywhere] sm:max-w-none sm:text-xs">
           We participate in the Amazon Associates and eBay Partner Network affiliate programs. As an
           affiliate, we earn from qualifying purchases at no extra cost to you.{" "}
           <Link href="/disclosure" className="font-medium underline underline-offset-2 hover:text-foreground">

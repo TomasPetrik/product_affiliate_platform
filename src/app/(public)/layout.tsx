@@ -21,7 +21,7 @@ async function ConsentAndBeacon() {
 
 export default function PublicLayout({ children }: { children: ReactNode }) {
   return (
-    <div className="flex min-h-screen flex-col">
+    <div className="flex min-h-screen min-w-0 flex-col overflow-x-clip">
       <a
         href="#main-content"
         className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-primary focus:px-3 focus:py-2 focus:text-sm focus:font-semibold focus:text-primary-foreground"
@@ -31,9 +31,9 @@ export default function PublicLayout({ children }: { children: ReactNode }) {
       <Suspense fallback={null}>
         <ConsentAndBeacon />
       </Suspense>
-      <DisclosureBanner />
+      <DisclosureBanner className="min-w-0" />
       <SiteHeader />
-      <main id="main-content" className="flex-1">
+      <main id="main-content" className="min-w-0 flex-1">
         {children}
       </main>
       <SiteFooter />

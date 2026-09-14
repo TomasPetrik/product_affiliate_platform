@@ -9,7 +9,7 @@ export default function CategoriesLoading() {
 
       <div className="mt-10 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {Array.from({ length: 6 }).map((_, index) => (
-          <Skeleton key={index} className="h-28 w-full rounded-xl" />
+          <Skeleton key={index} className="aspect-[4/3] min-h-[14rem] w-full rounded-[16px]" />
         ))}
       </div>
     </Container>

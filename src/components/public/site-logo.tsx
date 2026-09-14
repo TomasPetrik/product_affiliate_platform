@@ -19,7 +19,7 @@ export function SiteLogo({ className, markClassName, compact = false }: SiteLogo
       )}
       aria-label={`${SITE_NAME} home`}
     >
-      <RadarMark className={cn("size-7 shrink-0 text-primary", markClassName)} />
+      <RadarMark className={cn("size-7 shrink-0 text-foreground", markClassName)} />
       {compact ? (
         <span className="sr-only">{SITE_NAME}</span>
       ) : (

@@ -29,16 +29,31 @@ const productInclude = {
 type ProductWithRelations = Prisma.ProductGetPayload<{ include: typeof productInclude }>;
 
 function toMarketplaceLinks(product: ProductWithRelations): MarketplaceLink[] {
-  return product.affiliateLinks.map((link) => ({
-    marketplace: link.marketplace.code,
-    label: link.marketplace.name,
-    href: affiliateGoHref(product.slug, link.marketplace.code),
-  }));
+  return product.affiliateLinks.flatMap((link) => {
+    if (!link.marketplace) return [];
+    return [
+      {
+        marketplace: link.marketplace.code,
+        label: link.marketplace.name,
+        href: affiliateGoHref(product.slug, link.marketplace.code),
+      },
+    ];
+  });
 }
 
-function toCategorySummary(category: { id: string; slug: string; name: string; description: string | null } | null, productCount: number): CategorySummary {
+function toCategorySummary(
+  category: { id: string; slug: string; name: string; description: string | null; imageUrl?: string | null } | null,
+  productCount: number,
+): CategorySummary {
   if (!category) {
-    return { id: "uncategorized", slug: "uncategorized", name: "Uncategorized", description: "", productCount };
+    return {
+      id: "uncategorized",
+      slug: "uncategorized",
+      name: "Uncategorized",
+      description: "",
+      productCount,
+      imageUrl: null,
+    };
   }
 
   return {
@@ -47,6 +62,7 @@ function toCategorySummary(category: { id: string; slug: string; name: string; d
     name: category.name,
     description: category.description ?? "",
     productCount,
+    imageUrl: category.imageUrl ?? null,
   };
 }
 
@@ -89,16 +105,33 @@ async function countPublishedInCategory(categoryId: string | null): Promise<numb
 }
 
 async function toSummaries(products: ProductWithRelations[]): Promise<ProductSummary[]> {
-  return Promise.all(
-    products.map(async (product) => toProductSummary(product, await countPublishedInCategory(product.categoryId))),
+  const counts = new Map<string, number>();
+  const categoryIds = [...new Set(products.map((product) => product.categoryId).filter((id): id is string => Boolean(id)))];
+
+  await Promise.all(
+    categoryIds.map(async (categoryId) => {
+      counts.set(categoryId, await countPublishedInCategory(categoryId));
+    }),
   );
+
+  return products.map((product) => toProductSummary(product, counts.get(product.categoryId ?? "") ?? 0));
 }
 
 export async function getAllCategories(): Promise<CategorySummary[]> {
   const categories = await prisma.category.findMany({
     where: { isActive: true },
     orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
-    include: { _count: { select: { products: { where: { status: "PUBLISHED" } } } } },
+    include: {
+      _count: { select: { products: { where: { status: "PUBLISHED" } } } },
+      products: {
+        where: { status: "PUBLISHED" },
+        orderBy: [{ isFeatured: "desc" }, { isTrending: "desc" }, { publishedAt: "desc" }],
+        take: 1,
+        include: {
+          images: { orderBy: [{ isPrimary: "desc" }, { position: "asc" }], take: 1 },
+        },
+      },
+    },
   });
 
   return categories.map((category) => ({
@@ -107,13 +140,24 @@ export async function getAllCategories(): Promise<CategorySummary[]> {
     name: category.name,
     description: category.description ?? "",
     productCount: category._count.products,
+    imageUrl: category.imageUrl ?? category.products[0]?.images[0]?.url ?? category.products[0]?.ogImageUrl ?? null,
   }));
 }
 
 export async function getCategoryBySlug(slug: string): Promise<CategorySummary | undefined> {
   const category = await prisma.category.findFirst({
     where: { slug, isActive: true },
-    include: { _count: { select: { products: { where: { status: "PUBLISHED" } } } } },
+    include: {
+      _count: { select: { products: { where: { status: "PUBLISHED" } } } },
+      products: {
+        where: { status: "PUBLISHED" },
+        orderBy: [{ isFeatured: "desc" }, { isTrending: "desc" }, { publishedAt: "desc" }],
+        take: 1,
+        include: {
+          images: { orderBy: [{ isPrimary: "desc" }, { position: "asc" }], take: 1 },
+        },
+      },
+    },
   });
 
   if (!category) return undefined;
@@ -124,6 +168,7 @@ export async function getCategoryBySlug(slug: string): Promise<CategorySummary |
     name: category.name,
     description: category.description ?? "",
     productCount: category._count.products,
+    imageUrl: category.imageUrl ?? category.products[0]?.images[0]?.url ?? category.products[0]?.ogImageUrl ?? null,
   };
 }
 

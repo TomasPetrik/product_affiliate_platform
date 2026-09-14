@@ -25,7 +25,7 @@ export function SearchBar({ defaultValue, className, compact = false }: SearchBa
           name="q"
           placeholder="Search products"
           defaultValue={defaultValue}
-          className={cn("border-border bg-card pl-9", compact ? "h-10 rounded-lg" : "h-11 rounded-lg")}
+          className={cn("border-border bg-card pl-9", compact ? "h-10 rounded-[12px]" : "h-11 rounded-[12px]")}
           aria-label="Search products"
         />
       </div>

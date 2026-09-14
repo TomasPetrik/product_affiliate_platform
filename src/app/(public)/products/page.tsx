@@ -89,7 +89,7 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
   const copy = listingCopy(filters, activeCategory?.name);
 
   return (
-    <Container className="py-10 sm:py-14">
+    <Container className="py-12 sm:py-16">
       <PageHeader
         title={copy.title}
         description={`${products.length} ${products.length === 1 ? "product" : "products"}${activeCategory && !filters.query ? ` in ${activeCategory.name}` : ""}. ${copy.description}`}
@@ -104,7 +104,7 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
 
       <CollectionFilters filters={filters} />
 
-      <div className="mt-8">
+      <div className="mt-10">
         <ProductGrid products={products} emptyMessage="No products match your filters yet." />
       </div>
     </Container>
@@ -112,7 +112,7 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
 }
 
 const COLLECTION_CHIPS = [
-  { href: "/products", label: "All", match: (filters: ProductListingFilters) => !isCollectionFilter(filters) },
+  { href: "/products", label: "Discover", match: (filters: ProductListingFilters) => !isCollectionFilter(filters) },
   {
     href: PRODUCT_COLLECTIONS.trending.href,
     label: PRODUCT_COLLECTIONS.trending.shortTitle,
@@ -162,7 +162,7 @@ function CollectionFilters({ filters }: { filters: ProductListingFilters }) {
               <Link
                 href={chip.href}
                 className={cn(
-                  "inline-flex h-9 items-center rounded-full border px-3.5 text-sm font-medium transition-colors",
+            "inline-flex h-9 items-center rounded-full border px-3.5 text-sm font-medium transition-colors duration-200",
                   active
                     ? "border-foreground bg-foreground text-background"
                     : "border-border bg-card text-foreground/70 hover:border-foreground/30 hover:text-foreground",
@@ -199,7 +199,7 @@ function CategoryFilter({
       <select
         name="category"
         defaultValue={activeSlug}
-        className="h-10 rounded-lg border border-input bg-card px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+        className="h-10 rounded-[12px] border border-input bg-card px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
         aria-label="Filter by category"
       >
         <option value="">All categories</option>

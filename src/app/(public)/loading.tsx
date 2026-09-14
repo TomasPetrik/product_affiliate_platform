@@ -7,9 +7,9 @@ export default function PublicLoading() {
       <Skeleton className="h-10 w-64" />
       <Skeleton className="mt-3 h-4 w-96 max-w-full" />
 
-      <div className="mt-10 grid grid-cols-2 gap-3 sm:gap-5 lg:grid-cols-3 xl:grid-cols-4">
+      <div className="mt-10 grid grid-cols-2 gap-4 sm:gap-6 lg:grid-cols-3 xl:grid-cols-4">
         {Array.from({ length: 8 }).map((_, index) => (
-          <div key={index} className="overflow-hidden rounded-xl border border-border">
+          <div key={index} className="overflow-hidden rounded-[16px] border border-border">
             <Skeleton className="aspect-square w-full rounded-none" />
             <div className="space-y-2 p-4">
               <Skeleton className="h-3 w-20" />

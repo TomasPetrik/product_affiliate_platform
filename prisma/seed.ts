@@ -14,11 +14,11 @@ import { hashPassword } from "@/lib/password";
  */
 
 const categorySeeds = [
-  { slug: "home-kitchen", name: "Home & Kitchen", description: "Everyday upgrades for cooking, cleaning and organizing your home.", sortOrder: 0 },
-  { slug: "electronics", name: "Electronics", description: "Gadgets, audio and smart devices worth adding to your cart.", sortOrder: 1 },
-  { slug: "fitness-outdoors", name: "Fitness & Outdoors", description: "Gear for workouts, running and getting outside.", sortOrder: 2 },
-  { slug: "office-productivity", name: "Office & Productivity", description: "Desk setups, organizers and tools for getting things done.", sortOrder: 3 },
-  { slug: "pet-supplies", name: "Pet Supplies", description: "Well-reviewed picks for dogs, cats and other companions.", sortOrder: 4 },
+  { slug: "home-kitchen", name: "Home & Kitchen", description: "Everyday upgrades for cooking, cleaning and organizing your home.", sortOrder: 0, imageUrl: "/categories/home-kitchen.jpg" },
+  { slug: "electronics", name: "Electronics", description: "Gadgets, audio and smart devices worth adding to your cart.", sortOrder: 1, imageUrl: "/categories/electronics.jpg" },
+  { slug: "fitness-outdoors", name: "Fitness & Outdoors", description: "Gear for workouts, running and getting outside.", sortOrder: 2, imageUrl: "/categories/fitness-outdoors.jpg" },
+  { slug: "office-productivity", name: "Office & Productivity", description: "Desk setups, organizers and tools for getting things done.", sortOrder: 3, imageUrl: "/categories/office-productivity.jpg" },
+  { slug: "pet-supplies", name: "Pet Supplies", description: "Well-reviewed picks for dogs, cats and other companions.", sortOrder: 4, imageUrl: "/categories/pet-supplies.jpg" },
 ];
 
 const marketplaceSeeds = [
@@ -228,6 +228,7 @@ async function main() {
         name: category.name,
         description: category.description,
         sortOrder: category.sortOrder,
+        imageUrl: category.imageUrl,
       },
     });
     categoryBySlug.set(category.slug, record.id);

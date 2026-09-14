@@ -1,6 +1,7 @@
 import type { Prisma } from "@/generated/prisma/client";
 import type { MarketplaceCode, ProductStatus } from "@/generated/prisma/enums";
 import { affiliateGoHref } from "@/lib/affiliate-go";
+import { categoryCoverImage } from "@/lib/category-images";
 import { computeDiscountPercentage } from "@/lib/format";
 import type { ProductAdminQuery } from "@/lib/product-admin-query";
 import { prisma } from "@/lib/prisma";
@@ -390,7 +391,7 @@ export async function getProductPreviewById(id: string): Promise<ProductDetail |
     name: product.category.name,
     description: product.category.description,
     productCount: categoryProductCount,
-    imageUrl: product.category.imageUrl ?? null,
+    imageUrl: categoryCoverImage(product.category.slug, product.category.imageUrl),
   };
 
   const marketplaces: MarketplaceLink[] = product.affiliateLinks.map((link) => ({

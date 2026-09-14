@@ -1,5 +1,6 @@
 import { Prisma } from "@/generated/prisma/client";
 import { affiliateGoHref } from "@/lib/affiliate-go";
+import { categoryCoverImage } from "@/lib/category-images";
 import { prisma } from "@/lib/prisma";
 import type { CategorySummary, MarketplaceLink, ProductDetail, ProductStatus, ProductSummary } from "@/types/catalog";
 
@@ -62,7 +63,7 @@ function toCategorySummary(
     name: category.name,
     description: category.description ?? "",
     productCount,
-    imageUrl: category.imageUrl ?? null,
+    imageUrl: categoryCoverImage(category.slug, category.imageUrl),
   };
 }
 
@@ -123,14 +124,6 @@ export async function getAllCategories(): Promise<CategorySummary[]> {
     orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
     include: {
       _count: { select: { products: { where: { status: "PUBLISHED" } } } },
-      products: {
-        where: { status: "PUBLISHED" },
-        orderBy: [{ isFeatured: "desc" }, { isTrending: "desc" }, { publishedAt: "desc" }],
-        take: 1,
-        include: {
-          images: { orderBy: [{ isPrimary: "desc" }, { position: "asc" }], take: 1 },
-        },
-      },
     },
   });
 
@@ -140,7 +133,7 @@ export async function getAllCategories(): Promise<CategorySummary[]> {
     name: category.name,
     description: category.description ?? "",
     productCount: category._count.products,
-    imageUrl: category.imageUrl ?? category.products[0]?.images[0]?.url ?? category.products[0]?.ogImageUrl ?? null,
+    imageUrl: categoryCoverImage(category.slug, category.imageUrl),
   }));
 }
 
@@ -149,14 +142,6 @@ export async function getCategoryBySlug(slug: string): Promise<CategorySummary |
     where: { slug, isActive: true },
     include: {
       _count: { select: { products: { where: { status: "PUBLISHED" } } } },
-      products: {
-        where: { status: "PUBLISHED" },
-        orderBy: [{ isFeatured: "desc" }, { isTrending: "desc" }, { publishedAt: "desc" }],
-        take: 1,
-        include: {
-          images: { orderBy: [{ isPrimary: "desc" }, { position: "asc" }], take: 1 },
-        },
-      },
     },
   });
 
@@ -168,7 +153,7 @@ export async function getCategoryBySlug(slug: string): Promise<CategorySummary |
     name: category.name,
     description: category.description ?? "",
     productCount: category._count.products,
-    imageUrl: category.imageUrl ?? category.products[0]?.images[0]?.url ?? category.products[0]?.ogImageUrl ?? null,
+    imageUrl: categoryCoverImage(category.slug, category.imageUrl),
   };
 }
 

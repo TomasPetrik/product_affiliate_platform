@@ -15,6 +15,23 @@ import {
   getProductsUnderPrice,
   getTrendingProducts,
 } from "@/server/services/catalog.service";
+import type { ProductSummary } from "@/types/catalog";
+
+function pickUniqueProducts(limit: number, ...groups: ProductSummary[][]): ProductSummary[] {
+  const seen = new Set<string>();
+  const picked: ProductSummary[] = [];
+
+  for (const group of groups) {
+    for (const product of group) {
+      if (seen.has(product.id)) continue;
+      seen.add(product.id);
+      picked.push(product);
+      if (picked.length >= limit) return picked;
+    }
+  }
+
+  return picked;
+}
 
 export const metadata: Metadata = {
   description: SITE_DESCRIPTION,
@@ -22,7 +39,7 @@ export const metadata: Metadata = {
 
 export default async function HomePage() {
   const [trending, featured, bestsellers, newest, under50, under100, categories] = await Promise.all([
-    getTrendingProducts(4),
+    getTrendingProducts(8),
     getFeaturedProducts(4),
     getBestSellerProducts(4),
     getNewProducts(4),
@@ -31,9 +48,11 @@ export default async function HomePage() {
     getAllCategories(),
   ]);
 
+  const heroProducts = pickUniqueProducts(4, featured.slice(0, 2), trending, bestsellers, featured);
+
   return (
     <div className="flex flex-col">
-      <HeroSection />
+      <HeroSection products={heroProducts} />
 
       <ProductCollection
         id="trending"
@@ -94,7 +113,7 @@ export default async function HomePage() {
       />
 
       {categories.length > 0 ? (
-        <section aria-labelledby="categories-heading" className="py-12 sm:py-16">
+        <section aria-labelledby="categories-heading" className="py-8 sm:py-12">
           <Container>
             <SectionHeading
               id="categories-heading"

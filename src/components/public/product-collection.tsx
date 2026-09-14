@@ -39,7 +39,7 @@ export function ProductCollection({
   return (
     <section
       aria-labelledby={headingId}
-      className={cn("py-12 sm:py-16", tone === "muted" && "bg-muted/50")}
+      className={cn("py-8 sm:py-12", tone === "muted" && "bg-muted/50")}
     >
       <Container>
         <SectionHeading

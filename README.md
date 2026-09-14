@@ -99,6 +99,23 @@ stay within typical managed-Postgres connection limits.
 | `npm run lint`      | ESLint                                |
 | `npm run typecheck` | `tsc --noEmit`                        |
 | `npm run db:*`      | Prisma generate/migrate/seed/studio   |
+| `npm run deploy`    | Ship the current tree to the VPS      |
+
+## Deploy (VPS)
+
+Needs SSH key access to the radarcut.com VPS (`root@72.61.158.103` by default). The server `.env` and uploaded product images are left in place.
+
+```bash
+npm run deploy
+```
+
+Useful flags (passed through to `scripts/deploy.sh`):
+
+```bash
+npm run deploy -- --skip-install   # source-only change; reuse remote node_modules
+npm run deploy -- --skip-checks    # skip the local typecheck
+npm run deploy -- --dry-run        # show the rsync plan without changing the server
+```
 
 ## Project structure
 

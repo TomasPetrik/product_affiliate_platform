@@ -3,6 +3,7 @@ import { Compass, SearchX } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { SearchBar } from "@/components/public/search-bar";
+import { SITE_NAME } from "@/lib/brand";
 
 /**
  * Global 404. Applies to any unmatched route (public or admin) that isn't
@@ -15,7 +16,7 @@ export default function NotFound() {
         <div className="mx-auto flex h-16 max-w-6xl items-center px-4">
           <Link href="/" className="flex items-center gap-2 font-semibold">
             <Compass className="h-5 w-5 text-primary" aria-hidden="true" />
-            <span>FindIt</span>
+            <span>{SITE_NAME}</span>
           </Link>
         </div>
       </header>

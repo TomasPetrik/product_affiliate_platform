@@ -20,15 +20,19 @@ interface ProductCardProps {
 export function ProductCard({ product }: ProductCardProps) {
   const discount = formatDiscountPercent(product.displayPrice, product.originalPrice);
 
+  const marketplaces = [...product.marketplaces].sort((a, b) =>
+    a.marketplace.localeCompare(b.marketplace),
+  );
+
   return (
-    <Card className="group overflow-hidden transition-shadow hover:shadow-md">
-      <Link href={`/products/${product.slug}`} className="block">
-        <div className="relative">
+    <Card className="group h-full gap-0 overflow-hidden pt-0 transition-shadow hover:shadow-md">
+      <Link href={`/products/${product.slug}`} className="block shrink-0">
+        <div className="relative overflow-hidden">
           <ProductImagePlaceholder
             seed={product.slug}
             src={product.imageUrl}
             alt={product.title}
-            className="aspect-square w-full"
+            className="aspect-square w-full rounded-none"
           />
           <div className="absolute left-2 top-2 flex flex-wrap gap-1.5">
             {product.isTrending ? (
@@ -46,21 +50,21 @@ export function ProductCard({ product }: ProductCardProps) {
         </div>
       </Link>
 
-      <CardContent className="pt-4">
-        <p className="text-xs font-medium text-muted-foreground">{product.category.name}</p>
+      <CardContent className="flex flex-1 flex-col pt-4 pb-3">
+        <p className="truncate text-xs font-medium text-muted-foreground">{product.category.name}</p>
         <Link href={`/products/${product.slug}`}>
-          <h3 className="mt-1 line-clamp-2 text-sm font-semibold leading-snug transition-colors group-hover:text-primary">
+          <h3 className="mt-1 line-clamp-2 min-h-10 text-sm font-semibold leading-5 transition-colors group-hover:text-primary">
             {product.title}
           </h3>
         </Link>
 
-        <div className="mt-2 flex items-center gap-1 text-xs text-muted-foreground">
+        <div className="mt-2 flex h-5 items-center gap-1 text-xs text-muted-foreground">
           <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
           <span className="font-medium text-foreground">{formatRating(product.rating)}</span>
           <span>({product.ratingCount.toLocaleString()})</span>
         </div>
 
-        <div className="mt-2 flex items-baseline gap-2">
+        <div className="mt-2 flex h-7 items-baseline gap-2">
           <span className="text-lg font-semibold">{formatCurrency(product.displayPrice, product.currency)}</span>
           {product.originalPrice ? (
             <span className="text-sm text-muted-foreground line-through">
@@ -70,8 +74,8 @@ export function ProductCard({ product }: ProductCardProps) {
         </div>
       </CardContent>
 
-      <CardFooter className="flex flex-wrap gap-1.5 pt-0">
-        {product.marketplaces.map((link) => (
+      <CardFooter className="mt-auto h-12 shrink-0 flex-nowrap items-center gap-1.5 rounded-none p-0 px-4">
+        {marketplaces.map((link) => (
           <MarketplaceBadge key={link.marketplace} marketplace={link.marketplace} />
         ))}
       </CardFooter>

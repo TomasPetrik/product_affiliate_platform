@@ -1,4 +1,4 @@
-# FindIt — Affiliate Product Discovery Platform
+# Radar Cut — Affiliate Product Discovery Platform
 
 A production-track Next.js app that curates products from marketplaces (Amazon, eBay, …) and
 sends visitors to the marketplace to buy. This app does **not** process payments or sell products
@@ -43,7 +43,7 @@ npm run dev
 Open [http://localhost:3000](http://localhost:3000) for the public site and
 [http://localhost:3000/admin](http://localhost:3000/admin) for the admin dashboard. Sign in with
 the `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` you set before seeding (defaults:
-`admin@findit.local` / `ChangeMe123!` — **change these before using anything but a local
+`admin@radarcut.local` / `ChangeMe123!` — **change these before using anything but a local
 throwaway database**).
 
 ### Local database without Docker/Postgres installed

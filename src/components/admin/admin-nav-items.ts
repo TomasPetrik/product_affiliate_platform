@@ -13,6 +13,8 @@ import {
   UploadCloud,
 } from "lucide-react";
 
+import { SITE_NAME_ADMIN } from "@/lib/brand";
+
 export interface AdminNavItem {
   href: string;
   label: string;
@@ -41,6 +43,6 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
 
 export const ADMIN_BRAND = {
   href: "/admin",
-  label: "FindIt Admin",
+  label: SITE_NAME_ADMIN,
   icon: Compass,
 };

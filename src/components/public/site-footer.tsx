@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { Compass } from "lucide-react";
 
+import { SITE_NAME } from "@/lib/brand";
+
 const FOOTER_LINK_GROUPS = [
   {
     title: "Browse",
@@ -11,7 +13,10 @@ const FOOTER_LINK_GROUPS = [
   },
   {
     title: "Company",
-    links: [{ href: "/disclosure", label: "Affiliate disclosure" }],
+    links: [
+      { href: "/disclosure", label: "Affiliate disclosure" },
+      { href: "/privacy", label: "Privacy Policy" },
+    ],
   },
 ] as const;
 
@@ -25,10 +30,10 @@ export function SiteFooter() {
           <div>
             <Link href="/" className="flex items-center gap-2 font-semibold">
               <Compass className="h-5 w-5 text-primary" aria-hidden="true" />
-              <span>FindIt</span>
+              <span>{SITE_NAME}</span>
             </Link>
             <p className="mt-3 max-w-sm text-sm text-muted-foreground">
-              FindIt helps you decide fast by curating and reviewing products from marketplaces like
+              {SITE_NAME} helps you decide fast by curating and reviewing products from marketplaces like
               Amazon and eBay. We don&apos;t sell products or process payments — every purchase
               happens directly on the retailer&apos;s site.
             </p>
@@ -53,10 +58,18 @@ export function SiteFooter() {
           ))}
         </div>
 
-        <div className="mt-10 border-t pt-6 text-xs text-muted-foreground">
+        <div className="mt-10 flex flex-col gap-2 border-t pt-6 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
           <p>
-            © {year} FindIt. As an Amazon Associate and eBay Partner Network member, we earn from
+            © {year} {SITE_NAME}. As an Amazon Associate and eBay Partner Network member, we earn from
             qualifying purchases.
+          </p>
+          <p className="flex flex-wrap gap-x-3 gap-y-1">
+            <Link href="/privacy" className="underline-offset-2 hover:text-foreground hover:underline">
+              Privacy Policy
+            </Link>
+            <Link href="/disclosure" className="underline-offset-2 hover:text-foreground hover:underline">
+              Affiliate disclosure
+            </Link>
           </p>
         </div>
       </div>

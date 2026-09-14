@@ -11,6 +11,7 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { SearchBar } from "@/components/public/search-bar";
+import { SITE_NAME } from "@/lib/brand";
 
 const NAV_LINKS = [
   { href: "/", label: "Home" },
@@ -26,7 +27,7 @@ export function SiteHeader() {
       <div className="mx-auto flex h-16 max-w-6xl items-center gap-4 px-4">
         <Link href="/" className="flex items-center gap-2 font-semibold shrink-0">
           <Compass className="h-5 w-5 text-primary" aria-hidden="true" />
-          <span>FindIt</span>
+          <span>{SITE_NAME}</span>
         </Link>
 
         <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-muted-foreground">
@@ -51,7 +52,7 @@ export function SiteHeader() {
             <SheetHeader>
               <SheetTitle className="flex items-center gap-2">
                 <Compass className="h-5 w-5 text-primary" aria-hidden="true" />
-                FindIt
+                {SITE_NAME}
               </SheetTitle>
             </SheetHeader>
             <div className="flex flex-col gap-4 px-4">

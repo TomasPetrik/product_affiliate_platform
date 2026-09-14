@@ -195,7 +195,7 @@ async function main() {
   console.log("Seeding database...");
 
   // --- Admin user -----------------------------------------------------------
-  const adminEmail = process.env.SEED_ADMIN_EMAIL ?? "admin@findit.local";
+  const adminEmail = process.env.SEED_ADMIN_EMAIL ?? "admin@radarcut.local";
   const adminPassword = process.env.SEED_ADMIN_PASSWORD ?? "ChangeMe123!";
 
   const passwordHash = await hashPassword(adminPassword);
@@ -317,8 +317,8 @@ async function main() {
           marketplaceId,
           externalProductId: seed.slug,
           rawProductUrl: `https://www.${marketplaceCode.toLowerCase()}.com/dp/${seed.slug}`,
-          affiliateUrl: `https://www.${marketplaceCode.toLowerCase()}.com/dp/${seed.slug}?tag=findit-20`,
-          trackingTag: "findit-20",
+          affiliateUrl: `https://www.${marketplaceCode.toLowerCase()}.com/dp/${seed.slug}?tag=radarcut-20`,
+          trackingTag: "radarcut-20",
           isPrimary: marketplaceCode === seed.marketplaces[0],
         },
         update: {},
@@ -380,7 +380,7 @@ async function seedAnalyticsIfEmpty() {
         anonymousId: `seed-visitor-${(index % 22) + 1}`,
         landingPath: `/products/${product.slug}`,
         referrer: utm.source ? `https://${utm.source}.com` : null,
-        userAgent: "FindItSeed/1.0",
+        userAgent: "RadarCutSeed/1.0",
         deviceType,
         country,
         startedAt: createdAt,

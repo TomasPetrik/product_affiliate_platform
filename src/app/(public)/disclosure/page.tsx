@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 
 import { OutboundLink } from "@/components/public/outbound-link";
+import { SITE_NAME } from "@/lib/brand";
 
 export const metadata: Metadata = {
   title: "Affiliate disclosure",
-  description: "How FindIt earns money and why we recommend the products we do.",
+  description: `How ${SITE_NAME} earns money and why we recommend the products we do.`,
 };
 
 export default function DisclosurePage() {
@@ -14,7 +16,7 @@ export default function DisclosurePage() {
 
       <div className="mt-6 space-y-4 text-sm leading-relaxed text-muted-foreground">
         <p>
-          FindIt is a product discovery and review site. We do not sell products, and we never
+          {SITE_NAME} is a product discovery and review site. We do not sell products, and we never
           process payments ourselves — every purchase you make happens directly on the marketplace
           (for example Amazon or eBay), under that marketplace&apos;s own terms.
         </p>
@@ -37,9 +39,18 @@ export default function DisclosurePage() {
           feature, but they are how this site sustains itself.
         </p>
         <p>
-          Prices and availability shown on FindIt are reference information only and may not reflect
+          Prices and availability shown on {SITE_NAME} are reference information only and may not reflect
           the current price on the marketplace. Always confirm the final price and availability on
           the retailer&apos;s site before purchasing.
+        </p>
+        <p>
+          Affiliate links and retailer sites may use cookies and similar technologies to attribute
+          commissions. See our{" "}
+          <Link href="/privacy" className="underline underline-offset-2 hover:text-foreground">
+            Privacy Policy
+          </Link>{" "}
+          for how we and third parties (including Amazon) collect, use, store, and share visitor
+          data, and for advertising opt-out choices.
         </p>
       </div>
     </div>

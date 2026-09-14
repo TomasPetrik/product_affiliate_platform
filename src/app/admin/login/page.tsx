@@ -5,6 +5,7 @@ import { Compass } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { LoginForm } from "@/components/admin/login-form";
 import { getAdminSession } from "@/lib/auth";
+import { SITE_NAME_ADMIN } from "@/lib/brand";
 
 export const metadata: Metadata = {
   title: "Admin sign in",
@@ -29,7 +30,7 @@ export default async function AdminLoginPage({ searchParams }: AdminLoginPagePro
         <CardHeader className="items-center text-center">
           <div className="flex items-center gap-2 font-semibold">
             <Compass className="h-5 w-5 text-primary" aria-hidden="true" />
-            FindIt Admin
+            {SITE_NAME_ADMIN}
           </div>
           <CardTitle className="text-lg">Sign in</CardTitle>
           <CardDescription>Use your admin credentials to continue.</CardDescription>

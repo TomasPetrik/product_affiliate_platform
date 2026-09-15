@@ -34,6 +34,8 @@ export interface EbayProductContainer {
   gtin?: string[];
   mpns?: string[];
   epid?: string;
+  image?: EbayImage;
+  additionalImages?: EbayImage[];
 }
 
 export interface EbayBrowseItem {
@@ -153,16 +155,46 @@ function isEnded(item: EbayBrowseItem): boolean {
   return Number.isFinite(end) && end < Date.now();
 }
 
+export function ebayListingImageUrls(item: EbayBrowseItem): string[] {
+  const candidates = [
+    item.image?.imageUrl,
+    ...(item.additionalImages ?? []).map((image) => image.imageUrl),
+    item.product?.image?.imageUrl,
+    ...(item.product?.additionalImages ?? []).map((image) => image.imageUrl),
+  ];
+
+  const seen = new Set<string>();
+  const urls: string[] = [];
+  for (const candidate of candidates) {
+    const url = candidate?.trim();
+    if (!url) continue;
+    const key = ebayImageDedupeKey(url);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    urls.push(url);
+  }
+  return urls;
+}
+
+function ebayImageDedupeKey(url: string): string {
+  try {
+    const parsed = new URL(url);
+    const match = parsed.pathname.match(/\/images\/g\/([^/]+)/i);
+    return (match?.[1] ?? parsed.pathname).toLowerCase();
+  } catch {
+    return url;
+  }
+}
+
 export function normalizeEbayItem(item: EbayBrowseItem): NormalizedEbayListing {
   const itemId = item.legacyItemId?.trim() || "";
   const title = item.title?.trim() || "";
   const price = amountToNumber(item.price) ?? amountToNumber(item.currentBidPrice);
   const currency = item.price?.currency || item.currentBidPrice?.currency || "USD";
   const productUrl = item.itemWebUrl?.trim() || "";
-  const imageUrl = item.image?.imageUrl?.trim() || item.additionalImages?.[0]?.imageUrl?.trim() || null;
-  const additionalImageUrls = (item.additionalImages ?? [])
-    .map((image) => image.imageUrl?.trim())
-    .filter((url): url is string => Boolean(url && url !== imageUrl));
+  const imageUrls = ebayListingImageUrls(item);
+  const imageUrl = imageUrls[0] ?? null;
+  const additionalImageUrls = imageUrls.slice(1);
 
   const brand =
     item.brand?.trim() ||

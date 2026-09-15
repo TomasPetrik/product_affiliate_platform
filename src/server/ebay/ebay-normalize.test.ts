@@ -42,6 +42,28 @@ describe("normalizeEbayItem", () => {
     assert.equal(listing.ended, false);
   });
 
+  it("collects the full listing gallery, not only the primary photo", () => {
+    const listing = normalizeEbayItem(
+      sampleItem({
+        additionalImages: [
+          { imageUrl: "https://i.ebayimg.com/images/g/aaaa/s-l1600.jpg" },
+          { imageUrl: "https://i.ebayimg.com/images/g/bbbb/s-l1600.jpg" },
+          { imageUrl: "https://i.ebayimg.com/images/g/example/s-l64.jpg" },
+        ],
+        product: {
+          additionalImages: [{ imageUrl: "https://i.ebayimg.com/images/g/cccc/s-l1600.jpg" }],
+        },
+      }),
+    );
+
+    assert.equal(listing.imageUrl, "https://i.ebayimg.com/images/g/example/s-l1600.jpg");
+    assert.deepEqual(listing.additionalImageUrls, [
+      "https://i.ebayimg.com/images/g/aaaa/s-l1600.jpg",
+      "https://i.ebayimg.com/images/g/bbbb/s-l1600.jpg",
+      "https://i.ebayimg.com/images/g/cccc/s-l1600.jpg",
+    ]);
+  });
+
   it("rejects missing title, price, and image", () => {
     assert.throws(
       () => validateNormalizedListing(normalizeEbayItem(sampleItem({ title: "" }))),

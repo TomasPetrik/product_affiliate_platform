@@ -55,4 +55,5 @@ export interface ProductDetail extends ProductSummary {
   seoTitle: string | null;
   seoDescription: string | null;
   ogImageUrl: string | null;
+  images: Array<{ url: string; altText: string | null }>;
 }

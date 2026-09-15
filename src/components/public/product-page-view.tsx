@@ -11,7 +11,7 @@ import {
 import { AffiliateDisclosure } from "@/components/public/affiliate-disclosure";
 import { Container } from "@/components/public/container";
 import { ProductCollection } from "@/components/public/product-collection";
-import { ProductImagePlaceholder } from "@/components/public/product-image-placeholder";
+import { ProductImageGallery } from "@/components/public/product-image-gallery";
 import { ProductBadge, badgeForProduct, discountBadgeLabel } from "@/components/public/product-badge";
 import { RadarScore } from "@/components/public/radar-score";
 import { RetailerOffers } from "@/components/public/retailer-offers";
@@ -44,6 +44,7 @@ export function ProductPageView({ product, related, trackViews = true }: Product
     name: product.title,
     description: product.shortDescription,
     brand: { "@type": "Brand", name: product.brand },
+    image: product.images.length > 0 ? product.images.map((image) => image.url) : product.imageUrl || undefined,
     aggregateRating:
       product.rating > 0
         ? {
@@ -80,23 +81,19 @@ export function ProductPageView({ product, related, trackViews = true }: Product
         </Breadcrumb>
 
         <div className="mt-10 grid items-start gap-10 lg:grid-cols-[1.05fr_0.95fr] lg:gap-14">
-          <div className="relative overflow-hidden rounded-[16px] border border-border bg-image-well">
-            <ProductImagePlaceholder
-              seed={product.slug}
-              src={product.imageUrl}
-              alt={product.title}
-              fit="contain"
-              className="aspect-square w-full rounded-none p-8 sm:p-12"
-            />
-            {badge ? (
-              <div className="absolute left-4 top-4">
+          <ProductImageGallery
+            title={product.title}
+            images={product.images}
+            fallbackUrl={product.imageUrl}
+            badge={
+              badge ? (
                 <ProductBadge
                   kind={badge}
                   label={badge === "discount" && discountLabel ? discountLabel : undefined}
                 />
-              </div>
-            ) : null}
-          </div>
+              ) : null
+            }
+          />
 
           <div className="lg:sticky lg:top-24">
             <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">

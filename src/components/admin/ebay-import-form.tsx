@@ -251,16 +251,26 @@ export function EbayImportForm({
             {matchHint ? <p className="text-sm text-muted-foreground">{matchHint}</p> : null}
 
             <div className="grid gap-6 lg:grid-cols-[180px_1fr]">
-              {preview.imageUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={preview.imageUrl}
-                  alt={preview.title}
-                  className="h-40 w-full rounded-lg border bg-muted object-contain"
-                />
-              ) : (
-                <div className="h-40 rounded-lg border bg-muted" />
-              )}
+              <div className="flex flex-col gap-2">
+                {preview.imageUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={preview.imageUrl}
+                    alt={preview.title}
+                    className="h-40 w-full rounded-lg border bg-muted object-contain"
+                  />
+                ) : (
+                  <div className="h-40 rounded-lg border bg-muted" />
+                )}
+                {preview.additionalImageUrls.length > 0 ? (
+                  <div className="grid grid-cols-4 gap-1">
+                    {preview.additionalImageUrls.slice(0, 8).map((url) => (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img key={url} src={url} alt="" className="aspect-square rounded border bg-muted object-contain" />
+                    ))}
+                  </div>
+                ) : null}
+              </div>
               <div className="grid gap-3 text-sm">
                 <p>
                   <span className="text-muted-foreground">eBay item ID:</span> {preview.itemId}

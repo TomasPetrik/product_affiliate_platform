@@ -39,6 +39,7 @@ export interface EbayPreviewView {
   condition: string | null;
   sellerName: string | null;
   imageUrl: string | null;
+  additionalImageUrls: string[];
   productUrl: string;
   affiliateUrl: string;
   affiliateReferenceId: string;
@@ -91,6 +92,7 @@ export async function fetchEbayListingAction(
         condition: preview.listing.condition,
         sellerName: preview.listing.sellerName,
         imageUrl: preview.listing.imageUrl,
+        additionalImageUrls: preview.listing.additionalImageUrls,
         productUrl: preview.listing.productUrl,
         affiliateUrl: preview.listing.affiliateUrl,
         affiliateReferenceId: preview.listing.affiliateReferenceId,

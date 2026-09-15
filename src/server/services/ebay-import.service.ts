@@ -225,6 +225,8 @@ async function attachToExistingProduct(input: ImportEbayInput, listing: EbayList
   });
 }
 
+const MAX_IMPORTED_IMAGES = 16;
+
 async function createProductFromListing(input: ImportEbayInput, listing: EbayListingWithAffiliate) {
   if (!input.categoryId) {
     throw new Error("Select a RadarCut category.");
@@ -234,8 +236,7 @@ async function createProductFromListing(input: ImportEbayInput, listing: EbayLis
   const brand = input.brand.trim() || listing.brand || "Unknown";
   const shortDescription = clip(input.shortDescription.trim() || listing.shortDescription || title, 300);
   const longDescription = clip(input.longDescription.trim() || listing.description || shortDescription, 5000);
-  const imageUrl = listing.imageUrl && isApprovedImageUrl(listing.imageUrl) ? listing.imageUrl : null;
-  const extraImages = listing.additionalImageUrls.filter(isApprovedImageUrl).slice(0, 4);
+  const imageUrls = listingImageUrls(listing);
 
   return prisma.product.create({
     data: {
@@ -253,24 +254,28 @@ async function createProductFromListing(input: ImportEbayInput, listing: EbayLis
       currency: listing.currency,
       displayPrice: listing.price,
       originalPrice: listing.originalPrice,
-      ogImageUrl: imageUrl,
+      ogImageUrl: imageUrls[0] ?? null,
       createdById: input.createdById,
       publishedAt: input.status === "PUBLISHED" ? new Date() : null,
-      images: imageUrl
-        ? {
-            create: [
-              { url: imageUrl, altText: title, position: 0, isPrimary: true },
-              ...extraImages.map((url, index) => ({
+      images:
+        imageUrls.length > 0
+          ? {
+              create: imageUrls.map((url, index) => ({
                 url,
-                altText: `${title} ${index + 2}`,
-                position: index + 1,
-                isPrimary: false,
+                altText: index === 0 ? title : `${title} ${index + 1}`,
+                position: index,
+                isPrimary: index === 0,
               })),
-            ],
-          }
-        : undefined,
+            }
+          : undefined,
     },
   });
+}
+
+function listingImageUrls(listing: EbayListingWithAffiliate): string[] {
+  return [listing.imageUrl, ...listing.additionalImageUrls]
+    .filter((url): url is string => Boolean(url && isApprovedImageUrl(url)))
+    .slice(0, MAX_IMPORTED_IMAGES);
 }
 
 function clip(value: string, max: number): string {

@@ -101,6 +101,7 @@ function toProductDetail(product: ProductWithRelations, categoryProductCount: nu
     seoTitle: product.seoTitle,
     seoDescription: product.seoDescription,
     ogImageUrl: product.ogImageUrl ?? summary.imageUrl,
+    images: product.images.map((image) => ({ url: image.url, altText: image.altText })),
   };
 }
 

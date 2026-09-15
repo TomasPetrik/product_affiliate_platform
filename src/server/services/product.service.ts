@@ -459,5 +459,6 @@ export async function getProductPreviewById(id: string): Promise<ProductDetail |
     seoTitle: product.seoTitle,
     seoDescription: product.seoDescription,
     ogImageUrl: product.ogImageUrl ?? imageUrl,
+    images: product.images.map((image) => ({ url: image.url, altText: image.altText })),
   };
 }

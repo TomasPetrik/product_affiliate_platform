@@ -5,6 +5,10 @@ import type { MarketplaceCode } from "@/types/catalog";
 const MARKETPLACE_LABELS: Record<MarketplaceCode, string> = {
   AMAZON: "Amazon",
   EBAY: "eBay",
+  WALMART: "Walmart",
+  BEST_BUY: "Best Buy",
+  TARGET: "Target",
+  OTHER: "Other",
 };
 
 interface MarketplaceBadgeProps {

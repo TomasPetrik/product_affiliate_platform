@@ -20,8 +20,8 @@ Implemented:
 - Audit log: every admin mutation is recorded with actor, action, before/after state, and shown
   at `/admin/audit-log`.
 
-**Not implemented yet** (by design, later phases): Amazon/eBay import automation, analytics event
-tracking (page views, CTR, traffic sources), revenue reconciliation.
+**Not implemented yet** (by design, later phases): Amazon/Walmart/Best Buy import automation, automatic offer
+cron sync, network-order revenue attribution.
 
 **Architecture note:** the original plan named NextAuth/Auth.js for admin auth. At implementation
 time, Auth.js v5 (the version with first-class App Router support) was still beta-tagged on npm.
@@ -29,6 +29,10 @@ Since this app only needs first-party email/password auth, a small, fully-owned 
 (`src/lib/session.ts` + `src/lib/auth.ts`, using `jose` for JWTs and Node's built-in `crypto.scrypt`
 for password hashing) was used instead, avoiding a pre-release dependency. Swapping to Auth.js
 later remains straightforward.
+
+**Retailer offers:** a RadarCut `Product` is canonical (name, category, editorial copy). Purchasable
+listings live on `AffiliateLink` rows (one per retailer listing). eBay import is implemented;
+Amazon and others can attach additional offers to the same product.
 
 ## Getting started
 
@@ -146,3 +150,13 @@ prisma/
 
 See `.env.example`. All environment variable access should go through `src/lib/env.ts` rather
 than reading `process.env` directly, so missing/invalid config fails fast with a clear message.
+
+### eBay import (Level 1)
+
+1. Create an eBay developer application and enable the **Buy / Browse API**.
+2. Join the [eBay Partner Network](https://partnernetwork.ebay.com/) and copy your campaign ID.
+3. Set the sandbox and/or production keysets in `.env` (see `.env.example`), plus `EBAY_AFFILIATE_CAMPAIGN_ID` for live commissions. Switch with `EBAY_ENVIRONMENT=sandbox` or `production`.
+4. Restart the app, then in Admin go to **Products → Import from eBay**, paste `https://www.ebay.com/itm/…`, and click **Fetch product**.
+5. Choose a RadarCut category, then **Import product**.
+
+The public product page reads stored offers from Postgres. Use **Refresh** on the product edit page to pull a new eBay price/availability — there is no automatic cron yet.

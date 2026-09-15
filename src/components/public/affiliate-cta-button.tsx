@@ -8,6 +8,7 @@ interface AffiliateCtaButtonProps {
   link: MarketplaceLink;
   className?: string;
   variant?: "default" | "outline";
+  label?: string;
 }
 
 /**
@@ -16,9 +17,14 @@ interface AffiliateCtaButtonProps {
  * attributes (`sponsored nofollow`) live here once, not scattered per page.
  *
  * `href` is the local `/go/[productSlug]` recorder, which then 302s to the
- * marketplace URL. `rel="sponsored nofollow"` stays on this element.
+ * stored affiliate URL. The button label always names the retailer.
  */
-export function AffiliateCtaButton({ link, className, variant = "default" }: AffiliateCtaButtonProps) {
+export function AffiliateCtaButton({
+  link,
+  className,
+  variant = "default",
+  label,
+}: AffiliateCtaButtonProps) {
   return (
     <Button
       render={<a href={link.href} target="_blank" rel="sponsored nofollow noopener" />}
@@ -27,7 +33,7 @@ export function AffiliateCtaButton({ link, className, variant = "default" }: Aff
       size="cta"
       className={cn("w-full sm:w-auto", className)}
     >
-      Check price on {link.label}
+      {label ?? `Check price on ${link.label}`}
       <ExternalLink className="size-4" aria-hidden="true" />
     </Button>
   );

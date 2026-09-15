@@ -24,10 +24,22 @@ export function parseMarketplaceParam(raw: string | null | undefined): string | 
   return normalized.toUpperCase();
 }
 
-export function affiliateGoHref(productSlug: string, marketplaceCode?: string): string {
+export function parseLinkIdParam(raw: string | null | undefined): string | null {
+  const value = raw?.trim();
+  if (!value || value.length > 64) return null;
+  if (!/^[a-z0-9_-]+$/i.test(value)) return null;
+  return value;
+}
+
+export function affiliateGoHref(productSlug: string, marketplaceCode?: string, linkId?: string): string {
   const path = `/go/${productSlug}`;
-  if (!marketplaceCode) {
-    return path;
+  const params = new URLSearchParams();
+  if (marketplaceCode) {
+    params.set("m", marketplaceCode.toLowerCase());
   }
-  return `${path}?m=${marketplaceCode.toLowerCase()}`;
+  if (linkId) {
+    params.set("lid", linkId);
+  }
+  const query = params.toString();
+  return query ? `${path}?${query}` : path;
 }

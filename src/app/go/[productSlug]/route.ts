@@ -4,6 +4,7 @@ import { NextResponse, userAgent } from "next/server";
 import { collectCampaignParams } from "@/lib/analytics";
 import { env } from "@/lib/env";
 import {
+  linkIdFromRequest,
   marketplaceFromRequest,
   resolvePublishedAffiliateTarget,
   sanitizeAffiliateDestination,
@@ -46,9 +47,10 @@ export async function GET(request: Request, context: { params: Promise<{ product
   const { productSlug } = await context.params;
   const requestUrl = new URL(request.url);
   const marketplaceCode = marketplaceFromRequest(requestUrl.searchParams);
+  const linkId = linkIdFromRequest(requestUrl.searchParams);
   const home = siteUrl("/");
 
-  const target = await resolvePublishedAffiliateTarget(productSlug, marketplaceCode);
+  const target = await resolvePublishedAffiliateTarget(productSlug, marketplaceCode, linkId);
 
   if (!target) {
     return noStoreRedirect(home);

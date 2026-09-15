@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { Container } from "@/components/public/container";
+import { AFFILIATE_DISCLOSURE_BANNER } from "@/lib/affiliate-disclosure";
 import { cn } from "@/lib/utils";
 
 interface DisclosureBannerProps {
@@ -17,8 +18,7 @@ export function DisclosureBanner({ className }: DisclosureBannerProps) {
     <div className={cn("w-full min-w-0 border-b border-border bg-muted/70", className)}>
       <Container>
         <p className="mx-auto max-w-[calc(100vw-2.5rem)] py-2 text-center text-[11px] leading-relaxed text-muted-foreground [overflow-wrap:anywhere] sm:max-w-none sm:text-xs">
-          We participate in the Amazon Associates and eBay Partner Network affiliate programs. As an
-          affiliate, we earn from qualifying purchases at no extra cost to you.{" "}
+          {AFFILIATE_DISCLOSURE_BANNER}{" "}
           <Link href="/disclosure" className="font-medium underline underline-offset-2 hover:text-foreground">
             Learn more
           </Link>

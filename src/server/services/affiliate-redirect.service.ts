@@ -1,6 +1,6 @@
 import { unstable_cache } from "next/cache";
 
-import { affiliateGoHref, isProductSlug, parseMarketplaceParam } from "@/lib/affiliate-go";
+import { affiliateGoHref, isProductSlug, parseLinkIdParam, parseMarketplaceParam } from "@/lib/affiliate-go";
 import { env } from "@/lib/env";
 import { prisma } from "@/lib/prisma";
 import { parseOutboundUrl } from "@/server/services/tracking.service";
@@ -39,6 +39,7 @@ export function sanitizeAffiliateDestination(raw: string): string | null {
 async function lookupPublishedAffiliateTarget(
   slug: string,
   marketplaceCode: string | null,
+  linkId: string | null,
 ): Promise<ResolvedAffiliateTarget | null> {
   if (!isProductSlug(slug)) return null;
 
@@ -65,9 +66,11 @@ async function lookupPublishedAffiliateTarget(
     return null;
   }
 
-  const selected = marketplaceCode
-    ? product.affiliateLinks.find((link) => link.marketplace.code === marketplaceCode)
-    : (product.affiliateLinks.find((link) => link.isPrimary) ?? product.affiliateLinks[0]);
+  const selected = linkId
+    ? product.affiliateLinks.find((link) => link.id === linkId)
+    : marketplaceCode
+      ? product.affiliateLinks.find((link) => link.marketplace.code === marketplaceCode)
+      : (product.affiliateLinks.find((link) => link.isPrimary) ?? product.affiliateLinks[0]);
 
   if (!selected) {
     return null;
@@ -87,10 +90,14 @@ async function lookupPublishedAffiliateTarget(
   };
 }
 
-export function resolvePublishedAffiliateTarget(slug: string, marketplaceCode: string | null) {
+export function resolvePublishedAffiliateTarget(
+  slug: string,
+  marketplaceCode: string | null,
+  linkId: string | null = null,
+) {
   return unstable_cache(
-    () => lookupPublishedAffiliateTarget(slug, marketplaceCode),
-    ["affiliate-redirect", slug, marketplaceCode ?? ""],
+    () => lookupPublishedAffiliateTarget(slug, marketplaceCode, linkId),
+    ["affiliate-redirect", slug, marketplaceCode ?? "", linkId ?? ""],
     {
       revalidate: AFFILIATE_REDIRECT_CACHE_SECONDS,
       tags: [AFFILIATE_REDIRECT_CACHE_TAG, `${AFFILIATE_REDIRECT_CACHE_TAG}:${slug}`],
@@ -104,6 +111,7 @@ export async function resolveAffiliateGoPathFromLinkId(linkId: string): Promise<
   const link = await prisma.affiliateLink.findUnique({
     where: { id: linkId },
     select: {
+      id: true,
       isActive: true,
       marketplace: { select: { code: true, isActive: true } },
       product: { select: { slug: true, status: true } },
@@ -114,9 +122,13 @@ export async function resolveAffiliateGoPathFromLinkId(linkId: string): Promise<
     return null;
   }
 
-  return affiliateGoHref(link.product.slug, link.marketplace.code);
+  return affiliateGoHref(link.product.slug, link.marketplace.code, link.id);
 }
 
 export function marketplaceFromRequest(searchParams: URLSearchParams): string | null {
   return parseMarketplaceParam(searchParams.get("m") ?? searchParams.get("marketplace"));
+}
+
+export function linkIdFromRequest(searchParams: URLSearchParams): string | null {
+  return parseLinkIdParam(searchParams.get("lid") ?? searchParams.get("linkId"));
 }

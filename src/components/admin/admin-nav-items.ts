@@ -34,7 +34,7 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
   { href: "/admin/products", label: "Products", icon: Package },
   { href: "/admin/categories", label: "Categories", icon: FolderTree },
   { href: "/admin/marketplaces", label: "Marketplaces", icon: Store },
-  { href: "/admin/imports", label: "Imports", icon: UploadCloud, comingSoon: true },
+  { href: "/admin/imports", label: "Imports", icon: UploadCloud },
   { href: "/admin/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/admin/revenue", label: "Revenue", icon: DollarSign },
   { href: "/admin/audit-log", label: "Audit log", icon: ClipboardList },

@@ -54,10 +54,15 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
           </p>
         </div>
 
-        <Button render={<Link href="/admin/products/new" />} nativeButton={false} className="gap-1.5">
-          <Plus className="h-4 w-4" />
-          Add product
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" nativeButton={false} render={<Link href="/admin/products/import/ebay" />}>
+            Import from eBay
+          </Button>
+          <Button render={<Link href="/admin/products/new" />} nativeButton={false} className="gap-1.5">
+            <Plus className="h-4 w-4" />
+            Add product
+          </Button>
+        </div>
       </div>
 
       <ProductFilters query={query} categories={categories} marketplaces={marketplaces} />

@@ -21,14 +21,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ProductImagesField, type ProductImageFieldValue } from "@/components/admin/product-images-field";
 import { saveProductAction, type ProductActionState } from "@/server/actions/product.actions";
 
-function slugify(value: string): string {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, "")
-    .replace(/\s+/g, "-")
-    .replace(/-+/g, "-");
-}
+import { slugify } from "@/lib/slug";
 
 export interface ProductFormLinkValues {
   affiliateUrl: string;
@@ -43,6 +36,9 @@ export interface ProductFormValues {
   title: string;
   slug: string;
   brand: string;
+  modelNumber: string;
+  gtin: string;
+  mpn: string;
   categoryId: string;
   shortDescription: string;
   longDescription: string;
@@ -72,6 +68,9 @@ export const emptyProductFormValues: ProductFormValues = {
   title: "",
   slug: "",
   brand: "",
+  modelNumber: "",
+  gtin: "",
+  mpn: "",
   categoryId: "",
   shortDescription: "",
   longDescription: "",
@@ -91,7 +90,7 @@ export const emptyProductFormValues: ProductFormValues = {
 
 interface ProductFormProps {
   defaultValues?: ProductFormValues;
-  categories: Array<{ id: string; name: string }>;
+  categories: Array<{ id: string; name: string; parent: { name: string } | null }>;
   marketplaces: Array<{ id: string; code: string; name: string }>;
 }
 
@@ -157,6 +156,23 @@ export function ProductForm({ defaultValues = emptyProductFormValues, categories
             </div>
 
             <div className="flex flex-col gap-1.5">
+              <Label htmlFor="modelNumber">Model</Label>
+              <Input id="modelNumber" name="modelNumber" defaultValue={defaultValues.modelNumber} />
+            </div>
+          </div>
+
+          <div className="grid gap-5 sm:grid-cols-2">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="gtin">GTIN / UPC / EAN</Label>
+              <Input id="gtin" name="gtin" defaultValue={defaultValues.gtin} />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="mpn">MPN</Label>
+              <Input id="mpn" name="mpn" defaultValue={defaultValues.mpn} />
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
               <Label htmlFor="category">Category</Label>
               <Select value={categoryId || undefined} onValueChange={(value) => setCategoryId(value ?? "")}>
                 <SelectTrigger id="category" className="w-full">
@@ -165,7 +181,7 @@ export function ProductForm({ defaultValues = emptyProductFormValues, categories
                 <SelectContent>
                   {categories.map((category) => (
                     <SelectItem key={category.id} value={category.id}>
-                      {category.name}
+                      {category.parent ? `${category.parent.name} / ${category.name}` : category.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -176,7 +192,6 @@ export function ProductForm({ defaultValues = emptyProductFormValues, categories
                 </p>
               ) : null}
             </div>
-          </div>
 
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="shortDescription">Short description</Label>
@@ -252,9 +267,13 @@ export function ProductForm({ defaultValues = emptyProductFormValues, categories
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Affiliate links</CardTitle>
+          <CardTitle className="text-base">Manual affiliate URLs</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-6">
+          <p className="text-xs text-muted-foreground">
+            Optional fallback for retailers without import yet. eBay offers should be added via Import / Add eBay
+            offer so price, seller, and tracking stay in sync.
+          </p>
           {marketplaces.map((marketplace) => {
             const link = defaultValues.links[marketplace.id] ?? emptyLink;
             return (

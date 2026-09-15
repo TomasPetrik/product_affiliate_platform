@@ -8,12 +8,13 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
-import { AffiliateCtaButton } from "@/components/public/affiliate-cta-button";
+import { AffiliateDisclosure } from "@/components/public/affiliate-disclosure";
 import { Container } from "@/components/public/container";
 import { ProductCollection } from "@/components/public/product-collection";
 import { ProductImagePlaceholder } from "@/components/public/product-image-placeholder";
 import { ProductBadge, badgeForProduct, discountBadgeLabel } from "@/components/public/product-badge";
 import { RadarScore } from "@/components/public/radar-score";
+import { RetailerOffers } from "@/components/public/retailer-offers";
 import { formatCurrency, formatDiscountPercent } from "@/lib/format";
 import type { ProductDetail, ProductSummary } from "@/types/catalog";
 
@@ -134,28 +135,11 @@ export function ProductPageView({ product, related, trackViews = true }: Product
             ) : null}
 
             <div className="mt-8 border-t border-border pt-6">
-              <h2 className="text-sm font-semibold">Check current price</h2>
-              <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-                {product.marketplaces.length > 0 ? (
-                  product.marketplaces.map((link, index) => (
-                    <AffiliateCtaButton
-                      key={link.marketplace}
-                      link={link}
-                      variant={index === 0 ? "default" : "outline"}
-                    />
-                  ))
-                ) : (
-                  <p className="text-sm text-muted-foreground">No marketplace links yet.</p>
-                )}
+              <h2 className="text-sm font-semibold">Where to buy</h2>
+              <div className="mt-3">
+                <RetailerOffers offers={product.marketplaces} />
               </div>
-              <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
-                We may earn a commission if you make a purchase through these links, at no extra cost to
-                you. See our{" "}
-                <Link href="/disclosure" className="font-medium underline underline-offset-2 hover:text-foreground">
-                  affiliate disclosure
-                </Link>
-                .
-              </p>
+              <AffiliateDisclosure className="mt-3 text-xs leading-relaxed text-muted-foreground" />
             </div>
           </div>
         </div>

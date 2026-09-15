@@ -6,15 +6,19 @@
  * etc.) into these plain, UI-friendly shapes.
  */
 
-export type MarketplaceCode = "AMAZON" | "EBAY";
+export type MarketplaceCode = "AMAZON" | "EBAY" | "WALMART" | "BEST_BUY" | "TARGET" | "OTHER";
 
 export type ProductStatus = "DRAFT" | "PUBLISHED" | "ARCHIVED";
 
 export interface MarketplaceLink {
+  id: string;
   marketplace: MarketplaceCode;
   label: string;
   /** Local `/go/[productSlug]` hop that records the click, then redirects. */
   href: string;
+  price: number | null;
+  currency: string | null;
+  availability: string | null;
 }
 
 export interface CategorySummary {

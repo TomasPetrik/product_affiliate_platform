@@ -1,12 +1,16 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
+import { AdminFlash } from "@/components/admin/admin-flash";
 import { ProductForm, type ProductFormLinkValues } from "@/components/admin/product-form";
+import { RetailerOffersPanel } from "@/components/admin/retailer-offers-panel";
+import { adminNoticeMessage } from "@/lib/admin-notice";
 import {
   getProductByIdAdmin,
   listCategoriesForSelect,
   listMarketplaces,
 } from "@/server/services/product.service";
+import { listRetailerOffersForProduct } from "@/server/services/retailer-offer.service";
 
 export const metadata: Metadata = {
   title: "Edit product",
@@ -14,14 +18,17 @@ export const metadata: Metadata = {
 
 interface EditProductPageProps {
   params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }
 
-export default async function EditProductPage({ params }: EditProductPageProps) {
+export default async function EditProductPage({ params, searchParams }: EditProductPageProps) {
   const { id } = await params;
-  const [product, categories, marketplaces] = await Promise.all([
+  const query = await searchParams;
+  const [product, categories, marketplaces, offers] = await Promise.all([
     getProductByIdAdmin(id),
     listCategoriesForSelect(),
     listMarketplaces(),
+    listRetailerOffersForProduct(id),
   ]);
 
   if (!product) {
@@ -45,6 +52,10 @@ export default async function EditProductPage({ params }: EditProductPageProps) 
 
   return (
     <div className="flex flex-col gap-6">
+      <AdminFlash
+        notice={adminNoticeMessage(typeof query.notice === "string" ? query.notice : undefined)}
+        error={typeof query.error === "string" ? query.error : undefined}
+      />
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Edit product</h1>
         <p className="mt-1 text-sm text-muted-foreground">{product.title}</p>
@@ -57,6 +68,9 @@ export default async function EditProductPage({ params }: EditProductPageProps) 
           title: product.title,
           slug: product.slug,
           brand: product.brand ?? "",
+          modelNumber: product.modelNumber ?? "",
+          gtin: product.gtin ?? "",
+          mpn: product.mpn ?? "",
           categoryId: product.categoryId ?? "",
           shortDescription: product.shortDescription ?? "",
           longDescription: product.longDescription ?? "",
@@ -78,6 +92,7 @@ export default async function EditProductPage({ params }: EditProductPageProps) 
           primaryMarketplaceId,
         }}
       />
+      <RetailerOffersPanel productId={product.id} offers={offers} />
     </div>
   );
 }

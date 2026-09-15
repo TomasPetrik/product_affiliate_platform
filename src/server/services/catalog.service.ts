@@ -34,9 +34,13 @@ function toMarketplaceLinks(product: ProductWithRelations): MarketplaceLink[] {
     if (!link.marketplace) return [];
     return [
       {
+        id: link.id,
         marketplace: link.marketplace.code,
         label: link.marketplace.name,
-        href: affiliateGoHref(product.slug, link.marketplace.code),
+        href: affiliateGoHref(product.slug, link.marketplace.code, link.id),
+        price: link.lastKnownPrice ? Number(link.lastKnownPrice) : null,
+        currency: link.lastKnownPriceCurrency ?? product.currency,
+        availability: link.lastKnownAvailability,
       },
     ];
   });

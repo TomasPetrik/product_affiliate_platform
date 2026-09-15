@@ -22,8 +22,12 @@ const categorySeeds = [
 ];
 
 const marketplaceSeeds = [
-  { code: "AMAZON" as const, name: "Amazon", baseUrl: "https://www.amazon.com" },
-  { code: "EBAY" as const, name: "eBay", baseUrl: "https://www.ebay.com" },
+  { code: "AMAZON" as const, name: "Amazon", baseUrl: "https://www.amazon.com", isActive: true },
+  { code: "EBAY" as const, name: "eBay", baseUrl: "https://www.ebay.com", isActive: true },
+  { code: "WALMART" as const, name: "Walmart", baseUrl: "https://www.walmart.com", isActive: false },
+  { code: "BEST_BUY" as const, name: "Best Buy", baseUrl: "https://www.bestbuy.com", isActive: false },
+  { code: "TARGET" as const, name: "Target", baseUrl: "https://www.target.com", isActive: false },
+  { code: "OTHER" as const, name: "Other", baseUrl: "https://example.com", isActive: false },
 ];
 
 interface ProductSeed {
@@ -211,8 +215,13 @@ async function main() {
   for (const marketplace of marketplaceSeeds) {
     const record = await prisma.marketplace.upsert({
       where: { code: marketplace.code },
-      create: marketplace,
-      update: { name: marketplace.name, baseUrl: marketplace.baseUrl },
+      create: {
+        code: marketplace.code,
+        name: marketplace.name,
+        baseUrl: marketplace.baseUrl,
+        isActive: marketplace.isActive,
+      },
+      update: { name: marketplace.name, baseUrl: marketplace.baseUrl, isActive: marketplace.isActive },
     });
     marketplaceByCode.set(marketplace.code, record.id);
   }
@@ -312,7 +321,12 @@ async function main() {
       if (!marketplaceId) continue;
 
       await prisma.affiliateLink.upsert({
-        where: { productId_marketplaceId: { productId: product.id, marketplaceId } },
+        where: {
+          marketplaceId_externalProductId: {
+            marketplaceId,
+            externalProductId: seed.slug,
+          },
+        },
         create: {
           productId: product.id,
           marketplaceId,
@@ -321,6 +335,10 @@ async function main() {
           affiliateUrl: `https://www.${marketplaceCode.toLowerCase()}.com/dp/${seed.slug}?tag=radarcut-20`,
           trackingTag: "radarcut-20",
           isPrimary: marketplaceCode === seed.marketplaces[0],
+          lastKnownPrice: seed.displayPrice,
+          lastKnownOriginalPrice: seed.originalPrice,
+          lastKnownPriceCurrency: seed.currency,
+          lastKnownAvailability: "IN_STOCK",
         },
         update: {},
       });

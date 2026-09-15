@@ -84,6 +84,10 @@ model Product {
   shortDescription  String
   longDescription   String
   brand             String
+  /// Manufacturer model identifier (RadarCut product identity, not a retailer SKU).
+  modelNumber       String?
+  gtin              String?
+  mpn               String?
   status            ProductStatus @default(DRAFT)
   isFeatured        Boolean       @default(false)
   isTrending        Boolean       @default(false)
@@ -124,6 +128,9 @@ model Product {
   @@index([isFeatured])
   @@index([isTrending])
   @@index([createdAt])
+  @@index([gtin])
+  @@index([mpn])
+  @@index([brand, modelNumber])
   @@map("products")
 }
 
@@ -149,6 +156,10 @@ model ProductImage {
 enum MarketplaceCode {
   AMAZON
   EBAY
+  WALMART
+  BEST_BUY
+  TARGET
+  OTHER
 }
 
 model Marketplace {
@@ -170,6 +181,9 @@ model Marketplace {
   @@map("marketplaces")
 }
 
+/// Purchasable retailer offer for a canonical RadarCut product.
+/// One product can have many offers (Amazon + eBay + Walmart, or multiple
+/// listings from the same retailer when the external IDs differ).
 model AffiliateLink {
   id                String   @id @default(cuid())
   productId         String
@@ -182,11 +196,19 @@ model AffiliateLink {
   affiliateUrl       String
   trackingTag        String?
 
+  listingTitle String?
+  sellerName   String?
+  condition    String?
+  imageUrl     String?
+  metadata     Json?
+
   isPrimary Boolean @default(false)
   isActive  Boolean @default(true)
 
   lastCheckedAt          DateTime?
+  lastSyncedAt           DateTime?
   lastKnownPrice         Decimal?  @db.Decimal(10, 2)
+  lastKnownOriginalPrice Decimal?  @db.Decimal(10, 2)
   lastKnownPriceCurrency String?
   lastKnownAvailability  String?
 
@@ -196,10 +218,12 @@ model AffiliateLink {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([productId, marketplaceId])
+  @@unique([productId, marketplaceId, externalProductId])
+  @@unique([marketplaceId, externalProductId])
   @@index([productId])
   @@index([marketplaceId])
   @@index([externalProductId])
+  @@index([lastSyncedAt])
   @@map("affiliate_links")
 }
 

@@ -5,6 +5,7 @@ import { categoryCoverImage } from "@/lib/category-images";
 import { computeDiscountPercentage } from "@/lib/format";
 import type { ProductAdminQuery } from "@/lib/product-admin-query";
 import { prisma } from "@/lib/prisma";
+import { slugify, uniqueSlugCandidate } from "@/lib/slug";
 import type { CategorySummary, MarketplaceLink, ProductDetail } from "@/types/catalog";
 
 export interface ProductAdminRow {
@@ -150,13 +151,13 @@ export async function listRecentProductsAdmin(limit = 5): Promise<ProductAdminRo
 }
 
 export async function listMarketplaces() {
-  return prisma.marketplace.findMany({ orderBy: { name: "asc" } });
+  return prisma.marketplace.findMany({ where: { isActive: true }, orderBy: { name: "asc" } });
 }
 
 export async function listCategoriesForSelect() {
   return prisma.category.findMany({
-    orderBy: { name: "asc" },
-    select: { id: true, name: true },
+    orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+    select: { id: true, name: true, parent: { select: { name: true } } },
   });
 }
 
@@ -176,6 +177,17 @@ export async function isProductSlugTaken(slug: string, excludeId?: string): Prom
   return Boolean(existing && existing.id !== excludeId);
 }
 
+export async function allocateUniqueSlug(base: string, excludeId?: string): Promise<string> {
+  const normalized = slugify(base) || "product";
+  for (let attempt = 1; attempt <= 50; attempt += 1) {
+    const candidate = uniqueSlugCandidate(normalized, attempt);
+    if (!(await isProductSlugTaken(candidate, excludeId))) {
+      return candidate;
+    }
+  }
+  return `${normalized}-${Date.now().toString(36)}`;
+}
+
 export interface ProductFieldsInput {
   title: string;
   slug: string;
@@ -192,6 +204,9 @@ export interface ProductFieldsInput {
   seoTitle: string | null;
   seoDescription: string | null;
   ogImageUrl: string | null;
+  modelNumber: string | null;
+  gtin: string | null;
+  mpn: string | null;
 }
 
 export interface AffiliateLinkInput {
@@ -206,15 +221,14 @@ export interface AffiliateLinkInput {
 }
 
 /**
- * Creates or updates a product together with its per-marketplace affiliate
- * links and images in a single transaction. A link input with an empty
- * `affiliateUrl` means "no link for this marketplace" — any existing link
- * for that marketplace is removed.
+ * Creates or updates a product together with its images. Affiliate / retailer
+ * offers are managed separately so importing eBay (and later Amazon) listings
+ * cannot be wiped by an empty product-form slot.
  */
 export async function saveProduct(
   productId: string | null,
   fields: ProductFieldsInput,
-  links: AffiliateLinkInput[],
+  links: AffiliateLinkInput[] | null,
   images: ProductImageInput[],
   createdById?: string,
 ) {
@@ -247,37 +261,54 @@ export async function saveProduct(
           },
         });
 
-    for (const link of links) {
-      const hasUrl = link.affiliateUrl.trim().length > 0;
+    if (links) {
+      for (const link of links) {
+        const hasUrl = link.affiliateUrl.trim().length > 0;
+        if (!hasUrl) {
+          continue;
+        }
 
-      if (!hasUrl) {
-        await tx.affiliateLink.deleteMany({
-          where: { productId: product.id, marketplaceId: link.marketplaceId },
+        const externalProductId = link.externalProductId.trim() || product.slug;
+        const existingLink = await tx.affiliateLink.findUnique({
+          where: {
+            marketplaceId_externalProductId: {
+              marketplaceId: link.marketplaceId,
+              externalProductId,
+            },
+          },
         });
-        continue;
-      }
 
-      await tx.affiliateLink.upsert({
-        where: { productId_marketplaceId: { productId: product.id, marketplaceId: link.marketplaceId } },
-        create: {
-          productId: product.id,
-          marketplaceId: link.marketplaceId,
+        const data = {
           affiliateUrl: link.affiliateUrl.trim(),
           rawProductUrl: link.rawProductUrl.trim() || link.affiliateUrl.trim(),
-          externalProductId: link.externalProductId.trim() || product.slug,
+          externalProductId,
           trackingTag: link.trackingTag?.trim() || null,
           isActive: link.isActive,
           isPrimary: link.isPrimary,
-        },
-        update: {
-          affiliateUrl: link.affiliateUrl.trim(),
-          rawProductUrl: link.rawProductUrl.trim() || link.affiliateUrl.trim(),
-          externalProductId: link.externalProductId.trim() || product.slug,
-          trackingTag: link.trackingTag?.trim() || null,
-          isActive: link.isActive,
-          isPrimary: link.isPrimary,
-        },
-      });
+        };
+
+        if (existingLink) {
+          if (existingLink.productId !== product.id) {
+            continue;
+          }
+          await tx.affiliateLink.update({ where: { id: existingLink.id }, data });
+        } else {
+          const firstForMarketplace = await tx.affiliateLink.findFirst({
+            where: { productId: product.id, marketplaceId: link.marketplaceId },
+          });
+          if (firstForMarketplace && !link.externalProductId.trim()) {
+            await tx.affiliateLink.update({ where: { id: firstForMarketplace.id }, data });
+          } else {
+            await tx.affiliateLink.create({
+              data: {
+                productId: product.id,
+                marketplaceId: link.marketplaceId,
+                ...data,
+              },
+            });
+          }
+        }
+      }
     }
 
     await tx.productImage.deleteMany({ where: { productId: product.id } });
@@ -395,9 +426,13 @@ export async function getProductPreviewById(id: string): Promise<ProductDetail |
   };
 
   const marketplaces: MarketplaceLink[] = product.affiliateLinks.map((link) => ({
+    id: link.id,
     marketplace: link.marketplace.code,
     label: link.marketplace.name,
-    href: affiliateGoHref(product.slug, link.marketplace.code),
+    href: affiliateGoHref(product.slug, link.marketplace.code, link.id),
+    price: link.lastKnownPrice ? Number(link.lastKnownPrice) : null,
+    currency: link.lastKnownPriceCurrency ?? product.currency,
+    availability: link.lastKnownAvailability,
   }));
 
   const imageUrl = product.images[0]?.url ?? product.ogImageUrl ?? null;

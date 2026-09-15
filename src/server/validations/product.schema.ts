@@ -16,6 +16,9 @@ export const productSchema = z.object({
     .max(200)
     .regex(slugPattern, "Slug can only contain lowercase letters, numbers and hyphens"),
   brand: z.string().trim().min(1, "Brand is required").max(100),
+  modelNumber: z.string().trim().max(100).optional().or(z.literal("")),
+  gtin: z.string().trim().max(20).optional().or(z.literal("")),
+  mpn: z.string().trim().max(80).optional().or(z.literal("")),
   categoryId: z.string().trim().min(1, "Category is required"),
   shortDescription: z.string().trim().min(1, "Short description is required").max(300),
   longDescription: z.string().trim().min(1, "Long description is required").max(5000),

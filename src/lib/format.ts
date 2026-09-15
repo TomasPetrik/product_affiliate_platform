@@ -34,3 +34,24 @@ export function formatDiscountPercent(displayPrice: number, originalPrice: numbe
 export function computeDiscountPercentage(displayPrice: number, originalPrice: number | null): number | null {
   return formatDiscountPercent(displayPrice, originalPrice);
 }
+
+export function formatRelativeTime(isoDate: string | Date | null | undefined, now = new Date()): string {
+  if (!isoDate) return "Never";
+  const date = typeof isoDate === "string" ? new Date(isoDate) : isoDate;
+  if (Number.isNaN(date.getTime())) return "Never";
+
+  const deltaSeconds = Math.round((now.getTime() - date.getTime()) / 1000);
+  if (deltaSeconds < 10) return "just now";
+  if (deltaSeconds < 60) return `${deltaSeconds}s ago`;
+
+  const minutes = Math.round(deltaSeconds / 60);
+  if (minutes < 60) return `${minutes} min ago`;
+
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+
+  const days = Math.round(hours / 24);
+  if (days < 30) return `${days}d ago`;
+
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}

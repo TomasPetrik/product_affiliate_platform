@@ -2,22 +2,26 @@ const TAGLINES: Record<string, string> = {
   "home-kitchen": "Everyday upgrades worth living with.",
   electronics: "Gadgets worth knowing about.",
   "fitness-outdoors": "Gear that actually gets used.",
+  fishing: "Kit that earns its place on the boat.",
+  "auto-moto": "Road-ready picks that hold up.",
   "office-productivity": "Tools for getting things done.",
   "pet-supplies": "Picks your pets will thank you for.",
-  "style-accessories": "Pieces with staying power.",
-  travel: "Better kit for getting there.",
   beauty: "Quietly excellent self-care.",
+  travel: "Better kit for getting there.",
+  "style-accessories": "Pieces with staying power.",
 };
 
 const BY_KEYWORD: Array<[RegExp, string]> = [
   [/kitchen|cook|home|house|living/, "Everyday upgrades worth living with."],
   [/electron|gadget|audio|tech|phone|comput/, "Gadgets worth knowing about."],
+  [/fish|angling|tackle|reel/, "Kit that earns its place on the boat."],
+  [/auto|moto|car|motor|vehicle/, "Road-ready picks that hold up."],
   [/fitness|sport|outdoor|gym|hike|run/, "Gear that actually gets used."],
   [/office|desk|productiv|work/, "Tools for getting things done."],
   [/pet|dog|cat|animal/, "Picks your pets will thank you for."],
   [/beauty|skin|makeup|groom/, "Quietly excellent self-care."],
   [/fashion|cloth|apparel|wear|style|access/, "Pieces with staying power."],
-  [/travel|bag|luggage/, "Better kit for getting there."],
+  [/travel|bag|luggage|carry/, "Better kit for getting there."],
 ];
 
 /** Short editorial line for category cards. Falls back to the stored description. */

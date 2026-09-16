@@ -20,8 +20,8 @@ Implemented:
 - Audit log: every admin mutation is recorded with actor, action, before/after state, and shown
   at `/admin/audit-log`.
 
-**Not implemented yet** (by design, later phases): Amazon/Walmart/Best Buy import automation, automatic offer
-cron sync, network-order revenue attribution.
+**Not implemented yet** (by design, later phases): Amazon/Walmart/Best Buy import automation,
+network-order revenue attribution.
 
 **Architecture note:** the original plan named NextAuth/Auth.js for admin auth. At implementation
 time, Auth.js v5 (the version with first-class App Router support) was still beta-tagged on npm.
@@ -159,4 +159,14 @@ than reading `process.env` directly, so missing/invalid config fails fast with a
 4. Restart the app, then in Admin go to **Products → Import from eBay**, paste `https://www.ebay.com/itm/…`, and click **Fetch product**.
 5. Choose a RadarCut category, then **Import product**.
 
-The public product page reads stored offers from Postgres. Use **Refresh** on the product edit page to pull a new eBay price/availability — there is no automatic cron yet.
+The public product page reads stored offers from Postgres. Use **Refresh** on the product edit page
+for a single offer, or **Admin → Price sync** to re-fetch all active eBay prices (manual CTA with
+progress, plus a change report). Schedule the same job on the VPS:
+
+```bash
+# every 6 hours — set CRON_SECRET in the server .env first
+0 */6 * * * curl -fsS -X POST -H "Authorization: Bearer $CRON_SECRET" https://radarcut.com/api/cron/price-sync
+```
+
+Each cron invocation processes batches until the catalog is done (or a batch budget is hit); the
+next tick continues any remaining run.

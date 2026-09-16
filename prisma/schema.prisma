@@ -37,6 +37,7 @@ model AdminUser {
   auditLogs       AuditLog[]
   productImports  ProductImport[]
   revenueEntries  RevenueEntry[]
+  priceSyncRuns   PriceSyncRun[]
 
   @@map("admin_users")
 }
@@ -119,6 +120,7 @@ model Product {
   analyticsEvents  AnalyticsEvent[]
   imports          ProductImport[]
   revenueEntries   RevenueEntry[]
+  priceSyncChanges PriceSyncChange[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -212,8 +214,9 @@ model AffiliateLink {
   lastKnownPriceCurrency String?
   lastKnownAvailability  String?
 
-  clicks          AffiliateClick[]
-  analyticsEvents AnalyticsEvent[]
+  clicks           AffiliateClick[]
+  analyticsEvents  AnalyticsEvent[]
+  priceSyncChanges PriceSyncChange[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -470,4 +473,85 @@ model RevenueEntry {
   @@index([occurredOn])
   @@index([createdAt])
   @@map("revenue_entries")
+}
+
+// ---------------------------------------------------------------------------
+// Periodic / manual retailer price re-sync
+// ---------------------------------------------------------------------------
+
+enum PriceSyncTrigger {
+  MANUAL
+  CRON
+}
+
+enum PriceSyncStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+/// One batch job that refreshes retailer offer prices (currently eBay).
+model PriceSyncRun {
+  id     String          @id @default(cuid())
+  status PriceSyncStatus @default(PENDING)
+  trigger PriceSyncTrigger
+
+  /// Snapshot of AffiliateLink ids to process for this run (stable cursor).
+  offerIds String[]
+
+  totalOffers     Int @default(0)
+  processedOffers Int @default(0)
+  changedOffers   Int @default(0)
+  failedOffers    Int @default(0)
+  unchangedOffers Int @default(0)
+
+  errorMessage String?
+
+  createdById String?
+  createdBy   AdminUser? @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  startedAt  DateTime?
+  finishedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  changes PriceSyncChange[]
+
+  @@index([status])
+  @@index([createdAt])
+  @@map("price_sync_runs")
+}
+
+/// Offer whose price (or availability) changed during a sync run.
+model PriceSyncChange {
+  id     String       @id @default(cuid())
+  runId  String
+  run    PriceSyncRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  affiliateLinkId String
+  affiliateLink   AffiliateLink @relation(fields: [affiliateLinkId], references: [id], onDelete: Cascade)
+  productId       String
+  product         Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  productTitle      String
+  productSlug       String
+  marketplaceCode   String
+  externalProductId String
+
+  oldPrice         Decimal? @db.Decimal(10, 2)
+  newPrice         Decimal? @db.Decimal(10, 2)
+  oldOriginalPrice Decimal? @db.Decimal(10, 2)
+  newOriginalPrice Decimal? @db.Decimal(10, 2)
+  currency         String?
+
+  oldAvailability String?
+  newAvailability String?
+
+  createdAt DateTime @default(now())
+
+  @@index([runId])
+  @@index([productId])
+  @@index([affiliateLinkId])
+  @@map("price_sync_changes")
 }

@@ -71,6 +71,12 @@ const envSchema = z.object({
     .optional(),
   /** Exact HTTPS URL registered with eBay. Defaults to {NEXT_PUBLIC_SITE_URL}/api/ebay/marketplace-account-deletion */
   EBAY_NOTIFICATION_ENDPOINT: z.string().url().optional(),
+
+  /**
+   * Bearer secret for scheduled jobs (e.g. POST /api/cron/price-sync). Optional so
+   * the public site boots without cron configured; the cron route returns 503 when missing.
+   */
+  CRON_SECRET: z.string().min(16).optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;
@@ -102,6 +108,7 @@ function loadEnv(): Env {
       process.env.EBAY_NOTIFICATION_VERIFICATION_TOKEN,
     ),
     EBAY_NOTIFICATION_ENDPOINT: blankToUndefined(process.env.EBAY_NOTIFICATION_ENDPOINT),
+    CRON_SECRET: blankToUndefined(process.env.CRON_SECRET),
   });
 
   if (!parsed.success) {

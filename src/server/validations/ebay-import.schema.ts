@@ -43,21 +43,52 @@ export const ebayImportSchema = z
     }
   });
 
-export const retailerOfferManualSchema = z.object({
-  affiliateUrl: z
-    .string()
-    .trim()
-    .min(1, "Affiliate URL is required")
-    .max(2000)
-    .refine(isHttpUrl, "Affiliate URL must be a valid http(s) URL"),
-  rawProductUrl: z
-    .string()
-    .trim()
-    .max(2000)
-    .optional()
-    .or(z.literal(""))
-    .refine((value) => !value || isHttpUrl(value), "Product URL must be a valid http(s) URL"),
-  trackingTag: z.string().trim().max(256).optional().or(z.literal("")),
-  isActive: z.boolean(),
-  isPrimary: z.boolean(),
-});
+const optionalMoney = z.preprocess((value) => {
+  if (value === "" || value === null || value === undefined) {
+    return null;
+  }
+  return value;
+}, z.coerce.number().min(0).max(999999).nullable());
+
+export const retailerOfferManualSchema = z
+  .object({
+    affiliateUrl: z
+      .string()
+      .trim()
+      .min(1, "Affiliate URL is required")
+      .max(2000)
+      .refine(isHttpUrl, "Affiliate URL must be a valid http(s) URL"),
+    rawProductUrl: z
+      .string()
+      .trim()
+      .max(2000)
+      .optional()
+      .or(z.literal(""))
+      .refine((value) => !value || isHttpUrl(value), "Product URL must be a valid http(s) URL"),
+    trackingTag: z.string().trim().max(256).optional().or(z.literal("")),
+    lastKnownPrice: optionalMoney,
+    lastKnownOriginalPrice: optionalMoney,
+    lastKnownPriceCurrency: z
+      .string()
+      .trim()
+      .toUpperCase()
+      .max(3)
+      .optional()
+      .or(z.literal(""))
+      .refine((value) => !value || value.length === 3, "Use a 3-letter currency code, e.g. USD"),
+    lastKnownAvailability: z
+      .enum(["IN_STOCK", "OUT_OF_STOCK", "LIMITED_QUANTITY", ""])
+      .optional()
+      .or(z.literal("")),
+    isActive: z.boolean(),
+    isPrimary: z.boolean(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.lastKnownOriginalPrice != null && value.lastKnownPrice == null) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["lastKnownPrice"],
+        message: "Set the offer price when providing an original price",
+      });
+    }
+  });

@@ -1,5 +1,6 @@
 import type { Prisma } from "@/generated/prisma/client";
 import { computeDiscountPercentage } from "@/lib/format";
+import { pickLowestPricedOffer } from "@/lib/lowest-offer-price";
 import { prisma } from "@/lib/prisma";
 import { retailerLabel } from "@/lib/retailer";
 import type { EbayListingWithAffiliate } from "@/server/ebay/ebay.service";
@@ -203,6 +204,10 @@ export async function updateRetailerOfferManual(
     affiliateUrl: string;
     rawProductUrl: string;
     trackingTag: string | null;
+    lastKnownPrice: number | null;
+    lastKnownOriginalPrice: number | null;
+    lastKnownPriceCurrency: string | null;
+    lastKnownAvailability: string | null;
     isActive: boolean;
     isPrimary: boolean;
   },
@@ -219,24 +224,31 @@ export async function updateRetailerOfferManual(
     });
   }
 
-  return prisma.affiliateLink.update({
+  const updated = await prisma.affiliateLink.update({
     where: { id },
     data: {
       affiliateUrl: input.affiliateUrl,
       rawProductUrl: input.rawProductUrl || input.affiliateUrl,
       trackingTag: input.trackingTag,
+      lastKnownPrice: input.lastKnownPrice,
+      lastKnownOriginalPrice: input.lastKnownOriginalPrice,
+      lastKnownPriceCurrency: input.lastKnownPriceCurrency,
+      lastKnownAvailability: input.lastKnownAvailability,
       isActive: input.isActive,
       isPrimary: input.isPrimary,
     },
   });
+
+  await syncProductDisplayPrice(existing.productId);
+  return updated;
 }
 
 export async function syncProductDisplayPrice(productId: string) {
   const offers = await prisma.affiliateLink.findMany({
     where: { productId, isActive: true, lastKnownPrice: { not: null } },
-    orderBy: [{ isPrimary: "desc" }, { lastKnownPrice: "asc" }],
   });
-  const best = offers[0];
+  // Always surface the cheapest active offer on cards/PDP — not the primary CTA retailer.
+  const best = pickLowestPricedOffer(offers);
   if (!best?.lastKnownPrice) {
     return;
   }

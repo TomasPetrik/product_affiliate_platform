@@ -5,8 +5,15 @@ import { redirect } from "next/navigation";
 
 import type { ProductStatus } from "@/generated/prisma/enums";
 import { isApprovedImageUrl } from "@/lib/approved-image-url";
+import {
+  extractAmazonAscSubtag,
+  extractAmazonAsin,
+  extractAmazonPartnerTag,
+  generateAmazonTrackedAffiliate,
+} from "@/lib/amazon-url";
 import { safeAdminProductsReturnTo, withAdminNotice } from "@/lib/admin-notice";
 import { requireAdminSession } from "@/lib/auth";
+import { env } from "@/lib/env";
 import { writeAuditLog } from "@/server/services/audit.service";
 import { listUploadedImageFiles, storeUploadedProductImage } from "@/server/services/product-image.service";
 import {
@@ -78,12 +85,67 @@ export async function saveProductAction(
   const links = [];
 
   for (const marketplace of marketplaces) {
+    let affiliateUrl = String(formData.get(`link_${marketplace.id}_affiliateUrl`) ?? "");
+    const rawProductUrl = String(formData.get(`link_${marketplace.id}_rawProductUrl`) ?? "");
+    let externalProductId = String(formData.get(`link_${marketplace.id}_externalProductId`) ?? "");
+    let trackingTag = String(formData.get(`link_${marketplace.id}_trackingTag`) ?? "");
+
+    if (marketplace.code === "AMAZON") {
+      if (!externalProductId.trim()) {
+        const asin =
+          extractAmazonAsin(affiliateUrl) ?? extractAmazonAsin(rawProductUrl) ?? null;
+        if (asin) {
+          externalProductId = asin;
+        }
+      }
+
+      const partnerTag = env.AMAZON_ASSOCIATES_TAG?.trim() ?? "";
+      // trackingTag is the unique ascsubtag — never the account partner tag.
+      if (!trackingTag.trim() || (partnerTag && trackingTag.trim() === partnerTag)) {
+        trackingTag = extractAmazonAscSubtag(affiliateUrl) ?? "";
+      }
+
+      const hasAmazonInput = Boolean(
+        affiliateUrl.trim() || rawProductUrl.trim() || externalProductId.trim(),
+      );
+      const needsTracking =
+        Boolean(partnerTag) &&
+        hasAmazonInput &&
+        (!extractAmazonPartnerTag(affiliateUrl) ||
+          !extractAmazonAscSubtag(affiliateUrl) ||
+          !trackingTag.trim());
+
+      if (needsTracking) {
+        try {
+          const generated = generateAmazonTrackedAffiliate({
+            affiliateUrl,
+            rawProductUrl,
+            asin: externalProductId,
+            partnerTag,
+            productId,
+            customId: trackingTag.trim() || undefined,
+          });
+          affiliateUrl = generated.affiliateUrl;
+          trackingTag = generated.trackingTag;
+          if (!externalProductId.trim() && generated.asin) {
+            externalProductId = generated.asin;
+          }
+        } catch {
+          // Leave fields as submitted; validation below will surface URL issues.
+        }
+      }
+    }
+
     const candidate = {
       marketplaceId: marketplace.id,
-      affiliateUrl: String(formData.get(`link_${marketplace.id}_affiliateUrl`) ?? ""),
-      rawProductUrl: String(formData.get(`link_${marketplace.id}_rawProductUrl`) ?? ""),
-      externalProductId: String(formData.get(`link_${marketplace.id}_externalProductId`) ?? ""),
-      trackingTag: String(formData.get(`link_${marketplace.id}_trackingTag`) ?? ""),
+      affiliateUrl,
+      rawProductUrl,
+      externalProductId,
+      trackingTag,
+      lastKnownPrice: formData.get(`link_${marketplace.id}_lastKnownPrice`) ?? "",
+      lastKnownOriginalPrice: formData.get(`link_${marketplace.id}_lastKnownOriginalPrice`) ?? "",
+      lastKnownPriceCurrency: String(formData.get(`link_${marketplace.id}_lastKnownPriceCurrency`) ?? ""),
+      lastKnownAvailability: String(formData.get(`link_${marketplace.id}_lastKnownAvailability`) ?? ""),
       isActive: formData.get(`link_${marketplace.id}_isActive`) === "on",
     };
 
@@ -92,6 +154,10 @@ export async function saveProductAction(
       return { error: `${marketplace.name}: ${linkParsed.error.issues[0]?.message ?? "Invalid affiliate link."}` };
     }
 
+    const currency =
+      linkParsed.data.lastKnownPriceCurrency?.trim() ||
+      (linkParsed.data.lastKnownPrice != null ? parsed.data.currency : null);
+
     links.push({
       marketplaceId: marketplace.id,
       marketplaceCode: marketplace.code,
@@ -99,6 +165,10 @@ export async function saveProductAction(
       rawProductUrl: linkParsed.data.rawProductUrl ?? "",
       externalProductId: linkParsed.data.externalProductId ?? "",
       trackingTag: linkParsed.data.trackingTag || null,
+      lastKnownPrice: linkParsed.data.lastKnownPrice ?? null,
+      lastKnownOriginalPrice: linkParsed.data.lastKnownOriginalPrice ?? null,
+      lastKnownPriceCurrency: currency,
+      lastKnownAvailability: linkParsed.data.lastKnownAvailability || null,
       isActive: linkParsed.data.isActive,
       isPrimary: marketplace.id === primaryMarketplaceId,
     });

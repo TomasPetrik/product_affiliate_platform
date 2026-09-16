@@ -77,6 +77,14 @@ const envSchema = z.object({
    * the public site boots without cron configured; the cron route returns 503 when missing.
    */
   CRON_SECRET: z.string().min(16).optional(),
+
+  /**
+   * Amazon Associates store ID / partner tag (e.g. radarcut-20). Added as `tag=` on
+   * every Amazon affiliate URL for commissions. Per-product attribution uses a
+   * unique `ascsubtag` stored on AffiliateLink.trackingTag. Optional so the public
+   * site boots without it; the admin “Generate tracking ID” CTA explains when missing.
+   */
+  AMAZON_ASSOCIATES_TAG: z.string().min(1).optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;
@@ -109,6 +117,7 @@ function loadEnv(): Env {
     ),
     EBAY_NOTIFICATION_ENDPOINT: blankToUndefined(process.env.EBAY_NOTIFICATION_ENDPOINT),
     CRON_SECRET: blankToUndefined(process.env.CRON_SECRET),
+    AMAZON_ASSOCIATES_TAG: blankToUndefined(process.env.AMAZON_ASSOCIATES_TAG),
   });
 
   if (!parsed.success) {

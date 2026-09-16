@@ -3,9 +3,11 @@ import type { MarketplaceCode, ProductStatus } from "@/generated/prisma/enums";
 import { affiliateGoHref } from "@/lib/affiliate-go";
 import { categoryCoverImage } from "@/lib/category-images";
 import { computeDiscountPercentage } from "@/lib/format";
+import { pickLowestPricedOffer } from "@/lib/lowest-offer-price";
 import type { ProductAdminQuery } from "@/lib/product-admin-query";
 import { prisma } from "@/lib/prisma";
 import { slugify, uniqueSlugCandidate } from "@/lib/slug";
+import { syncProductDisplayPrice } from "@/server/services/retailer-offer.service";
 import type { CategorySummary, MarketplaceLink, ProductDetail } from "@/types/catalog";
 
 export interface ProductAdminRow {
@@ -216,6 +218,10 @@ export interface AffiliateLinkInput {
   rawProductUrl: string;
   externalProductId: string;
   trackingTag: string | null;
+  lastKnownPrice: number | null;
+  lastKnownOriginalPrice: number | null;
+  lastKnownPriceCurrency: string | null;
+  lastKnownAvailability: string | null;
   isActive: boolean;
   isPrimary: boolean;
 }
@@ -235,7 +241,7 @@ export async function saveProduct(
   const discountPercentage = computeDiscountPercentage(fields.displayPrice, fields.originalPrice);
   const normalizedImages = normalizeImages(images);
 
-  return prisma.$transaction(async (tx) => {
+  const product = await prisma.$transaction(async (tx) => {
     const existing = productId
       ? await tx.product.findUnique({ where: { id: productId }, select: { publishedAt: true } })
       : null;
@@ -283,6 +289,10 @@ export async function saveProduct(
           rawProductUrl: link.rawProductUrl.trim() || link.affiliateUrl.trim(),
           externalProductId,
           trackingTag: link.trackingTag?.trim() || null,
+          lastKnownPrice: link.lastKnownPrice,
+          lastKnownOriginalPrice: link.lastKnownOriginalPrice,
+          lastKnownPriceCurrency: link.lastKnownPriceCurrency,
+          lastKnownAvailability: link.lastKnownAvailability,
           isActive: link.isActive,
           isPrimary: link.isPrimary,
         };
@@ -326,6 +336,10 @@ export async function saveProduct(
 
     return product;
   });
+
+  // Keep denormalized displayPrice aligned with the cheapest active offer.
+  await syncProductDisplayPrice(product.id);
+  return prisma.product.findUniqueOrThrow({ where: { id: product.id } });
 }
 
 function normalizeImages(images: ProductImageInput[]): ProductImageInput[] {
@@ -494,15 +508,32 @@ export async function getProductPreviewById(id: string): Promise<ProductDetail |
     imageUrl: categoryCoverImage(product.category.slug, product.category.imageUrl),
   };
 
-  const marketplaces: MarketplaceLink[] = product.affiliateLinks.map((link) => ({
-    id: link.id,
-    marketplace: link.marketplace.code,
-    label: link.marketplace.name,
-    href: affiliateGoHref(product.slug, link.marketplace.code, link.id),
-    price: link.lastKnownPrice ? Number(link.lastKnownPrice) : null,
-    currency: link.lastKnownPriceCurrency ?? product.currency,
-    availability: link.lastKnownAvailability,
-  }));
+  const marketplaces: MarketplaceLink[] = product.affiliateLinks
+    .map((link) => ({
+      id: link.id,
+      marketplace: link.marketplace.code,
+      label: link.marketplace.name,
+      href: affiliateGoHref(product.slug, link.marketplace.code, link.id),
+      price: link.lastKnownPrice ? Number(link.lastKnownPrice) : null,
+      currency: link.lastKnownPriceCurrency ?? product.currency,
+      availability: link.lastKnownAvailability,
+    }))
+    .sort((a, b) => {
+      if (a.price == null && b.price == null) return 0;
+      if (a.price == null) return 1;
+      if (b.price == null) return -1;
+      return a.price - b.price;
+    });
+
+  const bestOffer = pickLowestPricedOffer(product.affiliateLinks);
+  const displayPrice = bestOffer?.lastKnownPrice != null ? Number(bestOffer.lastKnownPrice) : Number(product.displayPrice);
+  const originalPrice =
+    bestOffer?.lastKnownOriginalPrice != null
+      ? Number(bestOffer.lastKnownOriginalPrice)
+      : product.originalPrice
+        ? Number(product.originalPrice)
+        : null;
+  const currency = bestOffer?.lastKnownPriceCurrency ?? product.currency;
 
   const imageUrl = product.images[0]?.url ?? product.ogImageUrl ?? null;
 
@@ -514,9 +545,9 @@ export async function getProductPreviewById(id: string): Promise<ProductDetail |
     category,
     status: product.status,
     shortDescription: product.shortDescription,
-    currency: product.currency,
-    displayPrice: Number(product.displayPrice),
-    originalPrice: product.originalPrice ? Number(product.originalPrice) : null,
+    currency,
+    displayPrice,
+    originalPrice,
     rating: Number(product.rating),
     ratingCount: product.ratingCount,
     isFeatured: product.isFeatured,

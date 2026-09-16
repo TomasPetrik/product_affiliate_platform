@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useState, type ChangeEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -21,6 +21,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ProductImagesField, type ProductImageFieldValue } from "@/components/admin/product-images-field";
 import { saveProductAction, type ProductActionState } from "@/server/actions/product.actions";
 
+import { generateAmazonTrackedAffiliate } from "@/lib/amazon-url";
 import { slugify } from "@/lib/slug";
 
 export interface ProductFormLinkValues {
@@ -28,6 +29,10 @@ export interface ProductFormLinkValues {
   rawProductUrl: string;
   externalProductId: string;
   trackingTag: string;
+  lastKnownPrice: string;
+  lastKnownOriginalPrice: string;
+  lastKnownPriceCurrency: string;
+  lastKnownAvailability: string;
   isActive: boolean;
 }
 
@@ -61,6 +66,10 @@ const emptyLink: ProductFormLinkValues = {
   rawProductUrl: "",
   externalProductId: "",
   trackingTag: "",
+  lastKnownPrice: "",
+  lastKnownOriginalPrice: "",
+  lastKnownPriceCurrency: "",
+  lastKnownAvailability: "",
   isActive: true,
 };
 
@@ -92,17 +101,93 @@ interface ProductFormProps {
   defaultValues?: ProductFormValues;
   categories: Array<{ id: string; name: string; parent: { name: string } | null }>;
   marketplaces: Array<{ id: string; code: string; name: string }>;
+  /** Associates account tag from AMAZON_ASSOCIATES_TAG; enables Generate tracking ID. */
+  amazonAssociatesTag?: string | null;
 }
 
 const initialState: ProductActionState = {};
 
-export function ProductForm({ defaultValues = emptyProductFormValues, categories, marketplaces }: ProductFormProps) {
+type AmazonLinkDraft = {
+  affiliateUrl: string;
+  rawProductUrl: string;
+  externalProductId: string;
+  trackingTag: string;
+};
+
+export function ProductForm({
+  defaultValues = emptyProductFormValues,
+  categories,
+  marketplaces,
+  amazonAssociatesTag = null,
+}: ProductFormProps) {
   const [state, formAction, pending] = useActionState(saveProductAction, initialState);
   const [slug, setSlug] = useState(defaultValues.slug);
   const [slugTouched, setSlugTouched] = useState(Boolean(defaultValues.id));
   const [status, setStatus] = useState(defaultValues.status);
   const [categoryId, setCategoryId] = useState(defaultValues.categoryId || categories[0]?.id || "");
+  const [amazonDrafts, setAmazonDrafts] = useState<Record<string, AmazonLinkDraft>>(() => {
+    const drafts: Record<string, AmazonLinkDraft> = {};
+    for (const marketplace of marketplaces) {
+      if (marketplace.code !== "AMAZON") continue;
+      const link = defaultValues.links[marketplace.id] ?? emptyLink;
+      drafts[marketplace.id] = {
+        affiliateUrl: link.affiliateUrl,
+        rawProductUrl: link.rawProductUrl,
+        externalProductId: link.externalProductId,
+        trackingTag: link.trackingTag,
+      };
+    }
+    return drafts;
+  });
+  const [amazonTagError, setAmazonTagError] = useState<string | null>(null);
   const router = useRouter();
+
+  function updateAmazonDraft(marketplaceId: string, patch: Partial<AmazonLinkDraft>) {
+    setAmazonDrafts((prev) => ({
+      ...prev,
+      [marketplaceId]: {
+        ...(prev[marketplaceId] ?? {
+          affiliateUrl: "",
+          rawProductUrl: "",
+          externalProductId: "",
+          trackingTag: "",
+        }),
+        ...patch,
+      },
+    }));
+  }
+
+  function applyAmazonTracking(marketplaceId: string) {
+    setAmazonTagError(null);
+    if (!amazonAssociatesTag) {
+      setAmazonTagError("Set AMAZON_ASSOCIATES_TAG in .env, then restart the app.");
+      return;
+    }
+    const draft = amazonDrafts[marketplaceId] ?? {
+      affiliateUrl: "",
+      rawProductUrl: "",
+      externalProductId: "",
+      trackingTag: "",
+    };
+    try {
+      const generated = generateAmazonTrackedAffiliate({
+        affiliateUrl: draft.affiliateUrl,
+        rawProductUrl: draft.rawProductUrl,
+        asin: draft.externalProductId,
+        partnerTag: amazonAssociatesTag,
+        productId: defaultValues.id,
+        customId: draft.trackingTag,
+      });
+      updateAmazonDraft(marketplaceId, {
+        affiliateUrl: generated.affiliateUrl,
+        trackingTag: generated.trackingTag,
+        externalProductId: generated.asin ?? draft.externalProductId,
+        rawProductUrl: draft.rawProductUrl || generated.affiliateUrl.split("?")[0] || draft.rawProductUrl,
+      });
+    } catch (error) {
+      setAmazonTagError(error instanceof Error ? error.message : "Could not apply tracking tag.");
+    }
+  }
 
   return (
     <form action={formAction} className="flex flex-col gap-6">
@@ -271,11 +356,20 @@ export function ProductForm({ defaultValues = emptyProductFormValues, categories
         </CardHeader>
         <CardContent className="flex flex-col gap-6">
           <p className="text-xs text-muted-foreground">
-            Optional fallback for retailers without import yet. eBay offers should be added via Import / Add eBay
-            offer so price, seller, and tracking stay in sync.
+            Use this for Amazon (and other retailers without import yet). Set a per-retailer price so “Where to buy”
+            can show Amazon separately from the product/eBay price. Prefer Import / Add eBay offer for eBay so seller
+            and tracking stay in sync.
           </p>
+          {amazonTagError ? (
+            <Alert variant="destructive">
+              <AlertDescription>{amazonTagError}</AlertDescription>
+            </Alert>
+          ) : null}
+
           {marketplaces.map((marketplace) => {
             const link = defaultValues.links[marketplace.id] ?? emptyLink;
+            const isAmazon = marketplace.code === "AMAZON";
+            const amazonDraft = amazonDrafts[marketplace.id];
             return (
               <div key={marketplace.id} className="flex flex-col gap-3 rounded-lg border p-3">
                 <div className="flex items-center justify-between gap-3">
@@ -309,13 +403,24 @@ export function ProductForm({ defaultValues = emptyProductFormValues, categories
 
                 <div className="flex flex-col gap-1.5">
                   <Label htmlFor={`link_${marketplace.id}_affiliateUrl`} className="text-xs">
-                    Affiliate URL (leave blank to remove this marketplace)
+                    Affiliate URL
+                    {isAmazon ? " (account tag + product id applied)" : " (leave blank to skip)"}
                   </Label>
                   <Input
                     id={`link_${marketplace.id}_affiliateUrl`}
                     name={`link_${marketplace.id}_affiliateUrl`}
-                    placeholder={`https://www.${marketplace.code.toLowerCase()}.com/dp/...?tag=your-tag`}
-                    defaultValue={link.affiliateUrl}
+                    placeholder={
+                      isAmazon
+                        ? "https://www.amazon.com/dp/B0… or paste then Apply tracking tag"
+                        : `https://www.${marketplace.code.toLowerCase()}.com/...`
+                    }
+                    {...(isAmazon && amazonDraft
+                      ? {
+                          value: amazonDraft.affiliateUrl,
+                          onChange: (event: ChangeEvent<HTMLInputElement>) =>
+                            updateAmazonDraft(marketplace.id, { affiliateUrl: event.target.value }),
+                        }
+                      : { defaultValue: link.affiliateUrl })}
                   />
                 </div>
 
@@ -327,28 +432,125 @@ export function ProductForm({ defaultValues = emptyProductFormValues, categories
                     <Input
                       id={`link_${marketplace.id}_rawProductUrl`}
                       name={`link_${marketplace.id}_rawProductUrl`}
-                      defaultValue={link.rawProductUrl}
+                      {...(isAmazon && amazonDraft
+                        ? {
+                            value: amazonDraft.rawProductUrl,
+                            onChange: (event: ChangeEvent<HTMLInputElement>) =>
+                              updateAmazonDraft(marketplace.id, { rawProductUrl: event.target.value }),
+                          }
+                        : { defaultValue: link.rawProductUrl })}
                     />
                   </div>
                   <div className="flex flex-col gap-1.5">
                     <Label htmlFor={`link_${marketplace.id}_externalProductId`} className="text-xs">
-                      External product ID (e.g. ASIN)
+                      {isAmazon ? "ASIN (auto from URL if blank)" : "External product ID"}
                     </Label>
                     <Input
                       id={`link_${marketplace.id}_externalProductId`}
                       name={`link_${marketplace.id}_externalProductId`}
-                      defaultValue={link.externalProductId}
+                      placeholder={isAmazon ? "B0XXXXXXXX" : undefined}
+                      {...(isAmazon && amazonDraft
+                        ? {
+                            value: amazonDraft.externalProductId,
+                            onChange: (event: ChangeEvent<HTMLInputElement>) =>
+                              updateAmazonDraft(marketplace.id, { externalProductId: event.target.value }),
+                          }
+                        : { defaultValue: link.externalProductId })}
                     />
                   </div>
                   <div className="flex flex-col gap-1.5">
                     <Label htmlFor={`link_${marketplace.id}_trackingTag`} className="text-xs">
-                      Tracking tag
+                      {isAmazon ? "Product tracking ID (ascsubtag)" : "Tracking tag"}
                     </Label>
                     <Input
                       id={`link_${marketplace.id}_trackingTag`}
                       name={`link_${marketplace.id}_trackingTag`}
-                      defaultValue={link.trackingTag}
+                      placeholder={
+                        isAmazon ? "radarcut-product-… (unique per product)" : undefined
+                      }
+                      {...(isAmazon && amazonDraft
+                        ? {
+                            value: amazonDraft.trackingTag,
+                            onChange: (event: ChangeEvent<HTMLInputElement>) =>
+                              updateAmazonDraft(marketplace.id, { trackingTag: event.target.value }),
+                          }
+                        : { defaultValue: link.trackingTag })}
                     />
+                  </div>
+                </div>
+
+                {isAmazon ? (
+                  <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-xs text-muted-foreground">
+                      {amazonAssociatesTag
+                        ? `Account tag “${amazonAssociatesTag}” is added to the URL; this field is a unique product id for reports.`
+                        : "Configure AMAZON_ASSOCIATES_TAG in .env to enable one-click tagging."}
+                    </p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => applyAmazonTracking(marketplace.id)}
+                    >
+                      Generate tracking ID
+                    </Button>
+                  </div>
+                ) : null}
+
+                <div className="grid gap-3 sm:grid-cols-4">
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor={`link_${marketplace.id}_lastKnownPrice`} className="text-xs">
+                      Offer price
+                    </Label>
+                    <Input
+                      id={`link_${marketplace.id}_lastKnownPrice`}
+                      name={`link_${marketplace.id}_lastKnownPrice`}
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      defaultValue={link.lastKnownPrice}
+                      placeholder="e.g. 29.99"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor={`link_${marketplace.id}_lastKnownOriginalPrice`} className="text-xs">
+                      Original / list price
+                    </Label>
+                    <Input
+                      id={`link_${marketplace.id}_lastKnownOriginalPrice`}
+                      name={`link_${marketplace.id}_lastKnownOriginalPrice`}
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      defaultValue={link.lastKnownOriginalPrice}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor={`link_${marketplace.id}_lastKnownPriceCurrency`} className="text-xs">
+                      Currency
+                    </Label>
+                    <Input
+                      id={`link_${marketplace.id}_lastKnownPriceCurrency`}
+                      name={`link_${marketplace.id}_lastKnownPriceCurrency`}
+                      maxLength={3}
+                      defaultValue={link.lastKnownPriceCurrency || defaultValues.currency || "USD"}
+                      placeholder="USD"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor={`link_${marketplace.id}_lastKnownAvailability`} className="text-xs">
+                      Availability
+                    </Label>
+                    <select
+                      id={`link_${marketplace.id}_lastKnownAvailability`}
+                      name={`link_${marketplace.id}_lastKnownAvailability`}
+                      defaultValue={link.lastKnownAvailability || "IN_STOCK"}
+                      className="flex h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+                    >
+                      <option value="IN_STOCK">In stock</option>
+                      <option value="LIMITED_QUANTITY">Limited</option>
+                      <option value="OUT_OF_STOCK">Out of stock</option>
+                    </select>
                   </div>
                 </div>
               </div>

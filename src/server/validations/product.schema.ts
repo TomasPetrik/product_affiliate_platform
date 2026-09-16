@@ -41,13 +41,34 @@ export const productSchema = z.object({
 
 export type ProductFormValues = z.infer<typeof productSchema>;
 
+const optionalMoney = z.preprocess((value) => {
+  if (value === "" || value === null || value === undefined) {
+    return null;
+  }
+  return value;
+}, z.coerce.number().min(0).max(999999).nullable());
+
 export const affiliateLinkSchema = z
   .object({
     marketplaceId: z.string().min(1),
     affiliateUrl: z.string().trim().max(2000).optional().or(z.literal("")),
     rawProductUrl: z.string().trim().max(2000).optional().or(z.literal("")),
     externalProductId: z.string().trim().max(200).optional().or(z.literal("")),
-    trackingTag: z.string().trim().max(100).optional().or(z.literal("")),
+    trackingTag: z.string().trim().max(256).optional().or(z.literal("")),
+    lastKnownPrice: optionalMoney,
+    lastKnownOriginalPrice: optionalMoney,
+    lastKnownPriceCurrency: z
+      .string()
+      .trim()
+      .toUpperCase()
+      .max(3)
+      .optional()
+      .or(z.literal(""))
+      .refine((value) => !value || value.length === 3, "Use a 3-letter currency code, e.g. USD"),
+    lastKnownAvailability: z
+      .enum(["IN_STOCK", "OUT_OF_STOCK", "LIMITED_QUANTITY", ""])
+      .optional()
+      .or(z.literal("")),
     isActive: z.boolean(),
   })
   .superRefine((value, ctx) => {
@@ -76,6 +97,14 @@ export const affiliateLinkSchema = z
         code: "custom",
         path: ["affiliateUrl"],
         message: "Affiliate URL is required when adding a marketplace listing",
+      });
+    }
+
+    if (value.lastKnownOriginalPrice != null && value.lastKnownPrice == null) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["lastKnownPrice"],
+        message: "Set the offer price when providing an original price",
       });
     }
   });

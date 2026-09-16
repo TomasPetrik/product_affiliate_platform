@@ -6,6 +6,7 @@ import { ProductForm, type ProductFormLinkValues } from "@/components/admin/prod
 import { ReplaceHeroImagePanel } from "@/components/admin/replace-hero-image-panel";
 import { RetailerOffersPanel } from "@/components/admin/retailer-offers-panel";
 import { adminNoticeMessage } from "@/lib/admin-notice";
+import { env } from "@/lib/env";
 import {
   getProductByIdAdmin,
   listCategoriesForSelect,
@@ -44,6 +45,10 @@ export default async function EditProductPage({ params, searchParams }: EditProd
       rawProductUrl: link.rawProductUrl,
       externalProductId: link.externalProductId,
       trackingTag: link.trackingTag ?? "",
+      lastKnownPrice: link.lastKnownPrice != null ? String(link.lastKnownPrice) : "",
+      lastKnownOriginalPrice: link.lastKnownOriginalPrice != null ? String(link.lastKnownOriginalPrice) : "",
+      lastKnownPriceCurrency: link.lastKnownPriceCurrency ?? "",
+      lastKnownAvailability: link.lastKnownAvailability ?? "",
       isActive: link.isActive,
     };
     if (link.isPrimary) {
@@ -76,6 +81,7 @@ export default async function EditProductPage({ params, searchParams }: EditProd
       <ProductForm
         categories={categories}
         marketplaces={marketplaces}
+        amazonAssociatesTag={env.AMAZON_ASSOCIATES_TAG ?? null}
         defaultValues={{
           id: product.id,
           title: product.title,

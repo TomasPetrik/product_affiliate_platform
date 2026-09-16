@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
 import { OfferEditForm } from "@/components/admin/offer-edit-form";
+import { env } from "@/lib/env";
 import { getRetailerOfferById, type AdminRetailerOffer } from "@/server/services/retailer-offer.service";
 
 export const metadata: Metadata = {
@@ -49,7 +50,7 @@ export default async function EditRetailerOfferPage({ params }: EditOfferPagePro
         <h1 className="text-2xl font-bold tracking-tight">Edit retailer offer</h1>
         <p className="mt-1 text-sm text-muted-foreground">{offer.product.title}</p>
       </div>
-      <OfferEditForm offer={view} />
+      <OfferEditForm offer={view} amazonAssociatesTag={env.AMAZON_ASSOCIATES_TAG ?? null} />
     </div>
   );
 }

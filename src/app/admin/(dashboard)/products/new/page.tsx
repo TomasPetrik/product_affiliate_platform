@@ -3,6 +3,7 @@ import Link from "next/link";
 
 import { ProductForm } from "@/components/admin/product-form";
 import { Button } from "@/components/ui/button";
+import { env } from "@/lib/env";
 import { listCategoriesForSelect, listMarketplaces } from "@/server/services/product.service";
 
 export const metadata: Metadata = {
@@ -23,7 +24,11 @@ export default async function NewProductPage() {
           Import from eBay
         </Button>
       </div>
-      <ProductForm categories={categories} marketplaces={marketplaces} />
+      <ProductForm
+        categories={categories}
+        marketplaces={marketplaces}
+        amazonAssociatesTag={env.AMAZON_ASSOCIATES_TAG ?? null}
+      />
     </div>
   );
 }

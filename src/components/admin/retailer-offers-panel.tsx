@@ -32,8 +32,8 @@ export function RetailerOffersPanel({ productId, offers }: RetailerOffersPanelPr
       </CardHeader>
       <CardContent>
         <p className="mb-4 text-xs text-muted-foreground">
-          Offers are per retailer listing. Amazon, Walmart, and others can be added later without changing the
-          product itself.
+          Offers are per retailer listing. Add Amazon (with its own price) under Manual affiliate URLs on the product
+          form, or edit an existing offer below. Use Add eBay offer for eBay imports.
         </p>
         {offers.length === 0 ? (
           <p className="text-sm text-muted-foreground">No retailer offers yet.</p>

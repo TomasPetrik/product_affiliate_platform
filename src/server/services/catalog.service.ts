@@ -1,6 +1,7 @@
 import { Prisma } from "@/generated/prisma/client";
 import { affiliateGoHref } from "@/lib/affiliate-go";
 import { categoryCoverImage } from "@/lib/category-images";
+import { pickLowestPricedOffer } from "@/lib/lowest-offer-price";
 import { prisma } from "@/lib/prisma";
 import type { CategorySummary, MarketplaceLink, ProductDetail, ProductStatus, ProductSummary } from "@/types/catalog";
 
@@ -30,7 +31,7 @@ const productInclude = {
 type ProductWithRelations = Prisma.ProductGetPayload<{ include: typeof productInclude }>;
 
 function toMarketplaceLinks(product: ProductWithRelations): MarketplaceLink[] {
-  return product.affiliateLinks.flatMap((link) => {
+  const links = product.affiliateLinks.flatMap((link) => {
     if (!link.marketplace) return [];
     return [
       {
@@ -44,6 +45,35 @@ function toMarketplaceLinks(product: ProductWithRelations): MarketplaceLink[] {
       },
     ];
   });
+
+  // Cheapest offer first so "Where to buy" highlights the best price.
+  return links.sort((a, b) => {
+    if (a.price == null && b.price == null) return 0;
+    if (a.price == null) return 1;
+    if (b.price == null) return -1;
+    return a.price - b.price;
+  });
+}
+
+function resolveDisplayPricing(product: ProductWithRelations): {
+  displayPrice: number;
+  originalPrice: number | null;
+  currency: string;
+} {
+  const best = pickLowestPricedOffer(product.affiliateLinks);
+  if (best?.lastKnownPrice != null) {
+    return {
+      displayPrice: Number(best.lastKnownPrice),
+      originalPrice: best.lastKnownOriginalPrice ? Number(best.lastKnownOriginalPrice) : null,
+      currency: best.lastKnownPriceCurrency ?? product.currency,
+    };
+  }
+
+  return {
+    displayPrice: product.displayPrice ? Number(product.displayPrice) : 0,
+    originalPrice: product.originalPrice ? Number(product.originalPrice) : null,
+    currency: product.currency,
+  };
 }
 
 function toCategorySummary(
@@ -72,6 +102,7 @@ function toCategorySummary(
 }
 
 function toProductSummary(product: ProductWithRelations, categoryProductCount: number): ProductSummary {
+  const pricing = resolveDisplayPricing(product);
   return {
     id: product.id,
     slug: product.slug,
@@ -80,9 +111,9 @@ function toProductSummary(product: ProductWithRelations, categoryProductCount: n
     category: toCategorySummary(product.category, categoryProductCount),
     status: product.status as ProductStatus,
     shortDescription: product.shortDescription ?? "",
-    currency: product.currency,
-    displayPrice: product.displayPrice ? Number(product.displayPrice) : 0,
-    originalPrice: product.originalPrice ? Number(product.originalPrice) : null,
+    currency: pricing.currency,
+    displayPrice: pricing.displayPrice,
+    originalPrice: pricing.originalPrice,
     rating: product.rating ? Number(product.rating) : 0,
     ratingCount: product.ratingCount,
     isFeatured: product.isFeatured,

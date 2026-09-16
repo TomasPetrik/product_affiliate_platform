@@ -130,8 +130,10 @@ export async function saveProductAction(
           if (!externalProductId.trim() && generated.asin) {
             externalProductId = generated.asin;
           }
-        } catch {
-          // Leave fields as submitted; validation below will surface URL issues.
+        } catch (error) {
+          return {
+            error: `Amazon: ${error instanceof Error ? error.message : "Could not build the affiliate URL."}`,
+          };
         }
       }
     }
@@ -250,8 +252,8 @@ export async function saveProductAction(
   let saved;
   try {
     saved = await saveProduct(productId, fields, links, images, session.sub);
-  } catch {
-    return { error: "Could not save the product. Check your inputs and try again." };
+  } catch (error) {
+    return { error: formatProductSaveError(error) };
   }
 
   await writeAuditLog({
@@ -270,7 +272,33 @@ export async function saveProductAction(
     revalidateProductPage(before.slug);
   }
 
-  redirect(withAdminNotice("/admin/products", productId ? "updated" : "created"));
+  // Stay on the edit page so affiliate-link changes are visible after save.
+  redirect(withAdminNotice(`/admin/products/${saved.id}/edit`, productId ? "updated" : "created"));
+}
+
+function formatProductSaveError(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) {
+    const message = error.message.trim();
+    if (
+      message.includes("already linked") ||
+      message.includes("Affiliate URL") ||
+      message.includes("listing")
+    ) {
+      return message;
+    }
+  }
+
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: string }).code === "P2002"
+  ) {
+    return "That retailer listing ID is already used by another product.";
+  }
+
+  console.error("saveProductAction failed", error);
+  return "Could not save the product. Check the Amazon/eBay fields and try again.";
 }
 
 export async function replaceHeroImageAction(

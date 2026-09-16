@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -28,6 +28,14 @@ export function OfferEditForm({ offer, amazonAssociatesTag = null }: OfferEditFo
   const [rawProductUrl, setRawProductUrl] = useState(offer.productUrl ?? "");
   const [trackingTag, setTrackingTag] = useState(offer.trackingTag ?? "");
   const [tagError, setTagError] = useState<string | null>(null);
+  const errorAlertRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!state.error && !tagError) {
+      return;
+    }
+    errorAlertRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [state.error, tagError]);
 
   function applyAmazonTracking() {
     setTagError(null);
@@ -57,15 +65,12 @@ export function OfferEditForm({ offer, amazonAssociatesTag = null }: OfferEditFo
   return (
     <form action={formAction} className="flex flex-col gap-6">
       <input type="hidden" name="offerId" value={offer.id} />
-      {state.error ? (
-        <Alert variant="destructive">
-          <AlertDescription>{state.error}</AlertDescription>
-        </Alert>
-      ) : null}
-      {tagError ? (
-        <Alert variant="destructive">
-          <AlertDescription>{tagError}</AlertDescription>
-        </Alert>
+      {state.error || tagError ? (
+        <div ref={errorAlertRef}>
+          <Alert variant="destructive">
+            <AlertDescription>{state.error || tagError}</AlertDescription>
+          </Alert>
+        </div>
       ) : null}
 
       <Card>

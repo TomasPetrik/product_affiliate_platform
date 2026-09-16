@@ -282,5 +282,5 @@ function stripEbayHtml(html: string): string {
     .replace(/&gt;/g, ">")
     .replace(/\n{3,}/g, "\n\n")
     .trim()
-    .slice(0, 5000);
+    .slice(0, 50_000);
 }

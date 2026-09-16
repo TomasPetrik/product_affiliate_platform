@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState, type ChangeEvent } from "react";
+import { useActionState, useEffect, useRef, useState, type ChangeEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -140,7 +140,15 @@ export function ProductForm({
     return drafts;
   });
   const [amazonTagError, setAmazonTagError] = useState<string | null>(null);
+  const errorAlertRef = useRef<HTMLDivElement | null>(null);
   const router = useRouter();
+
+  useEffect(() => {
+    if (!state.error) {
+      return;
+    }
+    errorAlertRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [state.error]);
 
   function updateAmazonDraft(marketplaceId: string, patch: Partial<AmazonLinkDraft>) {
     setAmazonDrafts((prev) => ({
@@ -196,9 +204,11 @@ export function ProductForm({
       <input type="hidden" name="categoryId" value={categoryId} />
 
       {state.error ? (
-        <Alert variant="destructive">
-          <AlertDescription>{state.error}</AlertDescription>
-        </Alert>
+        <div ref={errorAlertRef}>
+          <Alert variant="destructive">
+            <AlertDescription>{state.error}</AlertDescription>
+          </Alert>
+        </div>
       ) : null}
 
       <Card>

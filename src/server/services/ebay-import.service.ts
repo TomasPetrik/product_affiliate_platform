@@ -235,7 +235,7 @@ async function createProductFromListing(input: ImportEbayInput, listing: EbayLis
   const title = input.title.trim() || listing.title;
   const brand = input.brand.trim() || listing.brand || "Unknown";
   const shortDescription = clip(input.shortDescription.trim() || listing.shortDescription || title, 300);
-  const longDescription = clip(input.longDescription.trim() || listing.description || shortDescription, 5000);
+  const longDescription = clip(input.longDescription.trim() || listing.description || shortDescription, 50_000);
   const imageUrls = listingImageUrls(listing);
 
   return prisma.product.create({

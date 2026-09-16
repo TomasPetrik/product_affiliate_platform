@@ -87,7 +87,7 @@ export function EbayImportForm({
     setGtin(next.gtin);
     setMpn(next.mpn);
     setShortDescription(next.shortDescription.slice(0, 300));
-    setLongDescription(next.description.slice(0, 5000));
+    setLongDescription(next.description.slice(0, 50_000));
     if (lockedAttach) {
       setMode("attach");
       setSelectedProductId(attachProductId ?? "");

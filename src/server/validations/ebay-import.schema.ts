@@ -30,7 +30,7 @@ export const ebayImportSchema = z
     gtin: z.string().trim().max(20).optional().or(z.literal("")),
     mpn: z.string().trim().max(80).optional().or(z.literal("")),
     shortDescription: z.string().trim().min(1).max(300),
-    longDescription: z.string().trim().min(1).max(5000),
+    longDescription: z.string().trim().min(1).max(50_000, "Long description must be at most 50,000 characters"),
     status: z.enum(["DRAFT", "PUBLISHED", "ARCHIVED"]),
     isFeatured: z.boolean(),
   })

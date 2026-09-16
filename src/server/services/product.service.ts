@@ -299,23 +299,46 @@ export async function saveProduct(
 
         if (existingLink) {
           if (existingLink.productId !== product.id) {
-            continue;
+            throw new Error(
+              `${link.marketplaceCode} listing “${externalProductId}” is already linked to another product. Use a different ASIN/item ID, or remove it from the other product first.`,
+            );
           }
           await tx.affiliateLink.update({ where: { id: existingLink.id }, data });
         } else {
+          // Product form has one slot per marketplace. Prefer updating that offer
+          // (including ASIN changes) over creating a second Amazon/eBay row.
           const firstForMarketplace = await tx.affiliateLink.findFirst({
             where: { productId: product.id, marketplaceId: link.marketplaceId },
+            orderBy: { createdAt: "asc" },
           });
-          if (firstForMarketplace && !link.externalProductId.trim()) {
-            await tx.affiliateLink.update({ where: { id: firstForMarketplace.id }, data });
+          if (firstForMarketplace) {
+            try {
+              await tx.affiliateLink.update({ where: { id: firstForMarketplace.id }, data });
+            } catch (error) {
+              if (isUniqueConstraintError(error)) {
+                throw new Error(
+                  `${link.marketplaceCode} listing “${externalProductId}” is already linked to another product. Use a different ASIN/item ID, or remove it from the other product first.`,
+                );
+              }
+              throw error;
+            }
           } else {
-            await tx.affiliateLink.create({
-              data: {
-                productId: product.id,
-                marketplaceId: link.marketplaceId,
-                ...data,
-              },
-            });
+            try {
+              await tx.affiliateLink.create({
+                data: {
+                  productId: product.id,
+                  marketplaceId: link.marketplaceId,
+                  ...data,
+                },
+              });
+            } catch (error) {
+              if (isUniqueConstraintError(error)) {
+                throw new Error(
+                  `${link.marketplaceCode} listing “${externalProductId}” is already linked to another product. Use a different ASIN/item ID, or remove it from the other product first.`,
+                );
+              }
+              throw error;
+            }
           }
         }
       }
@@ -340,6 +363,15 @@ export async function saveProduct(
   // Keep denormalized displayPrice aligned with the cheapest active offer.
   await syncProductDisplayPrice(product.id);
   return prisma.product.findUniqueOrThrow({ where: { id: product.id } });
+}
+
+function isUniqueConstraintError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: string }).code === "P2002"
+  );
 }
 
 function normalizeImages(images: ProductImageInput[]): ProductImageInput[] {

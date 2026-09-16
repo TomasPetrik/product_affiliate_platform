@@ -7,33 +7,47 @@ const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 export const productStatusValues = ["DRAFT", "PUBLISHED", "ARCHIVED"] as const;
 
 export const productSchema = z.object({
-  title: z.string().trim().min(2, "Title must be at least 2 characters").max(200),
+  title: z.string().trim().min(2, "Title must be at least 2 characters").max(200, "Title must be at most 200 characters"),
   slug: z
     .string()
     .trim()
     .toLowerCase()
     .min(2, "Slug must be at least 2 characters")
-    .max(200)
+    .max(200, "Slug must be at most 200 characters")
     .regex(slugPattern, "Slug can only contain lowercase letters, numbers and hyphens"),
-  brand: z.string().trim().min(1, "Brand is required").max(100),
-  modelNumber: z.string().trim().max(100).optional().or(z.literal("")),
-  gtin: z.string().trim().max(20).optional().or(z.literal("")),
-  mpn: z.string().trim().max(80).optional().or(z.literal("")),
+  brand: z.string().trim().min(1, "Brand is required").max(100, "Brand must be at most 100 characters"),
+  modelNumber: z.string().trim().max(100, "Model must be at most 100 characters").optional().or(z.literal("")),
+  gtin: z.string().trim().max(20, "GTIN must be at most 20 characters").optional().or(z.literal("")),
+  mpn: z.string().trim().max(80, "MPN must be at most 80 characters").optional().or(z.literal("")),
   categoryId: z.string().trim().min(1, "Category is required"),
-  shortDescription: z.string().trim().min(1, "Short description is required").max(300),
-  longDescription: z.string().trim().min(1, "Long description is required").max(5000),
+  shortDescription: z
+    .string()
+    .trim()
+    .min(1, "Short description is required")
+    .max(300, "Short description must be at most 300 characters"),
+  // eBay/Amazon descriptions are often long HTML-ish copy; keep roomy so imported products stay editable.
+  longDescription: z
+    .string()
+    .trim()
+    .min(1, "Long description is required")
+    .max(50_000, "Long description must be at most 50,000 characters"),
   status: z.enum(productStatusValues),
   isFeatured: z.boolean(),
   isTrending: z.boolean(),
   currency: z.string().trim().length(3, "Use a 3-letter currency code, e.g. USD").toUpperCase(),
   displayPrice: z.coerce.number().min(0, "Display price is required").max(999999),
   originalPrice: z.coerce.number().min(0).max(999999).optional().nullable(),
-  seoTitle: z.string().trim().max(150).optional().or(z.literal("")),
-  seoDescription: z.string().trim().max(300).optional().or(z.literal("")),
+  seoTitle: z.string().trim().max(150, "SEO title must be at most 150 characters").optional().or(z.literal("")),
+  seoDescription: z
+    .string()
+    .trim()
+    .max(300, "SEO description must be at most 300 characters")
+    .optional()
+    .or(z.literal("")),
   ogImageUrl: z
     .string()
     .trim()
-    .max(2000)
+    .max(2000, "OG image URL must be at most 2000 characters")
     .optional()
     .or(z.literal(""))
     .refine((value) => !value || isApprovedImageUrl(value), "OG image must be an https URL or an uploaded image"),
@@ -51,10 +65,15 @@ const optionalMoney = z.preprocess((value) => {
 export const affiliateLinkSchema = z
   .object({
     marketplaceId: z.string().min(1),
-    affiliateUrl: z.string().trim().max(2000).optional().or(z.literal("")),
-    rawProductUrl: z.string().trim().max(2000).optional().or(z.literal("")),
-    externalProductId: z.string().trim().max(200).optional().or(z.literal("")),
-    trackingTag: z.string().trim().max(256).optional().or(z.literal("")),
+    affiliateUrl: z.string().trim().max(2000, "Affiliate URL must be at most 2000 characters").optional().or(z.literal("")),
+    rawProductUrl: z.string().trim().max(2000, "Raw product URL must be at most 2000 characters").optional().or(z.literal("")),
+    externalProductId: z
+      .string()
+      .trim()
+      .max(200, "External product ID must be at most 200 characters")
+      .optional()
+      .or(z.literal("")),
+    trackingTag: z.string().trim().max(256, "Tracking tag must be at most 256 characters").optional().or(z.literal("")),
     lastKnownPrice: optionalMoney,
     lastKnownOriginalPrice: optionalMoney,
     lastKnownPriceCurrency: z
@@ -97,6 +116,17 @@ export const affiliateLinkSchema = z
         code: "custom",
         path: ["affiliateUrl"],
         message: "Affiliate URL is required when adding a marketplace listing",
+      });
+    }
+
+    if (
+      (value.lastKnownPrice != null || value.lastKnownOriginalPrice != null) &&
+      !url.trim()
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["affiliateUrl"],
+        message: "Affiliate URL is required when setting an offer price",
       });
     }
 

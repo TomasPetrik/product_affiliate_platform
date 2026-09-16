@@ -38,6 +38,8 @@ export interface ProductFormLinkValues {
 
 export interface ProductFormValues {
   id?: string;
+  /** Integer used for short Instagram URLs (`/p/{publicId}`). */
+  publicId?: number;
   title: string;
   slug: string;
   brand: string;
@@ -242,6 +244,11 @@ export function ProductForm({
               }}
             />
             <p className="text-xs text-muted-foreground">Public URL: /products/{slug || "…"}</p>
+            {defaultValues.publicId != null ? (
+              <p className="text-xs text-muted-foreground">
+                Instagram short URL: /p/{defaultValues.publicId}
+              </p>
+            ) : null}
           </div>
 
           <div className="grid gap-5 sm:grid-cols-2">

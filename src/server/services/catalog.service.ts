@@ -214,6 +214,15 @@ export async function getProductBySlug(slug: string): Promise<ProductDetail | un
   return toProductDetail(product, await countPublishedInCategory(product.categoryId));
 }
 
+/** Canonical product path for a short `/p/{publicId}` hop, or null if missing/unpublished. */
+export async function resolvePublishedProductPathByPublicId(publicId: number): Promise<string | null> {
+  const product = await prisma.product.findFirst({
+    where: { publicId, status: "PUBLISHED" },
+    select: { slug: true },
+  });
+  return product ? `/products/${product.slug}` : null;
+}
+
 export async function getFeaturedProducts(limit = 4): Promise<ProductSummary[]> {
   const products = await prisma.product.findMany({
     where: { status: "PUBLISHED", isFeatured: true },

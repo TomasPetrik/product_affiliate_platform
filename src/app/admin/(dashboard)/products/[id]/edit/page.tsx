@@ -84,6 +84,7 @@ export default async function EditProductPage({ params, searchParams }: EditProd
         amazonAssociatesTag={env.AMAZON_ASSOCIATES_TAG ?? null}
         defaultValues={{
           id: product.id,
+          publicId: product.publicId,
           title: product.title,
           slug: product.slug,
           brand: product.brand ?? "",

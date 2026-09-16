@@ -80,6 +80,8 @@ enum ProductStatus {
 
 model Product {
   id                String        @id @default(cuid())
+  /// Stable integer for short public URLs (e.g. /p/42 for Instagram).
+  publicId          Int           @unique @default(autoincrement())
   slug              String        @unique
   title             String
   shortDescription  String

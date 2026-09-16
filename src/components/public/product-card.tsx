@@ -5,6 +5,7 @@ import { ProductBadge, badgeForProduct, discountBadgeLabel } from "@/components/
 import { ProductImagePlaceholder } from "@/components/public/product-image-placeholder";
 import { ProductRating } from "@/components/public/product-rating";
 import { formatCurrency } from "@/lib/format";
+import { productListImageUrl, productThumbImageUrl } from "@/lib/product-image-variants";
 import { cn } from "@/lib/utils";
 import type { ProductSummary } from "@/types/catalog";
 
@@ -18,17 +19,23 @@ function CardMedia({
   badge,
   discountLabel,
   aspectClassName = "aspect-square",
+  size = "card",
 }: {
   product: ProductSummary;
   badge: ReturnType<typeof badgeForProduct>;
   discountLabel: string | null;
   aspectClassName?: string;
+  size?: "card" | "thumb";
 }) {
+  const fullSrc = product.imageUrl;
+  const listSrc = size === "thumb" ? productThumbImageUrl(fullSrc) : productListImageUrl(fullSrc);
+
   return (
     <div className={cn("relative overflow-hidden bg-image-well", aspectClassName)}>
       <ProductImagePlaceholder
         seed={product.slug}
-        src={product.imageUrl}
+        src={listSrc}
+        fallbackSrc={fullSrc}
         alt={product.title}
         fit="contain"
         className="size-full rounded-none"

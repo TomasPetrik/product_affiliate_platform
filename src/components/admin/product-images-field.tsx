@@ -124,13 +124,14 @@ export function ProductImagesField({ defaultImages }: ProductImagesFieldProps) {
 
         <div className="flex flex-1 flex-col gap-1.5">
           <Label htmlFor="imageFiles" className="text-xs">
-            Or upload images (JPEG, PNG, WebP, GIF · 2MB max)
+            Or upload images (JPEG, PNG, WebP, GIF · 5MB max)
           </Label>
           <Input id="imageFiles" name="imageFiles" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple />
         </div>
       </div>
       <p className="text-xs text-muted-foreground">
-        Remote images must be https URLs. Uploads are stored on this server and used as approved product images.
+        Remote images must be https URLs. Uploads (up to 5MB) are stored on this server with thumbnail variants for
+        faster product lists.
       </p>
     </div>
   );

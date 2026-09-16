@@ -504,7 +504,7 @@ export function EbayImportForm({
                       setError(result.error ?? "Import failed.");
                       return;
                     }
-                    router.push(`/admin/products/${result.productId}/edit`);
+                    router.push(`/admin/products/${result.productId}/edit?notice=imported#replace-hero`);
                     router.refresh();
                   });
                 }}

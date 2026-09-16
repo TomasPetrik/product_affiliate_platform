@@ -43,7 +43,8 @@ next-env.d.ts
 
 /src/generated/prisma
 
-# Admin-uploaded product images (URLs in the DB still work after deploy
-# only if the files are present on that host).
+# Admin-uploaded product images (kept on each host; not overwritten by deploy).
 /public/uploads/products/*
 !/public/uploads/products/.gitkeep
+/storage/uploads/products/*
+!/storage/uploads/products/.gitkeep

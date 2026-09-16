@@ -1,4 +1,5 @@
-const LOCAL_UPLOAD_PREFIX = "/uploads/products/";
+import { LOCAL_PRODUCT_UPLOAD_PREFIX } from "@/lib/product-image-variants";
+
 const MAX_URL_LENGTH = 2000;
 
 /**
@@ -18,7 +19,7 @@ export function isApprovedImageUrl(value: string): boolean {
     return false;
   }
 
-  if (trimmed.startsWith(LOCAL_UPLOAD_PREFIX)) {
+  if (trimmed.startsWith(LOCAL_PRODUCT_UPLOAD_PREFIX)) {
     return !trimmed.includes("..") && !trimmed.includes("\\") && !trimmed.includes("?");
   }
 

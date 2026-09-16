@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 
 import { AdminFlash } from "@/components/admin/admin-flash";
 import { ProductForm, type ProductFormLinkValues } from "@/components/admin/product-form";
+import { ReplaceHeroImagePanel } from "@/components/admin/replace-hero-image-panel";
 import { RetailerOffersPanel } from "@/components/admin/retailer-offers-panel";
 import { adminNoticeMessage } from "@/lib/admin-notice";
 import {
@@ -50,16 +51,28 @@ export default async function EditProductPage({ params, searchParams }: EditProd
     }
   }
 
+  const noticeKey = typeof query.notice === "string" ? query.notice : undefined;
+  const currentHeroUrl =
+    product.images.find((image) => image.isPrimary)?.url ?? product.images[0]?.url ?? product.ogImageUrl ?? null;
+
   return (
     <div className="flex flex-col gap-6">
       <AdminFlash
-        notice={adminNoticeMessage(typeof query.notice === "string" ? query.notice : undefined)}
+        notice={adminNoticeMessage(noticeKey)}
         error={typeof query.error === "string" ? query.error : undefined}
       />
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Edit product</h1>
         <p className="mt-1 text-sm text-muted-foreground">{product.title}</p>
       </div>
+      <ReplaceHeroImagePanel
+        productId={product.id}
+        title={product.title}
+        brand={product.brand}
+        shortDescription={product.shortDescription}
+        currentHeroUrl={currentHeroUrl}
+        highlight={noticeKey === "imported"}
+      />
       <ProductForm
         categories={categories}
         marketplaces={marketplaces}

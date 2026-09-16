@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import type { ProductStatus } from "@/generated/prisma/enums";
+import { isApprovedImageUrl } from "@/lib/approved-image-url";
 import { safeAdminProductsReturnTo, withAdminNotice } from "@/lib/admin-notice";
 import { requireAdminSession } from "@/lib/auth";
 import { writeAuditLog } from "@/server/services/audit.service";
@@ -14,6 +15,7 @@ import {
   getProductByIdAdmin,
   isProductSlugTaken,
   listMarketplaces,
+  replaceProductHeroImage,
   saveProduct,
   setProductFlag,
   setProductStatus,
@@ -198,6 +200,66 @@ export async function saveProductAction(
   }
 
   redirect(withAdminNotice("/admin/products", productId ? "updated" : "created"));
+}
+
+export async function replaceHeroImageAction(
+  _prevState: ProductActionState,
+  formData: FormData,
+): Promise<ProductActionState> {
+  const session = await requireAdminSession();
+  const productId = formData.get("productId");
+
+  if (typeof productId !== "string" || !productId) {
+    return { error: "Missing product." };
+  }
+
+  const before = await getProductByIdAdmin(productId);
+  if (!before) {
+    return { error: "Product not found." };
+  }
+
+  const uploaded = listUploadedImageFiles(formData)[0];
+  const imageUrlRaw = String(formData.get("heroImageUrl") ?? "").trim();
+  const altText = String(formData.get("heroImageAlt") ?? "").trim() || before.title;
+
+  let url = "";
+  if (uploaded) {
+    const stored = await storeUploadedProductImage(uploaded);
+    if ("error" in stored) {
+      return { error: stored.error };
+    }
+    url = stored.url;
+  } else if (imageUrlRaw) {
+    if (!isApprovedImageUrl(imageUrlRaw)) {
+      return { error: "Hero image must be an https URL or an uploaded file." };
+    }
+    url = imageUrlRaw;
+  } else {
+    return { error: "Upload a file or paste an https image URL." };
+  }
+
+  let updated;
+  try {
+    updated = await replaceProductHeroImage(productId, { url, altText });
+  } catch {
+    return { error: "Could not update the hero image. Try again." };
+  }
+
+  await writeAuditLog({
+    actor: session,
+    action: "PRODUCT_HERO_IMAGE_REPLACED",
+    entityType: "Product",
+    entityId: productId,
+    before: { ogImageUrl: before.ogImageUrl, primaryImage: before.images.find((image) => image.isPrimary)?.url },
+    after: { ogImageUrl: updated.ogImageUrl, primaryImage: url },
+  });
+
+  revalidatePublicCatalog();
+  revalidateProductPage(updated.slug);
+  revalidateAdminProducts();
+  revalidatePath(`/admin/products/${productId}/edit`);
+
+  redirect(withAdminNotice(`/admin/products/${productId}/edit`, "hero-updated"));
 }
 
 export async function deleteProductAction(formData: FormData): Promise<void> {

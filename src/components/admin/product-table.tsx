@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/table";
 import { formatCurrency } from "@/lib/format";
 import { toggleSortHref, type ProductAdminQuery, type ProductSortField } from "@/lib/product-admin-query";
+import { productThumbImageUrl } from "@/lib/product-image-variants";
 import {
   bulkSetProductStatusAction,
   deleteProductAction,
@@ -117,7 +118,14 @@ export function ProductTable({ products, query, returnTo }: ProductTableProps) {
                 <TableCell>
                   {product.imageUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={product.imageUrl} alt="" className="size-10 rounded-md object-cover" />
+                    <img
+                      src={productThumbImageUrl(product.imageUrl) ?? product.imageUrl}
+                      alt=""
+                      className="size-10 rounded-md object-cover"
+                      onError={(event) => {
+                        event.currentTarget.src = product.imageUrl!;
+                      }}
+                    />
                   ) : (
                     <div className="size-10 rounded-md bg-muted" />
                   )}

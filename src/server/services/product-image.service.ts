@@ -2,37 +2,112 @@ import { randomBytes } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-const MAX_BYTES = 2 * 1024 * 1024;
+import sharp from "sharp";
+
+import {
+  LOCAL_PRODUCT_UPLOAD_PREFIX,
+  MAX_PRODUCT_IMAGE_BYTES,
+  type ProductImageVariant,
+  productImageVariantPath,
+} from "@/lib/product-image-variants";
+import { productUploadsDir } from "@/lib/product-upload-paths";
+
+export { MAX_PRODUCT_IMAGE_BYTES };
+
 const MAX_FILES = 8;
 
-const ALLOWED_TYPES: Record<string, string> = {
-  "image/jpeg": ".jpg",
-  "image/png": ".png",
-  "image/webp": ".webp",
-  "image/gif": ".gif",
+const ALLOWED_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+
+const VARIANT_WIDTHS: Record<Exclude<ProductImageVariant, "full">, number> = {
+  sm: 320,
+  md: 640,
 };
+
+const FULL_MAX_EDGE = 1600;
+
+export interface StoredProductImage {
+  url: string;
+  variants: {
+    sm: string;
+    md: string;
+  };
+}
 
 export async function storeUploadedProductImage(
   file: File,
-): Promise<{ url: string } | { error: string }> {
+): Promise<StoredProductImage | { error: string }> {
   if (file.size <= 0) {
     return { error: "Uploaded image is empty." };
   }
-  if (file.size > MAX_BYTES) {
-    return { error: `"${file.name}" is larger than 2MB.` };
+  if (file.size > MAX_PRODUCT_IMAGE_BYTES) {
+    return { error: `"${file.name}" is larger than 5MB.` };
   }
-
-  const ext = ALLOWED_TYPES[file.type];
-  if (!ext) {
+  if (!ALLOWED_TYPES.has(file.type)) {
     return { error: `"${file.name}" must be a JPEG, PNG, WebP, or GIF.` };
   }
 
-  const filename = `${Date.now()}-${randomBytes(8).toString("hex")}${ext}`;
-  const dir = path.join(process.cwd(), "public", "uploads", "products");
-  await mkdir(dir, { recursive: true });
-  await writeFile(path.join(dir, filename), Buffer.from(await file.arrayBuffer()));
+  const buffer = Buffer.from(await file.arrayBuffer());
+  try {
+    await sharp(buffer, { animated: false }).metadata();
+  } catch {
+    return { error: `"${file.name}" could not be read as an image.` };
+  }
 
-  return { url: `/uploads/products/${filename}` };
+  const id = `${Date.now()}-${randomBytes(8).toString("hex")}`;
+  const dir = productUploadsDir();
+  await mkdir(dir, { recursive: true });
+
+  const fullRelative = `${LOCAL_PRODUCT_UPLOAD_PREFIX}${id}.webp`;
+  const smRelative = productImageVariantPath(fullRelative, "sm") ?? `${LOCAL_PRODUCT_UPLOAD_PREFIX}${id}-sm.webp`;
+  const mdRelative = productImageVariantPath(fullRelative, "md") ?? `${LOCAL_PRODUCT_UPLOAD_PREFIX}${id}-md.webp`;
+
+  try {
+    const fullBuffer = await sharp(buffer, { animated: false })
+      .rotate()
+      .resize({
+        width: FULL_MAX_EDGE,
+        height: FULL_MAX_EDGE,
+        fit: "inside",
+        withoutEnlargement: true,
+      })
+      .webp({ quality: 85 })
+      .toBuffer();
+
+    const smBuffer = await sharp(buffer, { animated: false })
+      .rotate()
+      .resize({
+        width: VARIANT_WIDTHS.sm,
+        height: VARIANT_WIDTHS.sm,
+        fit: "inside",
+        withoutEnlargement: true,
+      })
+      .webp({ quality: 78 })
+      .toBuffer();
+
+    const mdBuffer = await sharp(buffer, { animated: false })
+      .rotate()
+      .resize({
+        width: VARIANT_WIDTHS.md,
+        height: VARIANT_WIDTHS.md,
+        fit: "inside",
+        withoutEnlargement: true,
+      })
+      .webp({ quality: 80 })
+      .toBuffer();
+
+    await Promise.all([
+      writeFile(path.join(dir, path.basename(fullRelative)), fullBuffer),
+      writeFile(path.join(dir, path.basename(smRelative)), smBuffer),
+      writeFile(path.join(dir, path.basename(mdRelative)), mdBuffer),
+    ]);
+  } catch {
+    return { error: `Could not process "${file.name}". Try another image.` };
+  }
+
+  return {
+    url: fullRelative,
+    variants: { sm: smRelative, md: mdRelative },
+  };
 }
 
 export function listUploadedImageFiles(formData: FormData): File[] {

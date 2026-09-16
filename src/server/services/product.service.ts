@@ -338,6 +338,51 @@ function normalizeImages(images: ProductImageInput[]): ProductImageInput[] {
   }));
 }
 
+/** Sets a new primary / OG image and keeps existing gallery photos demoted. */
+export async function replaceProductHeroImage(
+  productId: string,
+  image: { url: string; altText: string },
+) {
+  const url = image.url.trim();
+  const altText = image.altText.trim();
+
+  return prisma.$transaction(async (tx) => {
+    const product = await tx.product.findUnique({
+      where: { id: productId },
+      select: { id: true, slug: true, title: true },
+    });
+    if (!product) {
+      throw new Error("Product not found.");
+    }
+
+    await tx.productImage.updateMany({
+      where: { productId },
+      data: { isPrimary: false },
+    });
+
+    await tx.productImage.updateMany({
+      where: { productId },
+      data: { position: { increment: 1 } },
+    });
+
+    await tx.productImage.create({
+      data: {
+        productId,
+        url,
+        altText: altText || null,
+        position: 0,
+        isPrimary: true,
+      },
+    });
+
+    return tx.product.update({
+      where: { id: productId },
+      data: { ogImageUrl: url },
+      select: { id: true, slug: true, title: true, ogImageUrl: true },
+    });
+  });
+}
+
 export async function deleteProduct(id: string) {
   return prisma.product.delete({ where: { id } });
 }

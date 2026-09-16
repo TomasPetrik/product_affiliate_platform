@@ -6,6 +6,8 @@ const NOTICE_MESSAGES = {
   unpublished: "Product moved back to draft.",
   "bulk-published": "Selected products published.",
   "bulk-unpublished": "Selected products unpublished.",
+  imported: "Product imported. Replace the hero image if the eBay photo looks unprofessional.",
+  "hero-updated": "Hero image updated.",
 } as const;
 
 export type AdminNoticeKey = keyof typeof NOTICE_MESSAGES;

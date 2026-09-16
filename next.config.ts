@@ -18,6 +18,10 @@ const nextConfig: NextConfig = {
     // worker keeps total connections bounded; with a small catalog this
     // has no meaningful effect on build time.
     cpus: 1,
+    serverActions: {
+      // Hero uploads allow up to 5MB images plus multipart overhead.
+      bodySizeLimit: "6mb",
+    },
   },
   async headers() {
     // Baseline security headers. A full Content-Security-Policy is

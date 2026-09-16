@@ -29,7 +29,7 @@ export function ProductImageGallery({ title, images, fallbackUrl, badge }: Produ
           src={activeUrl}
           alt={activeAlt}
           fit="contain"
-          className="aspect-square w-full rounded-none p-8 sm:p-12"
+          className="aspect-square size-full rounded-none"
         />
         {badge ? <div className="absolute left-4 top-4">{badge}</div> : null}
       </div>

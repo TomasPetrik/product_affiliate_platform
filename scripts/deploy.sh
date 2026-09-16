@@ -84,6 +84,8 @@ RSYNC_EXCLUDES=(
   --exclude '*.tsbuildinfo'
   --include 'public/uploads/products/.gitkeep'
   --exclude 'public/uploads/products/*'
+  --include 'storage/uploads/products/.gitkeep'
+  --exclude 'storage/uploads/products/*'
 )
 
 log() {
@@ -107,7 +109,12 @@ rsync -az --delete -e "$RSYNC_SSH" "${RSYNC_EXCLUDES[@]}" "$ROOT/" "$DEPLOY_HOST
 log "Fix ownership and keep server .env private"
 "${SSH[@]}" "set -euo pipefail
   test -f '$DEPLOY_APP_DIR/.env'
+  mkdir -p '$DEPLOY_APP_DIR/storage/uploads/products'
   mkdir -p '$DEPLOY_APP_DIR/public/uploads/products'
+  # One-time move of legacy public uploads into durable storage (runtime-safe).
+  if compgen -G '$DEPLOY_APP_DIR/public/uploads/products/*' > /dev/null; then
+    find '$DEPLOY_APP_DIR/public/uploads/products' -maxdepth 1 -type f ! -name '.gitkeep' -exec mv -n {} '$DEPLOY_APP_DIR/storage/uploads/products/' \;
+  fi
   chown -R '$DEPLOY_APP_USER:$DEPLOY_APP_USER' '$DEPLOY_APP_DIR'
   chmod 600 '$DEPLOY_APP_DIR/.env'
 "

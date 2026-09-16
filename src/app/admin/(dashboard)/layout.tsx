@@ -27,9 +27,9 @@ export default async function AdminDashboardLayout({ children }: { children: Rea
         <AdminSidebar />
       </aside>
 
-      <div className="flex min-h-screen flex-1 flex-col">
+      <div className="flex min-h-screen min-w-0 flex-1 flex-col">
         <AdminTopbar user={session} />
-        <main className="flex-1 p-4 lg:p-6">{children}</main>
+        <main className="min-w-0 flex-1 overflow-x-auto p-4 lg:p-6">{children}</main>
       </div>
     </div>
   );

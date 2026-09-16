@@ -6,6 +6,7 @@ const NOTICE_MESSAGES = {
   unpublished: "Product moved back to draft.",
   "bulk-published": "Selected products published.",
   "bulk-unpublished": "Selected products unpublished.",
+  "bulk-deleted": "Selected products deleted.",
   imported: "Product imported. Replace the hero image if the eBay photo looks unprofessional.",
   "hero-updated": "Hero image updated.",
 } as const;
@@ -18,12 +19,16 @@ export function adminNoticeMessage(key: string | undefined, count?: string): str
   }
 
   const message = NOTICE_MESSAGES[key as AdminNoticeKey];
-  if (count && (key === "bulk-published" || key === "bulk-unpublished")) {
+  if (count && (key === "bulk-published" || key === "bulk-unpublished" || key === "bulk-deleted")) {
     const n = Number(count);
     if (Number.isFinite(n) && n > 0) {
-      return key === "bulk-published"
-        ? `${n} ${n === 1 ? "product" : "products"} published.`
-        : `${n} ${n === 1 ? "product" : "products"} unpublished.`;
+      if (key === "bulk-published") {
+        return `${n} ${n === 1 ? "product" : "products"} published.`;
+      }
+      if (key === "bulk-unpublished") {
+        return `${n} ${n === 1 ? "product" : "products"} unpublished.`;
+      }
+      return `${n} ${n === 1 ? "product" : "products"} deleted.`;
     }
   }
 

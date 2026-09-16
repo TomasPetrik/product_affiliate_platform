@@ -30,7 +30,9 @@ import {
 import { formatCurrency } from "@/lib/format";
 import { toggleSortHref, type ProductAdminQuery, type ProductSortField } from "@/lib/product-admin-query";
 import { productThumbImageUrl } from "@/lib/product-image-variants";
+import { cn } from "@/lib/utils";
 import {
+  bulkDeleteProductsAction,
   bulkSetProductStatusAction,
   deleteProductAction,
   setProductStatusAction,
@@ -43,6 +45,9 @@ const statusVariant = {
   PUBLISHED: "secondary",
   ARCHIVED: "outline",
 } as const;
+
+const stickyActionsClass =
+  "sticky right-0 z-20 bg-background pl-3 shadow-[-8px_0_12px_-8px_rgba(0,0,0,0.18)]";
 
 interface ProductTableProps {
   products: ProductAdminRow[];
@@ -65,11 +70,11 @@ export function ProductTable({ products, query, returnTo }: ProductTableProps) {
   }
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex min-w-0 flex-col gap-3">
       <BulkToolbar selectedIds={selected} returnTo={returnTo} />
 
-      <div className="overflow-x-auto rounded-xl border">
-        <Table>
+      <div className="min-w-0 rounded-xl border">
+        <Table className="min-w-[1100px]">
           <TableHeader>
             <TableRow>
               <TableHead className="w-10">
@@ -100,7 +105,7 @@ export function ProductTable({ products, query, returnTo }: ProductTableProps) {
               <SortableHead field="updatedAt" query={query}>
                 Updated
               </SortableHead>
-              <TableHead className="w-28" />
+              <TableHead className={cn("w-[7.5rem] text-right", stickyActionsClass)}>Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -130,8 +135,11 @@ export function ProductTable({ products, query, returnTo }: ProductTableProps) {
                     <div className="size-10 rounded-md bg-muted" />
                   )}
                 </TableCell>
-                <TableCell className="font-medium">
-                  <Link href={`/admin/products/${product.id}`} className="underline-offset-2 hover:underline">
+                <TableCell className="max-w-[16rem] font-medium">
+                  <Link
+                    href={`/admin/products/${product.id}`}
+                    className="line-clamp-2 whitespace-normal underline-offset-2 hover:underline"
+                  >
                     {product.title}
                   </Link>
                 </TableCell>
@@ -205,8 +213,8 @@ export function ProductTable({ products, query, returnTo }: ProductTableProps) {
                     year: "numeric",
                   })}
                 </TableCell>
-                <TableCell>
-                  <div className="flex justify-end gap-1">
+                <TableCell className={stickyActionsClass}>
+                  <div className="flex justify-end gap-0.5">
                     <Button
                       variant="ghost"
                       size="icon"
@@ -230,6 +238,7 @@ export function ProductTable({ products, query, returnTo }: ProductTableProps) {
                       hiddenFieldName="productId"
                       hiddenFieldValue={product.id}
                       entityLabel={product.title}
+                      description="This permanently deletes the product, its images, and retailer offers. This cannot be undone."
                       extraFields={{ returnTo }}
                     />
                   </div>
@@ -277,6 +286,7 @@ function SortableHead({
 function BulkToolbar({ selectedIds, returnTo }: { selectedIds: string[]; returnTo: string }) {
   const publishFormId = useId();
   const unpublishFormId = useId();
+  const deleteFormId = useId();
   const disabled = selectedIds.length === 0;
 
   return (
@@ -299,6 +309,12 @@ function BulkToolbar({ selectedIds, returnTo }: { selectedIds: string[]; returnT
           <input key={id} type="hidden" name="productIds" value={id} />
         ))}
         <input type="hidden" name="status" value="DRAFT" />
+        <input type="hidden" name="returnTo" value={returnTo} />
+      </form>
+      <form id={deleteFormId} action={bulkDeleteProductsAction} className="hidden">
+        {selectedIds.map((id) => (
+          <input key={id} type="hidden" name="productIds" value={id} />
+        ))}
         <input type="hidden" name="returnTo" value={returnTo} />
       </form>
 
@@ -347,7 +363,30 @@ function BulkToolbar({ selectedIds, returnTo }: { selectedIds: string[]; returnT
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <AlertDialog>
+        <AlertDialogTrigger
+          disabled={disabled}
+          render={<Button type="button" size="sm" variant="destructive" disabled={disabled} />}
+        >
+          Delete selected
+        </AlertDialogTrigger>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {selectedIds.length} products?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently removes the selected products, their images, and retailer offers. This cannot be
+              undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction type="submit" form={deleteFormId} variant="destructive">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
-

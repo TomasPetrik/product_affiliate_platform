@@ -21,6 +21,7 @@ interface DeleteEntityButtonProps {
   hiddenFieldName: string;
   hiddenFieldValue: string;
   entityLabel: string;
+  description?: string;
   extraFields?: Record<string, string>;
 }
 
@@ -35,6 +36,7 @@ export function DeleteEntityButton({
   hiddenFieldName,
   hiddenFieldValue,
   entityLabel,
+  description = "This action cannot be undone.",
   extraFields,
 }: DeleteEntityButtonProps) {
   const formId = useId();
@@ -51,7 +53,9 @@ export function DeleteEntityButton({
       </form>
 
       <AlertDialogTrigger
-        render={<Button type="button" variant="ghost" size="icon" aria-label={`Delete ${entityLabel}`} />}
+        render={
+          <Button type="button" variant="ghost" size="icon" aria-label={`Delete ${entityLabel}`} className="text-destructive hover:text-destructive" />
+        }
       >
         <Trash2 className="h-4 w-4" />
       </AlertDialogTrigger>
@@ -59,7 +63,7 @@ export function DeleteEntityButton({
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Delete {entityLabel}?</AlertDialogTitle>
-          <AlertDialogDescription>This action cannot be undone.</AlertDialogDescription>
+          <AlertDialogDescription>{description}</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>

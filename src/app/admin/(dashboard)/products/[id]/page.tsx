@@ -6,10 +6,12 @@ import { Eye, MousePointerClick, Pencil, Percent } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { DeleteEntityButton } from "@/components/admin/delete-entity-button";
 import { StatCard } from "@/components/admin/stat-card";
 import { formatCurrency } from "@/lib/format";
 import { resolveDateRange } from "@/lib/date-range";
 import { getProductAnalyticsSummary } from "@/server/services/analytics.service";
+import { deleteProductAction } from "@/server/actions/product.actions";
 import { getProductByIdAdmin } from "@/server/services/product.service";
 
 export const metadata: Metadata = {
@@ -48,6 +50,14 @@ export default async function AdminProductDetailPage({ params }: ProductDetailPa
             <Pencil className="h-4 w-4" />
             Edit
           </Button>
+          <DeleteEntityButton
+            action={deleteProductAction}
+            hiddenFieldName="productId"
+            hiddenFieldValue={product.id}
+            entityLabel={product.title}
+            description="This permanently deletes the product, its images, and retailer offers. This cannot be undone."
+            extraFields={{ returnTo: "/admin/products" }}
+          />
         </div>
       </div>
 

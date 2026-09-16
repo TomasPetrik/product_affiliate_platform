@@ -10,6 +10,7 @@ import { requireAdminSession } from "@/lib/auth";
 import { writeAuditLog } from "@/server/services/audit.service";
 import { listUploadedImageFiles, storeUploadedProductImage } from "@/server/services/product-image.service";
 import {
+  bulkDeleteProducts,
   bulkSetProductStatus,
   deleteProduct as deleteProductService,
   getProductByIdAdmin,
@@ -288,6 +289,37 @@ export async function deleteProductAction(formData: FormData): Promise<void> {
     revalidateProductPage(before.slug);
   }
   redirect(withAdminNotice(returnTo, "deleted"));
+}
+
+export async function bulkDeleteProductsAction(formData: FormData): Promise<void> {
+  const session = await requireAdminSession();
+  const ids = formData
+    .getAll("productIds")
+    .filter((value): value is string => typeof value === "string" && value.length > 0)
+    .slice(0, BULK_LIMIT);
+  const returnTo = safeAdminProductsReturnTo(formData.get("returnTo"));
+
+  if (ids.length === 0) {
+    redirect(returnTo);
+  }
+
+  const deleted = await bulkDeleteProducts(ids);
+
+  await writeAuditLog({
+    actor: session,
+    action: "PRODUCTS_BULK_DELETED",
+    entityType: "Product",
+    entityId: ids[0],
+    after: { ids, count: deleted.count },
+  });
+
+  revalidatePublicCatalog();
+  revalidateAdminProducts();
+  for (const slug of deleted.slugs) {
+    revalidateProductPage(slug);
+  }
+
+  redirect(withAdminNotice(returnTo, "bulk-deleted", { count: String(deleted.count) }));
 }
 
 export async function setProductStatusAction(formData: FormData): Promise<void> {

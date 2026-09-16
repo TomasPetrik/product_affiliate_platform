@@ -387,6 +387,30 @@ export async function deleteProduct(id: string) {
   return prisma.product.delete({ where: { id } });
 }
 
+export async function bulkDeleteProducts(ids: string[]) {
+  if (ids.length === 0) {
+    return { count: 0, slugs: [] as string[] };
+  }
+
+  const products = await prisma.product.findMany({
+    where: { id: { in: ids } },
+    select: { id: true, slug: true },
+  });
+
+  if (products.length === 0) {
+    return { count: 0, slugs: [] as string[] };
+  }
+
+  await prisma.product.deleteMany({
+    where: { id: { in: products.map((product) => product.id) } },
+  });
+
+  return {
+    count: products.length,
+    slugs: products.map((product) => product.slug),
+  };
+}
+
 export async function setProductStatus(id: string, status: ProductStatus) {
   const existing = await prisma.product.findUnique({ where: { id }, select: { publishedAt: true } });
 

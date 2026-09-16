@@ -16,9 +16,10 @@ const categorySeeds = [
   { slug: "fishing", name: "Fishing", description: "Rods, reels, tackle and kit for time on the water.", sortOrder: 3, imageUrl: "/categories/fishing.jpg" },
   { slug: "auto-moto", name: "Auto & Moto", description: "Car and motorcycle gear, detailing and road-trip essentials.", sortOrder: 4, imageUrl: "/categories/auto-moto.jpg" },
   { slug: "pet-supplies", name: "Pet Supplies", description: "Well-reviewed picks for dogs, cats and other companions.", sortOrder: 5, imageUrl: "/categories/pet-supplies.jpg" },
-  { slug: "beauty", name: "Beauty & Self-care", description: "Skincare, hair tools and quietly excellent self-care picks.", sortOrder: 6, imageUrl: "/categories/beauty.jpg" },
-  { slug: "travel", name: "Travel & Everyday Carry", description: "Packing kits, power banks and EDC for getting there.", sortOrder: 7, imageUrl: "/categories/travel.jpg" },
-  { slug: "office-productivity", name: "Office & Productivity", description: "Desk setups, organizers and tools for getting things done.", sortOrder: 8, imageUrl: "/categories/office-productivity.jpg" },
+  { slug: "kids", name: "Kids", description: "Toys, gear and everyday essentials for babies and children.", sortOrder: 6, imageUrl: "/categories/kids.jpg" },
+  { slug: "beauty", name: "Beauty & Self-care", description: "Skincare, hair tools and quietly excellent self-care picks.", sortOrder: 7, imageUrl: "/categories/beauty.jpg" },
+  { slug: "travel", name: "Travel & Everyday Carry", description: "Packing kits, power banks and EDC for getting there.", sortOrder: 8, imageUrl: "/categories/travel.jpg" },
+  { slug: "office-productivity", name: "Office & Productivity", description: "Desk setups, organizers and tools for getting things done.", sortOrder: 9, imageUrl: "/categories/office-productivity.jpg" },
 ];
 
 async function main() {

@@ -13,7 +13,13 @@ export const ebayFetchSchema = z.object({
 
 export const ebayImportSchema = z
   .object({
-    itemId: z.string().regex(/^\d{6,19}$/, "Invalid eBay item ID"),
+    itemId: z
+      .string()
+      .trim()
+      .refine(
+        (value) => /^\d{6,19}$/.test(value) || /^v1\|[^|]+\|[^|]+$/.test(value),
+        "Invalid eBay item ID",
+      ),
     mode: z.enum(["create", "attach"]),
     attachProductId: z.string().trim().max(64).optional().or(z.literal("")),
     categoryId: z.string().trim().optional().or(z.literal("")),

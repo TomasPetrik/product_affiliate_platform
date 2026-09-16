@@ -26,6 +26,7 @@ const BY_SLUG: Record<string, LucideIcon> = {
   "auto-moto": Car,
   "office-productivity": Briefcase,
   "pet-supplies": PawPrint,
+  kids: Baby,
   beauty: Sparkles,
   travel: Luggage,
 };

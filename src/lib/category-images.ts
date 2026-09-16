@@ -5,6 +5,7 @@ const BY_SLUG: Record<string, string> = {
   fishing: "/categories/fishing.jpg",
   "auto-moto": "/categories/auto-moto.jpg",
   "pet-supplies": "/categories/pet-supplies.jpg",
+  kids: "/categories/kids.jpg",
   beauty: "/categories/beauty.jpg",
   travel: "/categories/travel.jpg",
   "office-productivity": "/categories/office-productivity.jpg",

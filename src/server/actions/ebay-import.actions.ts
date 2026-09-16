@@ -44,6 +44,8 @@ export interface EbayPreviewView {
   affiliateUrl: string;
   affiliateReferenceId: string;
   availability: string | null;
+  fromItemGroup: boolean;
+  itemGroupId: string | null;
   suggestedSlug: string;
   existingOffer: { productId: string; productTitle: string; productSlug: string; offerId: string } | null;
   identifierMatches: Array<{ id: string; title: string; slug: string; brand: string; reason: string }>;
@@ -97,6 +99,8 @@ export async function fetchEbayListingAction(
         affiliateUrl: preview.listing.affiliateUrl,
         affiliateReferenceId: preview.listing.affiliateReferenceId,
         availability: preview.listing.availability,
+        fromItemGroup: preview.listing.fromItemGroup,
+        itemGroupId: preview.listing.itemGroupId,
         suggestedSlug: preview.suggestedSlug,
         existingOffer: preview.existingOffer,
         identifierMatches: preview.identifierMatches,

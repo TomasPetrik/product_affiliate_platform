@@ -146,4 +146,93 @@ describe("EbayService", () => {
       /sandbox/i,
     );
   });
+
+  it("falls back to item group and picks the first available variation", async () => {
+    const calls: string[] = [];
+    const service = createEbayService({
+      clientId: "id",
+      clientSecret: "secret",
+      marketplaceId: "EBAY_US",
+      environment: "production",
+      affiliateCampaignId: "5338123456",
+      fetchImpl: async (input) => {
+        const url = String(input);
+        calls.push(url);
+        if (url.includes("/oauth2/token")) {
+          return jsonResponse({ access_token: "token-1", expires_in: 7200 });
+        }
+        if (url.includes("get_item_by_legacy_id")) {
+          return jsonResponse(
+            {
+              errors: [
+                {
+                  message:
+                    "The legacy Id is invalid. Use https://api.ebay.com/buy/browse/v1/item/get_items_by_item_group?item_group_id=382590617929 to get the item group details.",
+                },
+              ],
+            },
+            400,
+          );
+        }
+        if (url.includes("get_items_by_item_group")) {
+          return jsonResponse({
+            items: [
+              {
+                itemId: "v1|382590617929|1001",
+                legacyItemId: "382590617929",
+                title: "Hiking Boots — Size 9",
+                price: { value: "89.00", currency: "USD" },
+                image: { imageUrl: "https://i.ebayimg.com/out.jpg" },
+                itemWebUrl: "https://www.ebay.com/itm/382590617929?var=1001",
+                estimatedAvailabilities: [{ estimatedAvailabilityStatus: "OUT_OF_STOCK" }],
+              },
+              {
+                itemId: "v1|382590617929|1002",
+                legacyItemId: "382590617929",
+                title: "Hiking Boots — Size 10",
+                shortDescription: "Waterproof hiking boots",
+                description: "Durable boots",
+                price: { value: "89.00", currency: "USD" },
+                image: { imageUrl: "https://i.ebayimg.com/in.jpg" },
+                itemWebUrl: "https://www.ebay.com/itm/382590617929?var=1002",
+                itemAffiliateWebUrl:
+                  "https://www.ebay.com/itm/382590617929?var=1002&campid=5338123456&customid=radarcut",
+                condition: "New",
+                brand: "TrailCo",
+                seller: { username: "TrailSeller" },
+                estimatedAvailabilities: [{ estimatedAvailabilityStatus: "IN_STOCK" }],
+              },
+            ],
+          });
+        }
+        if (url.includes("/buy/browse/v1/item/")) {
+          return jsonResponse({
+            itemId: "v1|382590617929|1002",
+            legacyItemId: "382590617929",
+            title: "Hiking Boots — Size 10",
+            shortDescription: "Waterproof hiking boots",
+            description: "Durable boots",
+            price: { value: "89.00", currency: "USD" },
+            image: { imageUrl: "https://i.ebayimg.com/in.jpg" },
+            itemWebUrl: "https://www.ebay.com/itm/382590617929?var=1002",
+            itemAffiliateWebUrl:
+              "https://www.ebay.com/itm/382590617929?var=1002&campid=5338123456&customid=radarcut",
+            condition: "New",
+            brand: "TrailCo",
+            seller: { username: "TrailSeller" },
+            estimatedAvailabilities: [{ estimatedAvailabilityStatus: "IN_STOCK" }],
+          });
+        }
+        return jsonResponse({ errors: [{ message: "unexpected" }] }, 500);
+      },
+    });
+
+    const listing = await service.getListingByLegacyId("382590617929");
+    assert.equal(listing.fromItemGroup, true);
+    assert.equal(listing.itemGroupId, "382590617929");
+    assert.equal(listing.itemId, "v1|382590617929|1002");
+    assert.equal(listing.title, "Hiking Boots — Size 10");
+    assert.ok(calls.some((url) => url.includes("get_items_by_item_group")));
+    assert.ok(calls.some((url) => url.includes(encodeURIComponent("v1|382590617929|1002"))));
+  });
 });

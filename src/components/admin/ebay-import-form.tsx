@@ -248,6 +248,16 @@ export function EbayImportForm({
             <CardTitle className="text-base">Import preview</CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-6">
+            {preview.fromItemGroup ? (
+              <Alert>
+                <AlertDescription>
+                  This eBay URL is a multi-variation listing (item group
+                  {preview.itemGroupId ? ` ${preview.itemGroupId}` : ""}). We selected the first available
+                  variation to import.
+                </AlertDescription>
+              </Alert>
+            ) : null}
+
             {matchHint ? <p className="text-sm text-muted-foreground">{matchHint}</p> : null}
 
             <div className="grid gap-6 lg:grid-cols-[180px_1fr]">

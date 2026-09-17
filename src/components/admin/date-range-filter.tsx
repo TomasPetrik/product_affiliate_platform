@@ -10,6 +10,7 @@ import { DATE_RANGE_PRESETS, type DateRangePreset, type ResolvedDateRange } from
 
 const PRESET_LABELS: Record<Exclude<DateRangePreset, "custom">, string> = {
   today: "Today",
+  yesterday: "Yesterday",
   "7d": "Last 7 days",
   "30d": "Last 30 days",
   "90d": "Last 90 days",
@@ -18,13 +19,29 @@ const PRESET_LABELS: Record<Exclude<DateRangePreset, "custom">, string> = {
 interface DateRangeFilterProps {
   basePath: string;
   range: ResolvedDateRange;
+  extraParams?: {
+    country?: string | null;
+    source?: string | null;
+    medium?: string | null;
+    campaign?: string | null;
+    [key: string]: string | null | undefined;
+  };
 }
 
-export function DateRangeFilter({ basePath, range }: DateRangeFilterProps) {
+export function DateRangeFilter({ basePath, range, extraParams = {} }: DateRangeFilterProps) {
   const router = useRouter();
 
+  function extras(): string {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(extraParams)) {
+      if (value) params.set(key, value);
+    }
+    const query = params.toString();
+    return query ? `&${query}` : "";
+  }
+
   function pushPreset(preset: Exclude<DateRangePreset, "custom">) {
-    router.push(`${basePath}?range=${preset}`);
+    router.push(`${basePath}?range=${preset}${extras()}`);
   }
 
   return (
@@ -49,6 +66,9 @@ export function DateRangeFilter({ basePath, range }: DateRangeFilterProps) {
         method="get"
       >
         <input type="hidden" name="range" value="custom" />
+        {Object.entries(extraParams).map(([key, value]) =>
+          value ? <input key={key} type="hidden" name={key} value={value} /> : null,
+        )}
         <div className="grid gap-1.5">
           <Label htmlFor="from" className="text-xs">
             From

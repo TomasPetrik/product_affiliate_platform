@@ -9,7 +9,7 @@ import {
   type ConsentRegion,
   type ConsentState,
 } from "@/lib/consent";
-import { countryFromHeaders } from "@/server/services/tracking.service";
+import { resolveVisitorGeo } from "@/lib/geo";
 
 export interface RequestConsent {
   region: ConsentRegion;
@@ -21,7 +21,7 @@ export interface RequestConsent {
 export async function readRequestConsent(): Promise<RequestConsent> {
   const cookieStore = await cookies();
   const headerStore = await headers();
-  const region = consentRegionFromCountry(countryFromHeaders(headerStore));
+  const region = consentRegionFromCountry(resolveVisitorGeo(headerStore).country);
   const gpc = headerHasGpc(headerStore.get("sec-gpc"));
   const consent = parseConsentCookie(cookieStore.get(CONSENT_COOKIE_NAME)?.value);
 

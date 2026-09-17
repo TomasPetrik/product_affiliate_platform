@@ -105,24 +105,74 @@ export function resolvePublishedAffiliateTarget(
   )();
 }
 
-export async function resolveAffiliateGoPathFromLinkId(linkId: string): Promise<string | null> {
-  if (!linkId || linkId.length > 64) return null;
+export function resolveAffiliateGoPathFromLinkId(linkId: string): Promise<string | null> {
+  if (!linkId || linkId.length > 64) return Promise.resolve(null);
 
-  const link = await prisma.affiliateLink.findUnique({
-    where: { id: linkId },
-    select: {
-      id: true,
-      isActive: true,
-      marketplace: { select: { code: true, isActive: true } },
-      product: { select: { slug: true, status: true } },
+  return unstable_cache(
+    async () => {
+      const link = await prisma.affiliateLink.findUnique({
+        where: { id: linkId },
+        select: {
+          id: true,
+          isActive: true,
+          marketplace: { select: { code: true, isActive: true } },
+          product: { select: { slug: true, status: true } },
+        },
+      });
+
+      if (!link || !link.isActive || !link.marketplace.isActive || link.product.status !== "PUBLISHED") {
+        return null;
+      }
+
+      return affiliateGoHref(link.product.slug, link.marketplace.code, link.id);
     },
-  });
+    ["affiliate-redirect-link", linkId],
+    {
+      revalidate: AFFILIATE_REDIRECT_CACHE_SECONDS,
+      tags: [AFFILIATE_REDIRECT_CACHE_TAG, `${AFFILIATE_REDIRECT_CACHE_TAG}:link:${linkId}`],
+    },
+  )();
+}
 
-  if (!link || !link.isActive || !link.marketplace.isActive || link.product.status !== "PUBLISHED") {
-    return null;
-  }
+export function resolvePublishedAffiliateTargetByOfferId(offerId: string) {
+  const linkId = parseLinkIdParam(offerId);
+  if (!linkId) return Promise.resolve(null);
 
-  return affiliateGoHref(link.product.slug, link.marketplace.code, link.id);
+  return unstable_cache(
+    async (): Promise<ResolvedAffiliateTarget | null> => {
+      const link = await prisma.affiliateLink.findUnique({
+        where: { id: linkId },
+        select: {
+          id: true,
+          affiliateUrl: true,
+          isActive: true,
+          productId: true,
+          marketplace: { select: { code: true, isActive: true } },
+          product: { select: { slug: true, status: true } },
+        },
+      });
+
+      if (!link || !link.isActive || !link.marketplace.isActive || link.product.status !== "PUBLISHED") {
+        return null;
+      }
+
+      const destinationUrl = sanitizeAffiliateDestination(link.affiliateUrl);
+      if (!destinationUrl) return null;
+
+      return {
+        linkId: link.id,
+        productId: link.productId,
+        productSlug: link.product.slug,
+        marketplaceCode: link.marketplace.code,
+        destinationUrl,
+      };
+    },
+    ["affiliate-redirect-offer", linkId],
+    {
+      revalidate: AFFILIATE_REDIRECT_CACHE_SECONDS,
+      tags: [AFFILIATE_REDIRECT_CACHE_TAG, `${AFFILIATE_REDIRECT_CACHE_TAG}:link:${linkId}`],
+    },
+  )();
 }
 
 export function marketplaceFromRequest(searchParams: URLSearchParams): string | null {

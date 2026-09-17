@@ -1,9 +1,11 @@
 import { AffiliateCtaButton } from "@/components/public/affiliate-cta-button";
+import { OfferVisibilityTracker } from "@/components/public/offer-visibility-tracker";
 import { formatCurrency } from "@/lib/format";
 import type { MarketplaceLink } from "@/types/catalog";
 
 interface RetailerOffersProps {
   offers: MarketplaceLink[];
+  productId: string;
 }
 
 /**
@@ -11,7 +13,7 @@ interface RetailerOffersProps {
  * for the product — eBay today, Amazon/Walmart later — without hardcoding
  * retailer-specific UI.
  */
-export function RetailerOffers({ offers }: RetailerOffersProps) {
+export function RetailerOffers({ offers, productId }: RetailerOffersProps) {
   if (offers.length === 0) {
     return <p className="text-sm text-muted-foreground">No retailer offers yet.</p>;
   }
@@ -21,6 +23,7 @@ export function RetailerOffers({ offers }: RetailerOffersProps) {
       {offers.map((offer, index) => (
         <li
           key={offer.id}
+          id={`offer-${offer.id}`}
           className="flex flex-col gap-3 rounded-[14px] border border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
         >
           <div>
@@ -36,6 +39,7 @@ export function RetailerOffers({ offers }: RetailerOffersProps) {
             variant={index === 0 ? "default" : "outline"}
             label="Check Price"
           />
+          <OfferVisibilityTracker offerId={offer.id} productId={productId} />
         </li>
       ))}
     </ul>

@@ -31,6 +31,12 @@ export function parseLinkIdParam(raw: string | null | undefined): string | null 
   return value;
 }
 
+/** Public hop that records an offer click without exposing a raw retailer URL. */
+export function affiliateOfferGoHref(offerId: string): string {
+  const id = parseLinkIdParam(offerId);
+  return id ? `/go/offer/${id}` : "/";
+}
+
 export function affiliateGoHref(productSlug: string, marketplaceCode?: string, linkId?: string): string {
   const path = `/go/${productSlug}`;
   const params = new URLSearchParams();

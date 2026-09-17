@@ -1,9 +1,11 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { ArrowRight } from "lucide-react";
 
 import { ProductBadge, badgeForProduct, discountBadgeLabel } from "@/components/public/product-badge";
 import { ProductImagePlaceholder } from "@/components/public/product-image-placeholder";
 import { ProductRating } from "@/components/public/product-rating";
+import { SearchResultLink } from "@/components/public/search-tracking";
 import { formatCurrency } from "@/lib/format";
 import { productListImageUrl, productThumbImageUrl } from "@/lib/product-image-variants";
 import { cn } from "@/lib/utils";
@@ -12,6 +14,7 @@ import type { ProductSummary } from "@/types/catalog";
 interface ProductCardProps {
   product: ProductSummary;
   className?: string;
+  searchQuery?: string;
 }
 
 function CardMedia({
@@ -98,9 +101,21 @@ function PriceBlock({
  * category pages. Links to the product detail page — affiliate CTAs live
  * on the PDP so outbound intent stays explicit.
  */
-export function ProductCard({ product, className }: ProductCardProps) {
+export function ProductCard({ product, className, searchQuery }: ProductCardProps) {
   const badge = badgeForProduct(product);
   const discountLabel = discountBadgeLabel(product.displayPrice, product.originalPrice);
+  const href = `/products/${product.slug}`;
+  const LinkComponent = searchQuery
+    ? ({ children }: { children: ReactNode }) => (
+        <SearchResultLink href={href} productId={product.id} searchQuery={searchQuery} className="flex h-full flex-col">
+          {children}
+        </SearchResultLink>
+      )
+    : ({ children }: { children: ReactNode }) => (
+        <Link href={href} className="flex h-full flex-col">
+          {children}
+        </Link>
+      );
 
   return (
     <article
@@ -109,7 +124,7 @@ export function ProductCard({ product, className }: ProductCardProps) {
         className,
       )}
     >
-      <Link href={`/products/${product.slug}`} className="flex h-full flex-col">
+      <LinkComponent>
         <CardMedia product={product} badge={badge} discountLabel={discountLabel} />
 
         <div className="flex flex-1 flex-col px-3.5 pb-3.5 pt-4 sm:px-4 sm:pb-4">
@@ -134,7 +149,7 @@ export function ProductCard({ product, className }: ProductCardProps) {
             <ViewProductCta />
           </div>
         </div>
-      </Link>
+      </LinkComponent>
     </article>
   );
 }

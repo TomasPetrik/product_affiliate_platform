@@ -6,11 +6,12 @@ import type { SeriesPoint } from "@/server/services/analytics.service";
 
 interface TimeSeriesChartProps {
   data: SeriesPoint[];
-  dataKey: "views" | "clicks";
+  dataKey: "views" | "clicks" | "visitors" | "sessions";
   color?: string;
+  label?: string;
 }
 
-export function TimeSeriesChart({ data, dataKey, color = "var(--chart-2)" }: TimeSeriesChartProps) {
+export function TimeSeriesChart({ data, dataKey, color = "var(--chart-2)", label }: TimeSeriesChartProps) {
   return (
     <div className="h-56 w-full">
       <ResponsiveContainer width="100%" height="100%">
@@ -24,7 +25,7 @@ export function TimeSeriesChart({ data, dataKey, color = "var(--chart-2)" }: Tim
           <YAxis allowDecimals={false} width={32} tick={{ fontSize: 11 }} />
           <Tooltip
             labelFormatter={(value) => String(value)}
-            formatter={(value) => [Number(value), dataKey === "views" ? "Views" : "Clicks"]}
+            formatter={(value) => [Number(value), label ?? dataKey]}
           />
           <Line type="monotone" dataKey={dataKey} stroke={color} strokeWidth={2} dot={false} />
         </LineChart>

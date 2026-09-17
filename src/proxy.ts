@@ -28,7 +28,7 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  // Everything under /admin except the login page itself (handled above,
-  // since the matcher can't easily express "all of /admin except one path").
+  // Static string required by Next.js compile-time parsing. Keep in sync with
+  // ADMIN_PROXY_MATCHER in src/lib/admin-routes.ts.
   matcher: ["/admin/:path*"],
 };

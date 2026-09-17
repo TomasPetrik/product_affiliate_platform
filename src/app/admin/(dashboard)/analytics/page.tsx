@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 
 import { AnalyticsOverview } from "@/components/admin/analytics-overview";
+import { parseAnalyticsFilters } from "@/lib/analytics-query";
 import { resolveDateRange, type DateRangeSearchParams } from "@/lib/date-range";
 import { getDashboardAnalytics } from "@/server/services/analytics.service";
 
@@ -13,16 +14,18 @@ interface AdminAnalyticsPageProps {
 }
 
 export default async function AdminAnalyticsPage({ searchParams }: AdminAnalyticsPageProps) {
-  const range = resolveDateRange(await searchParams);
-  const analytics = await getDashboardAnalytics(range);
+  const params = await searchParams;
+  const range = resolveDateRange(params);
+  const filters = parseAnalyticsFilters(params);
+  const analytics = await getDashboardAnalytics(range, filters);
 
   return (
     <div className="flex flex-col gap-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Analytics</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          First-party page views, product views, searches, clicks, CTR, sources, and campaigns
-          from the live event tables.
+          First-party product, retailer, search, country, and campaign analytics. Complements GA4;
+          it does not replace it.
         </p>
       </div>
       <AnalyticsOverview data={analytics} basePath="/admin/analytics" />

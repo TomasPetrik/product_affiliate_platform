@@ -4,10 +4,11 @@ import type { ProductSummary } from "@/types/catalog";
 interface ProductGridProps {
   products: ProductSummary[];
   emptyMessage?: string;
+  searchQuery?: string;
 }
 
 /** Responsive grid of product cards: 2 cols on mobile, up to 4 on desktop. */
-export function ProductGrid({ products, emptyMessage = "No products found." }: ProductGridProps) {
+export function ProductGrid({ products, emptyMessage = "No products found.", searchQuery }: ProductGridProps) {
   if (products.length === 0) {
     return (
       <div className="rounded-[16px] border border-dashed border-border px-6 py-16 text-center">
@@ -19,7 +20,7 @@ export function ProductGrid({ products, emptyMessage = "No products found." }: P
   return (
     <div className="grid min-w-0 grid-cols-2 items-stretch gap-4 sm:gap-6 lg:grid-cols-3 xl:grid-cols-4">
       {products.map((product) => (
-        <ProductCard key={product.id} product={product} />
+        <ProductCard key={product.id} product={product} searchQuery={searchQuery} />
       ))}
     </div>
   );

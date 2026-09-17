@@ -2,11 +2,11 @@ import { cookies, headers } from "next/headers";
 import { NextResponse, userAgent } from "next/server";
 
 import { env } from "@/lib/env";
+import { visitorContextFromHeaders } from "@/lib/geo";
+import { shouldOmitAnalytics } from "@/server/analytics-omit";
 import { readRequestConsent } from "@/server/consent";
 import {
   applyAnalyticsCookies,
-  clientIpFromHeaders,
-  countryFromHeaders,
   newVisitorId,
   normalizeDeviceType,
   parseOutboundUrl,
@@ -32,6 +32,10 @@ export async function GET(request: Request) {
   const cookieStore = await cookies();
   const headerStore = await headers();
   const { allowAnalytics } = await readRequestConsent();
+  const geo = visitorContextFromHeaders(headerStore);
+  if (await shouldOmitAnalytics(geo)) {
+    return NextResponse.redirect(destination);
+  }
 
   const recorded = await recordOutboundClick(destination.toString(), {
     visitorId: cookieStore.get(VISITOR_COOKIE)?.value || newVisitorId(),
@@ -39,8 +43,10 @@ export async function GET(request: Request) {
     path: headerStore.get("referer") ?? undefined,
     referrer: headerStore.get("referer"),
     userAgent: headerStore.get("user-agent"),
-    ip: clientIpFromHeaders(headerStore),
-    country: countryFromHeaders(headerStore),
+    ip: geo.ip,
+    country: geo.country,
+    region: geo.region,
+    city: geo.city,
     deviceType: normalizeDeviceType(ua.device.type),
   });
 

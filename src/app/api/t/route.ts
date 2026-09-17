@@ -1,13 +1,18 @@
 import { cookies, headers } from "next/headers";
 import { NextResponse, userAgent } from "next/server";
-import { z } from "zod";
 
+import {
+  analyticsEventPayloadSchema,
+  isBlockedAnalyticsPath,
+} from "@/lib/analytics";
+import { analyticsRateLimitKey, consumeAnalyticsRateLimit } from "@/lib/analytics-rate-limit";
+import { parseBrowserName, parseOperatingSystem } from "@/lib/analytics-device";
+import { visitorContextFromHeaders } from "@/lib/geo";
+import { shouldOmitAnalytics } from "@/server/analytics-omit";
 import { readRequestConsent } from "@/server/consent";
 import {
-  ANALYTICS_EVENT_NAMES,
   applyAnalyticsCookies,
-  clientIpFromHeaders,
-  countryFromHeaders,
+  languageFromHeaders,
   newVisitorId,
   normalizeDeviceType,
   recordBeaconEvents,
@@ -15,32 +20,15 @@ import {
   VISITOR_COOKIE,
 } from "@/server/services/tracking.service";
 
-const payloadSchema = z.object({
-  path: z.string().max(500).optional(),
-  search: z.string().max(200).optional().nullable(),
-  referrer: z.string().max(1000).optional().nullable(),
-  productId: z.string().max(64).optional().nullable(),
-  categoryId: z.string().max(64).optional().nullable(),
-  destinationUrl: z.string().max(2000).optional().nullable(),
-  affiliateLinkId: z.string().max(64).optional().nullable(),
-  events: z.array(z.enum(ANALYTICS_EVENT_NAMES)).max(6).optional(),
-  source: z.string().max(200).optional().nullable(),
-  medium: z.string().max(200).optional().nullable(),
-  campaign: z.string().max(200).optional().nullable(),
-  term: z.string().max(200).optional().nullable(),
-  content: z.string().max(200).optional().nullable(),
-});
-
 export async function POST(request: Request) {
   const json = await request.json().catch(() => null);
-  const parsed = payloadSchema.safeParse(json);
+  const parsed = analyticsEventPayloadSchema.safeParse(json);
 
   if (!parsed.success) {
     return NextResponse.json({ ok: false }, { status: 400 });
   }
 
-  const path = parsed.data.path ?? "";
-  if (path.startsWith("/admin") || path.startsWith("/api") || path.startsWith("/out") || path.startsWith("/go")) {
+  if (isBlockedAnalyticsPath(parsed.data.path)) {
     return NextResponse.json({ ok: true });
   }
 
@@ -57,20 +45,35 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true });
   }
 
+  const visitorId = cookieStore.get(VISITOR_COOKIE)?.value || newVisitorId();
+  const geo = visitorContextFromHeaders(headerStore);
+  if (await shouldOmitAnalytics(geo)) {
+    return NextResponse.json({ ok: true });
+  }
+  if (!consumeAnalyticsRateLimit(analyticsRateLimitKey(visitorId, geo.ip))) {
+    return NextResponse.json({ ok: true }, { status: 429 });
+  }
+
   const session = await recordBeaconEvents(parsed.data, {
-    visitorId: cookieStore.get(VISITOR_COOKIE)?.value || newVisitorId(),
+    visitorId,
     sessionId: cookieStore.get(SESSION_COOKIE)?.value ?? null,
     path: parsed.data.path,
     referrer: parsed.data.referrer ?? headerStore.get("referer"),
     userAgent: headerStore.get("user-agent"),
-    ip: clientIpFromHeaders(headerStore),
-    country: countryFromHeaders(headerStore),
+    ip: geo.ip,
+    country: geo.country,
+    region: geo.region,
+    city: geo.city,
     deviceType: normalizeDeviceType(ua.device.type),
+    browser: parseBrowserName(ua.browser.name),
+    operatingSystem: parseOperatingSystem(ua.os.name),
+    language: languageFromHeaders(headerStore),
     source: parsed.data.source,
     medium: parsed.data.medium,
     campaign: parsed.data.campaign,
     term: parsed.data.term,
     content: parsed.data.content,
+    metadata: parsed.data.metadata,
   });
 
   const response = NextResponse.json({ ok: true });

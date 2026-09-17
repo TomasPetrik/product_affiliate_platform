@@ -134,7 +134,7 @@ export function ProductPageView({ product, related, trackViews = true }: Product
             <div className="mt-8 border-t border-border pt-6">
               <h2 className="text-sm font-semibold">Where to buy</h2>
               <div className="mt-3">
-                <RetailerOffers offers={product.marketplaces} />
+                <RetailerOffers offers={product.marketplaces} productId={product.id} />
               </div>
               <AffiliateDisclosure className="mt-3 text-xs leading-relaxed text-muted-foreground" />
             </div>

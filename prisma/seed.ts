@@ -378,15 +378,17 @@ async function seedAnalyticsIfEmpty() {
   if (products.length === 0) return;
 
   const sources = [
+    { source: "instagram", medium: "social", campaign: "airpods-september" },
     { source: "google", medium: "organic", campaign: null },
     { source: "google", medium: "cpc", campaign: "spring-picks" },
+    { source: "facebook", medium: "social", campaign: "headphones-reel-01" },
     { source: "newsletter", medium: "email", campaign: "weekly-digest" },
-    { source: "twitter", medium: "social", campaign: "launch" },
     { source: null, medium: null, campaign: null },
   ] as const;
   const devices = ["DESKTOP", "MOBILE", "TABLET"] as const;
   const countries = ["US", "GB", "DE", "SK", null] as const;
-  const queries = ["french press", "headphones", "desk lamp", "yoga mat"];
+  const cities = ["New York", "London", "Berlin", "Bratislava", null] as const;
+  const queries = ["french press", "headphones", "desk lamp", "yoga mat", "robot lawn mower", "portable ice maker"];
 
   const now = Date.now();
   const dayMs = 86_400_000;
@@ -398,6 +400,7 @@ async function seedAnalyticsIfEmpty() {
     const product = products[index % products.length];
     const deviceType = devices[index % devices.length];
     const country = countries[index % countries.length];
+    const city = cities[index % cities.length];
 
     const session = await prisma.trafficSession.create({
       data: {
@@ -407,6 +410,7 @@ async function seedAnalyticsIfEmpty() {
         userAgent: "RadarCutSeed/1.0",
         deviceType,
         country,
+        city,
         startedAt: createdAt,
         lastSeenAt: createdAt,
         createdAt,
@@ -461,6 +465,7 @@ async function seedAnalyticsIfEmpty() {
       utm,
       deviceType,
       country,
+      city,
       createdAt,
       searchQuery: index % 4 === 0 ? queries[index % queries.length] : null,
       includeCategory: index % 2 === 0,
@@ -502,6 +507,7 @@ async function backfillAnalyticsEventsFromLegacy() {
         utmTerm: utm?.term,
         deviceType: session.deviceType,
         country: session.country,
+        city: session.city,
         dedupeKey: `backfill:page_view:${session.id}`,
         createdAt: session.startedAt,
       },
@@ -523,6 +529,7 @@ async function backfillAnalyticsEventsFromLegacy() {
           utmCampaign: utm?.campaign,
           deviceType: session.deviceType,
           country: session.country,
+          city: session.city,
           dedupeKey: `backfill:product_view:${view.id}`,
           createdAt: view.createdAt,
         },
@@ -546,6 +553,7 @@ async function backfillAnalyticsEventsFromLegacy() {
           utmCampaign: utm?.campaign,
           deviceType: session.deviceType,
           country: session.country,
+          city: session.city,
           dedupeKey: `backfill:affiliate_click:${click.id}`,
           createdAt: click.createdAt,
         },
@@ -564,6 +572,7 @@ async function seedSessionEvents({
   utm,
   deviceType,
   country,
+  city,
   createdAt,
   searchQuery,
   includeCategory,
@@ -576,6 +585,7 @@ async function seedSessionEvents({
   utm: { source: string | null; medium: string | null; campaign: string | null };
   deviceType: "DESKTOP" | "MOBILE" | "TABLET";
   country: string | null;
+  city: string | null;
   createdAt: Date;
   searchQuery: string | null;
   includeCategory: boolean;
@@ -595,6 +605,7 @@ async function seedSessionEvents({
     utmCampaign: utm.campaign,
     deviceType,
     country,
+    city,
   };
 
   await prisma.analyticsEvent.create({
@@ -628,25 +639,71 @@ async function seedSessionEvents({
   }
 
   if (searchQuery) {
+    const zero = searchQuery === "robot lawn mower" || searchQuery === "portable ice maker";
     await prisma.analyticsEvent.create({
       data: {
         type: "SEARCH",
         ...attribution,
         path: "/products",
         searchQuery,
+        resultCount: zero ? 0 : 3,
+        sourceNormalized: utm.source === "instagram" ? "Instagram" : utm.source === "google" ? "Google" : utm.source === "facebook" ? "Facebook" : utm.source ? "Other" : "Direct",
+        firstUtmSource: utm.source,
+        firstUtmCampaign: utm.campaign,
         dedupeKey: `seed:search:${sessionId}:${searchQuery}`,
         createdAt: new Date(createdAt.getTime() + 12_000),
       },
     });
+
+    if (zero) {
+      await prisma.analyticsEvent.create({
+        data: {
+          type: "NO_SEARCH_RESULTS",
+          ...attribution,
+          path: "/products",
+          searchQuery,
+          resultCount: 0,
+          sourceNormalized: utm.source === "instagram" ? "Instagram" : "Direct",
+          dedupeKey: `seed:no_search:${sessionId}:${searchQuery}`,
+          createdAt: new Date(createdAt.getTime() + 12_500),
+        },
+      });
+    } else {
+      await prisma.analyticsEvent.create({
+        data: {
+          type: "SEARCH_RESULT_CLICK",
+          ...attribution,
+          path: `/products/${product.slug}`,
+          searchQuery,
+          sourceNormalized: utm.source === "instagram" ? "Instagram" : "Direct",
+          dedupeKey: `seed:search_click:${sessionId}:${searchQuery}`,
+          createdAt: new Date(createdAt.getTime() + 13_000),
+        },
+      });
+    }
   }
 
   if (link) {
+    await prisma.analyticsEvent.create({
+      data: {
+        type: "RETAILER_OFFER_VIEW",
+        ...attribution,
+        affiliateLinkId: link.id,
+        sourceNormalized: utm.source === "instagram" ? "Instagram" : "Direct",
+        dedupeKey: `seed:offer_view:${sessionId}:${link.id}`,
+        createdAt: new Date(createdAt.getTime() + 20_000),
+      },
+    });
+
     await prisma.analyticsEvent.create({
       data: {
         type: "AFFILIATE_CLICK",
         ...attribution,
         affiliateLinkId: link.id,
         destinationUrl: link.affiliateUrl,
+        sourceNormalized: utm.source === "instagram" ? "Instagram" : utm.source === "google" ? "Google" : utm.source === "facebook" ? "Facebook" : utm.source ? "Other" : "Direct",
+        firstUtmSource: utm.source,
+        firstUtmCampaign: utm.campaign,
         dedupeKey: `seed:affiliate_click:${sessionId}:${link.id}`,
         createdAt: new Date(createdAt.getTime() + 90_000),
       },

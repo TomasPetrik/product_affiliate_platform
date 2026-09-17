@@ -1,4 +1,4 @@
-export const DATE_RANGE_PRESETS = ["today", "7d", "30d", "90d", "custom"] as const;
+export const DATE_RANGE_PRESETS = ["today", "yesterday", "7d", "30d", "90d", "custom"] as const;
 
 export type DateRangePreset = (typeof DATE_RANGE_PRESETS)[number];
 
@@ -14,6 +14,10 @@ export interface DateRangeSearchParams {
   range?: string;
   from?: string;
   to?: string;
+  country?: string;
+  source?: string;
+  medium?: string;
+  campaign?: string;
 }
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -79,23 +83,28 @@ export function resolveDateRange(params: DateRangeSearchParams): ResolvedDateRan
   const start =
     preset === "today"
       ? todayStart
-      : preset === "7d"
-        ? new Date(todayStart.getTime() - 6 * MS_PER_DAY)
-        : preset === "90d"
-          ? new Date(todayStart.getTime() - 89 * MS_PER_DAY)
-          : new Date(todayStart.getTime() - 29 * MS_PER_DAY);
+      : preset === "yesterday"
+        ? new Date(todayStart.getTime() - MS_PER_DAY)
+        : preset === "7d"
+          ? new Date(todayStart.getTime() - 6 * MS_PER_DAY)
+          : preset === "90d"
+            ? new Date(todayStart.getTime() - 89 * MS_PER_DAY)
+            : new Date(todayStart.getTime() - 29 * MS_PER_DAY);
+
+  const end = preset === "yesterday" ? endOfUtcDay(start) : now;
 
   return {
     preset,
     start,
-    end: now,
+    end,
     fromParam: formatIsoDate(start),
-    toParam: formatIsoDate(todayStart),
+    toParam: formatIsoDate(preset === "yesterday" ? start : todayStart),
   };
 }
 
 export function dateRangeLabel(range: ResolvedDateRange): string {
   if (range.preset === "today") return "Today";
+  if (range.preset === "yesterday") return "Yesterday";
   if (range.preset === "7d") return "Last 7 days";
   if (range.preset === "30d") return "Last 30 days";
   if (range.preset === "90d") return "Last 90 days";

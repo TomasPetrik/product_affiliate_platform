@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 
-import { collectCampaignParams, track } from "@/lib/analytics";
+import { collectCampaignParams, collectInstagramMetadata, track } from "@/lib/analytics";
 import {
   allowsAnalytics,
   clientHasGpc,
@@ -52,10 +52,11 @@ export function TrafficBeacon({
 
     track({
       path: pathname,
-      search: searchParams.get("q"),
       referrer: document.referrer || null,
       productId,
       categoryId,
+      events: ["page_view", "product_view", "category_view"],
+      metadata: collectInstagramMetadata(searchParams),
       ...collectCampaignParams(searchParams),
     });
   }, [pathname, productId, categoryId, searchParams, consent, region, gpc]);

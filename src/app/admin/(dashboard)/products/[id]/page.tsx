@@ -46,6 +46,9 @@ export default async function AdminProductDetailPage({ params }: ProductDetailPa
             <Eye className="h-4 w-4" />
             Preview
           </Button>
+          <Button variant="outline" nativeButton={false} render={<Link href={`/admin/products/${product.id}/analytics`} />}>
+            Analytics
+          </Button>
           <Button nativeButton={false} render={<Link href={`/admin/products/${product.id}/edit`} />}>
             <Pencil className="h-4 w-4" />
             Edit
@@ -61,8 +64,9 @@ export default async function AdminProductDetailPage({ params }: ProductDetailPa
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
         <StatCard label="Views (30d)" value={String(stats.views)} icon={Eye} />
+        <StatCard label="Unique visitors (30d)" value={String(stats.uniqueVisitors)} icon={Eye} />
         <StatCard label="Clicks (30d)" value={String(stats.clicks)} icon={MousePointerClick} />
         <StatCard
           label="CTR (30d)"

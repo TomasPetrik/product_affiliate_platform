@@ -8,6 +8,8 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: __dirname,
   },
+  // Keep the IP city database on disk; do not pack it into the app bundle.
+  serverExternalPackages: ["geoip-lite"],
   experimental: {
     // Static generation spawns several worker processes, each opening its
     // own Postgres connection pool (see `src/lib/prisma.ts`). Against a

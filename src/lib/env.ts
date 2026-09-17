@@ -85,6 +85,24 @@ const envSchema = z.object({
    * site boots without it; the admin “Generate tracking ID” CTA explains when missing.
    */
   AMAZON_ASSOCIATES_TAG: z.string().min(1).optional(),
+
+  /**
+   * Days to keep raw analytics_events / product_views. Aggregated daily metrics
+   * are kept after purge. Default 400 days.
+   */
+  ANALYTICS_RETENTION_DAYS: z.coerce.number().int().min(30).max(3650).optional().default(400),
+
+  /**
+   * Comma-separated public IPs whose visits are not recorded (site operators).
+   * Raw IPs are never written to analytics tables; this list is only matched
+   * at ingest time.
+   */
+  ANALYTICS_EXCLUDE_IPS: z.string().optional(),
+  /**
+   * Comma-separated ISO country codes to omit from analytics, e.g. `SK`.
+   * Leave empty to keep real visitors from those countries.
+   */
+  ANALYTICS_EXCLUDE_COUNTRIES: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;
@@ -118,6 +136,9 @@ function loadEnv(): Env {
     EBAY_NOTIFICATION_ENDPOINT: blankToUndefined(process.env.EBAY_NOTIFICATION_ENDPOINT),
     CRON_SECRET: blankToUndefined(process.env.CRON_SECRET),
     AMAZON_ASSOCIATES_TAG: blankToUndefined(process.env.AMAZON_ASSOCIATES_TAG),
+    ANALYTICS_RETENTION_DAYS: blankToUndefined(process.env.ANALYTICS_RETENTION_DAYS),
+    ANALYTICS_EXCLUDE_IPS: blankToUndefined(process.env.ANALYTICS_EXCLUDE_IPS),
+    ANALYTICS_EXCLUDE_COUNTRIES: blankToUndefined(process.env.ANALYTICS_EXCLUDE_COUNTRIES),
   });
 
   if (!parsed.success) {

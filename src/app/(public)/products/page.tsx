@@ -6,6 +6,7 @@ import { Container } from "@/components/public/container";
 import { PageHeader } from "@/components/public/page-header";
 import { ProductGrid } from "@/components/public/product-grid";
 import { listingCopy, PRODUCT_COLLECTIONS, type ProductListingFilters } from "@/lib/collections";
+import { SearchTracking } from "@/components/public/search-tracking";
 import {
   getAllCategories,
   getAllProducts,
@@ -105,7 +106,12 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
       <CollectionFilters filters={filters} />
 
       <div className="mt-10">
-        <ProductGrid products={products} emptyMessage="No products match your filters yet." />
+        {query ? <SearchTracking query={query} resultCount={products.length} /> : null}
+        <ProductGrid
+          products={products}
+          emptyMessage="No products match your filters yet."
+          searchQuery={query || undefined}
+        />
       </div>
     </Container>
   );

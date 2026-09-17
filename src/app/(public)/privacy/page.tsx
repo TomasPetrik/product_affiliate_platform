@@ -150,7 +150,11 @@ export default function PrivacyPage() {
           <ul className="list-disc space-y-1 pl-5">
             <li>Pages you view, product and category pages, and search terms you enter on the Site</li>
             <li>Clicks on affiliate and other outbound links, including the destination URL</li>
-            <li>Approximate country (from our hosting or CDN headers, when available)</li>
+            <li>
+              Approximate country, region, and city derived from your IP address using a local
+              lookup (or from hosting/CDN headers when those are present). We do not use the
+              browser geolocation API.
+            </li>
             <li>Device type (desktop, mobile, or tablet), browser user agent, and referring URL</li>
             <li>Campaign or referral details if they are present in the link you used to arrive</li>
             <li>
@@ -437,7 +441,9 @@ export default function PrivacyPage() {
             First-party analytics cookies are set for up to one year. We keep related analytics
             events, session records, and affiliate-click logs for as long as needed to operate the
             Site, understand traffic, reconcile affiliate reporting, debug issues, and meet legal
-            or program-audit needs, after which we delete or aggregate them. Emails you send us are
+            or program-audit needs, after which we delete or aggregate them. Raw event rows are
+            typically retained for about 400 days (configurable) and then removed; daily aggregated
+            statistics are kept so historical trends are not lost. Emails you send us are
             kept long enough to handle your request. Staff account records are kept while the
             account is active.
           </p>

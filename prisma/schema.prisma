@@ -272,8 +272,25 @@ enum AnalyticsEventType {
   PRODUCT_VIEW
   CATEGORY_VIEW
   SEARCH
+  SEARCH_RESULT_CLICK
+  NO_SEARCH_RESULTS
+  RETAILER_OFFER_VIEW
   AFFILIATE_CLICK
   OUTBOUND_CLICK
+  SHARE
+  /// Reserved for imported retailer conversion reports. Never synthesized.
+  AFFILIATE_CONVERSION
+}
+
+enum AnalyticsDimension {
+  OVERALL
+  COUNTRY
+  SOURCE
+  CAMPAIGN
+  PRODUCT
+  RETAILER
+  DEVICE
+  SEARCH
 }
 
 model TrafficSession {
@@ -285,6 +302,20 @@ model TrafficSession {
   ipHash      String?
   deviceType  DeviceType?
   country     String?     @db.Char(2)
+  region      String?     @db.VarChar(64)
+  city        String?     @db.VarChar(64)
+  /// First-touch campaign. Never overwritten after the session starts.
+  firstSource   String?
+  firstMedium   String?
+  firstCampaign String?
+  firstContent  String?
+  firstTerm     String?
+  /// Last-touch campaign. Updated when new UTM params arrive.
+  lastSource    String?
+  lastMedium    String?
+  lastCampaign  String?
+  lastContent   String?
+  lastTerm      String?
   startedAt   DateTime    @default(now())
   lastSeenAt  DateTime    @default(now())
   createdAt   DateTime    @default(now())
@@ -297,6 +328,7 @@ model TrafficSession {
   @@index([anonymousId])
   @@index([startedAt])
   @@index([createdAt])
+  @@index([country])
   @@map("traffic_sessions")
 }
 
@@ -374,16 +406,36 @@ model AnalyticsEvent {
   landingPath    String?
   referrer       String?
   searchQuery    String?
+  resultCount    Int?
   destinationUrl String?
 
+  /// Last-touch UTM on this event.
   utmSource   String?
   utmMedium   String?
   utmCampaign String?
   utmContent  String?
   utmTerm     String?
 
-  deviceType DeviceType?
-  country    String?     @db.Char(2)
+  /// First-touch UTM copied from the session. Never overwritten.
+  firstUtmSource   String?
+  firstUtmMedium   String?
+  firstUtmCampaign String?
+  firstUtmContent  String?
+  firstUtmTerm     String?
+
+  /// Normalized last-touch source: Instagram, Google, Facebook, Direct, Other.
+  sourceNormalized String?
+
+  deviceType      DeviceType?
+  browser         String?
+  operatingSystem String?
+  language        String?     @db.VarChar(16)
+  country         String?     @db.Char(2)
+  region          String?     @db.VarChar(64)
+  city            String?     @db.VarChar(64)
+
+  /// Extensible payload for future Instagram / conversion fields.
+  metadata Json?
 
   /// Time-bucketed uniqueness key used to drop refresh / double-click inflation.
   dedupeKey String @unique
@@ -395,10 +447,40 @@ model AnalyticsEvent {
   @@index([sessionId])
   @@index([productId, createdAt])
   @@index([categoryId, createdAt])
+  @@index([affiliateLinkId, createdAt])
   @@index([utmSource, createdAt])
   @@index([utmCampaign, createdAt])
+  @@index([sourceNormalized, createdAt])
+  @@index([country, createdAt])
+  @@index([country, city, createdAt])
   @@index([createdAt])
   @@map("analytics_events")
+}
+
+/// Daily aggregates so raw events can be purged without losing KPI history.
+model AnalyticsDailyMetric {
+  id        String             @id @default(cuid())
+  day       DateTime           @db.Date
+  dimension AnalyticsDimension
+  key       String             @default("")
+
+  visitors            Int @default(0)
+  sessions            Int @default(0)
+  pageViews           Int @default(0)
+  productViews        Int @default(0)
+  offerViews          Int @default(0)
+  affiliateClicks     Int @default(0)
+  searches            Int @default(0)
+  zeroResultSearches  Int @default(0)
+  searchResultClicks  Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([day, dimension, key])
+  @@index([dimension, key, day])
+  @@index([day])
+  @@map("analytics_daily_metrics")
 }
 
 // ---------------------------------------------------------------------------

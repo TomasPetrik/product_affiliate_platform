@@ -1,5 +1,6 @@
 import { BarChart3, ExternalLink, Eye, Layers, MousePointerClick, Percent, Search, Users } from "lucide-react";
 
+import { AnalyticsExportButtons } from "@/components/admin/analytics-export-buttons";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DateRangeFilter } from "@/components/admin/date-range-filter";
 import { EmptyState } from "@/components/admin/empty-state";
@@ -25,6 +26,7 @@ export function AnalyticsOverview({ data, basePath }: AnalyticsOverviewProps) {
   return (
     <div className="flex flex-col gap-6">
       <DateRangeFilter basePath={basePath} range={range} />
+      {basePath.startsWith("/admin/analytics") ? <AnalyticsExportButtons range={range} /> : null}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
@@ -56,6 +58,12 @@ export function AnalyticsOverview({ data, basePath }: AnalyticsOverviewProps) {
           value={kpis.uniqueVisitors.toLocaleString()}
           icon={Users}
           hint="Anonymous visitor IDs"
+        />
+        <StatCard
+          label="Sessions"
+          value={kpis.sessions.toLocaleString()}
+          icon={Users}
+          hint="Idle timeout 30 minutes"
         />
         <StatCard
           label="Category views"
@@ -153,6 +161,35 @@ export function AnalyticsOverview({ data, basePath }: AnalyticsOverviewProps) {
                 <RankedTable
                   rows={data.topSearches}
                   emptyLabel="No searches in this range."
+                  showClicks={false}
+                  metricLabel="Searches"
+                />
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm">Top countries</CardTitle>
+              </CardHeader>
+              <CardContent className="px-0">
+                <RankedTable rows={data.topCountries} emptyLabel="No country data in this range." />
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm">Top retailers</CardTitle>
+              </CardHeader>
+              <CardContent className="px-0">
+                <RankedTable rows={data.topRetailers} emptyLabel="No retailer clicks in this range." />
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm">Product opportunities</CardTitle>
+              </CardHeader>
+              <CardContent className="px-0">
+                <RankedTable
+                  rows={data.opportunities}
+                  emptyLabel="No zero-result searches in this range."
                   showClicks={false}
                   metricLabel="Searches"
                 />

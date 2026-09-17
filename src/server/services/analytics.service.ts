@@ -1,43 +1,21 @@
 import { prisma } from "@/lib/prisma";
+import { ctr } from "@/lib/analytics-attribution";
+import { analyticsQueryString, countryDetailHref, hasAnalyticsFilters, type AnalyticsQueryFilters } from "@/lib/analytics-query";
 import { eachUtcDay, formatIsoDate, type ResolvedDateRange } from "@/lib/date-range";
+import {
+  getCountryAnalytics,
+  getRetailerAnalytics,
+  getSearchAnalytics,
+  getTimeSeriesAnalytics,
+} from "@/server/services/analytics-reports.service";
+import type {
+  AnalyticsKpis,
+  DashboardAnalytics,
+  RankedRow,
+  SeriesPoint,
+} from "@/server/services/analytics-types";
 
-export interface AnalyticsKpis {
-  pageViews: number;
-  productViews: number;
-  categoryViews: number;
-  searches: number;
-  uniqueVisitors: number;
-  affiliateClicks: number;
-  outboundClicks: number;
-  affiliateCtr: number | null;
-}
-
-export interface RankedRow {
-  id: string;
-  label: string;
-  href?: string;
-  views: number;
-  clicks: number;
-}
-
-export interface SeriesPoint {
-  date: string;
-  views: number;
-  clicks: number;
-}
-
-export interface DashboardAnalytics {
-  range: ResolvedDateRange;
-  kpis: AnalyticsKpis;
-  topProducts: RankedRow[];
-  topCategories: RankedRow[];
-  topSources: RankedRow[];
-  topCampaigns: RankedRow[];
-  topSearches: RankedRow[];
-  devices: RankedRow[];
-  series: SeriesPoint[];
-  hasData: boolean;
-}
+export type { AnalyticsKpis, DashboardAnalytics, RankedRow, SeriesPoint };
 
 type DayCount = { day: Date; count: number };
 type NamedCount = { key: string | null; views: number; clicks: number };
@@ -64,8 +42,12 @@ function rankedFromNamed(rows: NamedCount[], fallbackLabel: string): RankedRow[]
   }));
 }
 
-export async function getDashboardAnalytics(range: ResolvedDateRange): Promise<DashboardAnalytics> {
+export async function getDashboardAnalytics(
+  range: ResolvedDateRange,
+  filters: AnalyticsQueryFilters = {},
+): Promise<DashboardAnalytics> {
   const createdAt = inRange(range.start, range.end);
+  const filtered = hasAnalyticsFilters(filters);
 
   const [
     pageViews,
@@ -91,10 +73,14 @@ export async function getDashboardAnalytics(range: ResolvedDateRange): Promise<D
     deviceRows,
   ] = await Promise.all([
     prisma.analyticsEvent.count({ where: { type: "PAGE_VIEW", createdAt } }),
-    prisma.productView.count({ where: { createdAt } }),
+    filtered
+      ? prisma.analyticsEvent.count({ where: { type: "PRODUCT_VIEW", createdAt, country: filters.country ?? undefined, sourceNormalized: filters.source ?? undefined, utmMedium: filters.medium ?? undefined, utmCampaign: filters.campaign ?? undefined } })
+      : prisma.productView.count({ where: { createdAt } }),
     prisma.analyticsEvent.count({ where: { type: "CATEGORY_VIEW", createdAt } }),
     prisma.analyticsEvent.count({ where: { type: "SEARCH", createdAt } }),
-    prisma.affiliateClick.count({ where: { createdAt } }),
+    filtered
+      ? prisma.analyticsEvent.count({ where: { type: "AFFILIATE_CLICK", createdAt, country: filters.country ?? undefined, sourceNormalized: filters.source ?? undefined, utmMedium: filters.medium ?? undefined, utmCampaign: filters.campaign ?? undefined } })
+      : prisma.affiliateClick.count({ where: { createdAt } }),
     prisma.analyticsEvent.count({ where: { type: "OUTBOUND_CLICK", createdAt } }),
     prisma.$queryRaw<Array<{ count: bigint }>>`
       SELECT COUNT(*)::bigint AS count FROM (
@@ -229,7 +215,22 @@ export async function getDashboardAnalytics(range: ResolvedDateRange): Promise<D
   ]);
 
   const uniqueVisitors = Number(uniqueVisitorRows[0]?.count ?? 0);
-  const affiliateCtr = productViews > 0 ? (affiliateClicks / productViews) * 100 : null;
+
+  const [sessionRows, countries, retailers, searchReport, seriesExtra] = await Promise.all([
+    prisma.$queryRaw<Array<{ count: number }>>`
+      SELECT COUNT(DISTINCT "sessionId")::int AS count
+      FROM "analytics_events"
+      WHERE "createdAt" >= ${range.start} AND "createdAt" <= ${range.end}
+        AND "sessionId" IS NOT NULL
+    `,
+    getCountryAnalytics(range, filters, 8),
+    getRetailerAnalytics(range, filters, 8),
+    getSearchAnalytics(range, filters, 8),
+    getTimeSeriesAnalytics(range, filters),
+  ]);
+
+  const sessions = Number(sessionRows[0]?.count ?? 0);
+  const affiliateCtr = ctr(affiliateClicks, productViews);
   const viewsByCategory = categoryViewRows.length > 0 ? categoryViewRows : viewsByCategoryFallback;
 
   const productIds = [...new Set([...viewsByProduct.map((row) => row.productId), ...clicksByProduct.map((row) => row.productId)])];
@@ -261,7 +262,7 @@ export async function getDashboardAnalytics(range: ResolvedDateRange): Promise<D
       return {
         id: row.productId,
         label: product?.title ?? "Deleted product",
-        href: `/admin/products/${row.productId}`,
+        href: `/admin/products/${row.productId}/analytics`,
         views: row._count.id,
         clicks: clicksByProductId.get(row.productId) ?? 0,
       };
@@ -311,10 +312,36 @@ export async function getDashboardAnalytics(range: ResolvedDateRange): Promise<D
 
   const viewMap = toCountMap(pageViews > 0 ? pageViewDays : productViewDays);
   const clickMap = toCountMap(clickDays);
-  const series = eachUtcDay(range.start, range.end).map((date) => ({
-    date,
-    views: viewMap.get(date) ?? 0,
-    clicks: clickMap.get(date) ?? 0,
+  const series = eachUtcDay(range.start, range.end).map((date) => {
+    const extra = seriesExtra.find((point) => point.date === date);
+    return {
+      date,
+      views: extra?.views ?? viewMap.get(date) ?? 0,
+      clicks: extra?.clicks ?? clickMap.get(date) ?? 0,
+      visitors: extra?.visitors ?? 0,
+      sessions: extra?.sessions ?? 0,
+    };
+  });
+
+  const topCountries: RankedRow[] = countries.map((row) => ({
+    id: row.id,
+    label: row.label,
+    href: countryDetailHref(row.id, range, filters),
+    views: row.views,
+    clicks: row.clicks,
+    visitors: row.visitors,
+    sessions: row.sessions,
+    ctr: row.ctr,
+  }));
+
+  const topRetailers: RankedRow[] = retailers.map((row) => ({
+    id: row.id,
+    label: row.label,
+    href: "/admin/analytics/retailers",
+    views: row.views,
+    clicks: row.clicks,
+    visitors: row.visitors,
+    ctr: row.ctr,
   }));
 
   return {
@@ -325,6 +352,7 @@ export async function getDashboardAnalytics(range: ResolvedDateRange): Promise<D
       categoryViews,
       searches,
       uniqueVisitors,
+      sessions,
       affiliateClicks,
       outboundClicks,
       affiliateCtr,
@@ -338,6 +366,16 @@ export async function getDashboardAnalytics(range: ResolvedDateRange): Promise<D
       label: row.query,
       views: row.count,
       clicks: 0,
+    })),
+    topCountries,
+    topRetailers,
+    opportunities: searchReport.opportunities.map((row) => ({
+      id: row.id,
+      label: row.label,
+      href: `/admin/analytics/searches${analyticsQueryString(range, filters)}`,
+      views: row.views,
+      clicks: 0,
+      visitors: row.visitors,
     })),
     devices: deviceRows.map((row) => ({
       id: row.key ?? "unknown",
@@ -354,8 +392,11 @@ export async function getDashboardAnalytics(range: ResolvedDateRange): Promise<D
         affiliateClicks +
         outboundClicks +
         uniqueVisitors +
+        sessions +
         topSources.length +
-        topCampaigns.length >
+        topCampaigns.length +
+        topCountries.length +
+        topRetailers.length >
       0,
   };
 }
@@ -363,15 +404,22 @@ export async function getDashboardAnalytics(range: ResolvedDateRange): Promise<D
 export async function getProductAnalyticsSummary(productId: string, range: ResolvedDateRange) {
   const createdAt = inRange(range.start, range.end);
 
-  const [views, clicks] = await Promise.all([
+  const [views, clicks, uniqueRows] = await Promise.all([
     prisma.productView.count({ where: { productId, createdAt } }),
     prisma.affiliateClick.count({ where: { productId, createdAt } }),
+    prisma.$queryRaw<Array<{ count: number }>>`
+      SELECT COUNT(DISTINCT "visitorId")::int AS count
+      FROM "analytics_events"
+      WHERE "productId" = ${productId}
+        AND "createdAt" >= ${range.start} AND "createdAt" <= ${range.end}
+    `,
   ]);
 
   return {
     views,
     clicks,
-    ctr: views > 0 ? (clicks / views) * 100 : null,
+    uniqueVisitors: Number(uniqueRows[0]?.count ?? 0),
+    ctr: ctr(clicks, views),
   };
 }
 

@@ -7,14 +7,13 @@ import sharp from "sharp";
 import {
   LOCAL_PRODUCT_UPLOAD_PREFIX,
   MAX_PRODUCT_IMAGE_BYTES,
+  MAX_PRODUCT_IMAGE_FILES,
   type ProductImageVariant,
   productImageVariantPath,
 } from "@/lib/product-image-variants";
 import { productUploadsDir } from "@/lib/product-upload-paths";
 
-export { MAX_PRODUCT_IMAGE_BYTES };
-
-const MAX_FILES = 8;
+export { MAX_PRODUCT_IMAGE_BYTES, MAX_PRODUCT_IMAGE_FILES };
 
 const ALLOWED_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
 
@@ -114,5 +113,5 @@ export function listUploadedImageFiles(formData: FormData): File[] {
   return formData
     .getAll("imageFiles")
     .filter((value): value is File => value instanceof File && value.size > 0)
-    .slice(0, MAX_FILES);
+    .slice(0, MAX_PRODUCT_IMAGE_FILES);
 }

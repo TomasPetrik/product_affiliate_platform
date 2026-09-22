@@ -21,8 +21,8 @@ const nextConfig: NextConfig = {
     // has no meaningful effect on build time.
     cpus: 1,
     serverActions: {
-      // Hero uploads allow up to 5MB images plus multipart overhead.
-      bodySizeLimit: "6mb",
+      // Gallery uploads allow up to 8 × 5MB images plus multipart overhead.
+      bodySizeLimit: "45mb",
     },
   },
   async headers() {

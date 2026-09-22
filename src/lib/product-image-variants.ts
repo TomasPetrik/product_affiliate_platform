@@ -3,6 +3,9 @@ export const LOCAL_PRODUCT_UPLOAD_PREFIX = "/uploads/products/";
 /** Max upload size for product hero / gallery images. */
 export const MAX_PRODUCT_IMAGE_BYTES = 5 * 1024 * 1024;
 
+/** Max number of local files accepted in one product save. */
+export const MAX_PRODUCT_IMAGE_FILES = 8;
+
 export type ProductImageVariant = "full" | "md" | "sm";
 
 const VARIANT_SUFFIX: Record<Exclude<ProductImageVariant, "full">, string> = {

@@ -1,4 +1,12 @@
-export const KNOWN_TRAFFIC_SOURCES = ["Instagram", "Google", "Facebook", "Direct", "Other"] as const;
+export const KNOWN_TRAFFIC_SOURCES = [
+  "Instagram",
+  "Google",
+  "Facebook",
+  "YouTube",
+  "TikTok",
+  "Direct",
+  "Other",
+] as const;
 
 export type KnownTrafficSource = (typeof KNOWN_TRAFFIC_SOURCES)[number];
 
@@ -11,6 +19,13 @@ const SOURCE_ALIASES: Record<string, KnownTrafficSource> = {
   facebook: "Facebook",
   fb: "Facebook",
   meta: "Facebook",
+  youtube: "YouTube",
+  yt: "YouTube",
+  "youtube-shorts": "YouTube",
+  youtu: "YouTube",
+  tiktok: "TikTok",
+  tt: "TikTok",
+  "tik-tok": "TikTok",
   direct: "Direct",
   "(direct)": "Direct",
   none: "Direct",
@@ -26,6 +41,10 @@ const HOST_ALIASES: Array<{ match: RegExp; source: KnownTrafficSource }> = [
   { match: /(^|\.)fb\.com$/i, source: "Facebook" },
   { match: /(^|\.)fbcdn\.net$/i, source: "Facebook" },
   { match: /(^|\.)l\.facebook\.com$/i, source: "Facebook" },
+  { match: /(^|\.)youtube\.com$/i, source: "YouTube" },
+  { match: /(^|\.)youtu\.be$/i, source: "YouTube" },
+  { match: /(^|\.)tiktok\.com$/i, source: "TikTok" },
+  { match: /(^|\.)tiktokv\.com$/i, source: "TikTok" },
 ];
 
 function hostFromReferrer(referrer: string | null | undefined): string | null {

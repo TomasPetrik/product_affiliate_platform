@@ -123,6 +123,7 @@ model Product {
   imports          ProductImport[]
   revenueEntries   RevenueEntry[]
   priceSyncChanges PriceSyncChange[]
+  marketingVideos  ProductMarketingVideo[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -423,7 +424,7 @@ model AnalyticsEvent {
   firstUtmContent  String?
   firstUtmTerm     String?
 
-  /// Normalized last-touch source: Instagram, Google, Facebook, Direct, Other.
+  /// Normalized last-touch source: Instagram, Google, Facebook, YouTube, TikTok, Direct, Other.
   sourceNormalized String?
 
   deviceType      DeviceType?
@@ -638,4 +639,135 @@ model PriceSyncChange {
   @@index([productId])
   @@index([affiliateLinkId])
   @@map("price_sync_changes")
+}
+
+// ---------------------------------------------------------------------------
+// Marketing videos (Instagram / Facebook / YouTube / TikTok view funnel)
+// ---------------------------------------------------------------------------
+
+enum SocialPlatform {
+  INSTAGRAM
+  FACEBOOK
+  YOUTUBE
+  TIKTOK
+}
+
+enum MarketingVideoSyncStatus {
+  PENDING
+  OK
+  ERROR
+}
+
+/// One marketing creative for a product, published on one or more platforms.
+model ProductMarketingVideo {
+  id          String  @id @default(cuid())
+  productId   String
+  product     Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  /// Admin label, e.g. "Launch reel".
+  title       String?
+  /// Optional UTM campaign used in short links so site visits attribute to this video.
+  utmCampaign String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  posts ProductMarketingVideoPost[]
+
+  @@index([productId])
+  @@index([utmCampaign])
+  @@map("product_marketing_videos")
+}
+
+model ProductMarketingVideoPost {
+  id               String                    @id @default(cuid())
+  marketingVideoId String
+  marketingVideo   ProductMarketingVideo     @relation(fields: [marketingVideoId], references: [id], onDelete: Cascade)
+  platform         SocialPlatform
+  /// Platform-native media / video ID (not the share URL).
+  externalId       String
+  permalinkUrl     String?
+  /// Latest lifetime view count from the platform API.
+  viewCount        BigInt                    @default(0)
+  lastSyncedAt     DateTime?
+  syncStatus       MarketingVideoSyncStatus  @default(PENDING)
+  lastSyncError    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  snapshots ProductMarketingVideoPostSnapshot[]
+
+  @@unique([marketingVideoId, platform])
+  @@index([platform, externalId])
+  @@index([syncStatus])
+  @@map("product_marketing_video_posts")
+}
+
+/// Daily snapshot of cumulative platform views (for date-range funnel deltas).
+model ProductMarketingVideoPostSnapshot {
+  id        String                     @id @default(cuid())
+  postId    String
+  post      ProductMarketingVideoPost  @relation(fields: [postId], references: [id], onDelete: Cascade)
+  day       DateTime                   @db.Date
+  viewCount BigInt
+
+  createdAt DateTime @default(now())
+
+  @@unique([postId, day])
+  @@index([day])
+  @@map("product_marketing_video_post_snapshots")
+}
+
+// ---------------------------------------------------------------------------
+// TikTok Login Kit (Display API) — single RadarCut account connection
+// ---------------------------------------------------------------------------
+
+enum TikTokConnectionStatus {
+  CONNECTED
+  NEEDS_REAUTH
+  DISCONNECTED
+}
+
+/// OAuth tokens for the RadarCut TikTok account (Login Kit / Display API).
+/// Tokens are stored encrypted at rest (see src/lib/token-crypto.ts).
+model TikTokOAuthConnection {
+  id                     String                 @id @default(cuid())
+  /// Singleton key — only one connected TikTok account for the site.
+  key                    String                 @unique @default("default")
+  openId                 String
+  /// Display name from user.info.basic (not @handle — that needs user.info.profile).
+  displayName            String?
+  /// Best-effort @handle extracted from a video share_url when available.
+  username               String?
+  avatarUrl              String?
+  accessTokenEnc         String
+  refreshTokenEnc        String
+  accessTokenExpiresAt   DateTime
+  refreshTokenExpiresAt  DateTime?
+  scopes                 String
+  status                 TikTokConnectionStatus @default(CONNECTED)
+  lastError              String?
+  lastSyncedAt           DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("tiktok_oauth_connections")
+}
+
+/// Cached public videos from the connected TikTok account (from video.list).
+model TikTokCachedVideo {
+  id          String   @id
+  title       String?
+  description String?
+  shareUrl    String?
+  createTime  DateTime?
+  viewCount   BigInt   @default(0)
+  lastSyncedAt DateTime @default(now())
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([viewCount])
+  @@map("tiktok_cached_videos")
 }

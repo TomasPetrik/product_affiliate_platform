@@ -29,6 +29,7 @@ const FOOTER_LINK_GROUPS = [
     title: "Company",
     links: [
       { href: "/disclosure", label: "Affiliate disclosure" },
+      { href: "/terms", label: "Terms of Service" },
       { href: "/privacy", label: "Privacy Policy" },
       { href: "/privacy#cookies", label: "Cookie Policy" },
     ],
@@ -76,6 +77,9 @@ export function SiteFooter() {
             qualifying purchases.
           </p>
           <p className="flex flex-wrap gap-x-4 gap-y-1">
+            <Link href="/terms" className="underline-offset-2 hover:text-foreground hover:underline">
+              Terms of Service
+            </Link>
             <Link href="/privacy" className="underline-offset-2 hover:text-foreground hover:underline">
               Privacy Policy
             </Link>

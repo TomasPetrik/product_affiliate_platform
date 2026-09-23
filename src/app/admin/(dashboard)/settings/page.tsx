@@ -1,30 +1,48 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
+import { TikTokConnectionCard } from "@/components/admin/tiktok-connection-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getAdminSession } from "@/lib/auth";
 import { env } from "@/lib/env";
 import { prisma } from "@/lib/prisma";
+import { getTikTokRedirectUri } from "@/lib/tiktok";
+import { getTikTokConnectionPublic } from "@/server/services/tiktok-oauth.service";
+import { listCachedTikTokVideos } from "@/server/services/tiktok-video.service";
 
 export const metadata: Metadata = { title: "Settings" };
 
-export default async function AdminSettingsPage() {
+export default async function AdminSettingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ tiktok?: string }>;
+}) {
   const session = await getAdminSession();
-  const [productCount, categoryCount, marketplaceCount, revenueCount] = await Promise.all([
-    prisma.product.count(),
-    prisma.category.count(),
-    prisma.marketplace.count(),
-    prisma.revenueEntry.count(),
-  ]);
+  const params = await searchParams;
+  const [productCount, categoryCount, marketplaceCount, revenueCount, tiktok, cachedVideos] =
+    await Promise.all([
+      prisma.product.count(),
+      prisma.category.count(),
+      prisma.marketplace.count(),
+      prisma.revenueEntry.count(),
+      getTikTokConnectionPublic(),
+      listCachedTikTokVideos(40),
+    ]);
+
+  const connectedLabel =
+    tiktok.connectedLabel ??
+    (tiktok.displayName
+      ? tiktok.displayName
+      : null);
 
   return (
     <div className="flex flex-col gap-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Site identity, signed-in admin, and marketplace connections.
+          Site identity, signed-in admin, marketplace and social connections.
         </p>
       </div>
 
@@ -63,6 +81,33 @@ export default async function AdminSettingsPage() {
             </p>
           </CardContent>
         </Card>
+
+        <TikTokConnectionCard
+          oauthConfigured={tiktok.oauthConfigured}
+          connected={tiktok.connected}
+          status={tiktok.status}
+          connectedLabel={
+            connectedLabel
+              ? connectedLabel.startsWith("@")
+                ? connectedLabel
+                : tiktok.username
+                  ? `@${tiktok.username}`
+                  : connectedLabel
+              : null
+          }
+          displayName={tiktok.displayName}
+          lastSyncedAt={tiktok.lastSyncedAt?.toISOString() ?? null}
+          lastError={tiktok.lastError}
+          redirectUri={getTikTokRedirectUri()}
+          flash={params.tiktok ?? null}
+          videos={cachedVideos.map((video) => ({
+            id: video.id,
+            title: video.title,
+            shareUrl: video.shareUrl,
+            viewCount: video.viewCount.toString(),
+            createTime: video.createTime?.toISOString() ?? null,
+          }))}
+        />
 
         <Card>
           <CardHeader>

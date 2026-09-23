@@ -103,6 +103,32 @@ const envSchema = z.object({
    * Leave empty to keep real visitors from those countries.
    */
   ANALYTICS_EXCLUDE_COUNTRIES: z.string().optional(),
+
+  /**
+   * Meta (Instagram + Facebook) Graph API long-lived Page access token.
+   * Needs pages_read_engagement + instagram_manage_insights (or equivalent).
+   * Optional so the site boots without social sync configured.
+   */
+  META_ACCESS_TOKEN: z.string().min(1).optional(),
+  /** Graph API version, e.g. v22.0 */
+  META_GRAPH_API_VERSION: z.string().min(1).default("v22.0"),
+
+  /** YouTube Data API v3 key (public video statistics). */
+  YOUTUBE_API_KEY: z.string().min(1).optional(),
+
+  /**
+   * TikTok Login Kit (web) app credentials from TikTok Developer Portal.
+   * Used for OAuth authorize + token exchange. Optional so the site boots
+   * without TikTok connected; Connect TikTok in Admin → Settings requires both.
+   */
+  TIKTOK_CLIENT_KEY: z.string().min(1).optional(),
+  TIKTOK_CLIENT_SECRET: z.string().min(1).optional(),
+
+  /**
+   * @deprecated Prefer Login Kit OAuth (stored encrypted in DB).
+   * Kept as an emergency fallback for video.query when no OAuth connection exists.
+   */
+  TIKTOK_ACCESS_TOKEN: z.string().min(1).optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;
@@ -139,6 +165,12 @@ function loadEnv(): Env {
     ANALYTICS_RETENTION_DAYS: blankToUndefined(process.env.ANALYTICS_RETENTION_DAYS),
     ANALYTICS_EXCLUDE_IPS: blankToUndefined(process.env.ANALYTICS_EXCLUDE_IPS),
     ANALYTICS_EXCLUDE_COUNTRIES: blankToUndefined(process.env.ANALYTICS_EXCLUDE_COUNTRIES),
+    META_ACCESS_TOKEN: blankToUndefined(process.env.META_ACCESS_TOKEN),
+    META_GRAPH_API_VERSION: blankToUndefined(process.env.META_GRAPH_API_VERSION) ?? "v22.0",
+    YOUTUBE_API_KEY: blankToUndefined(process.env.YOUTUBE_API_KEY),
+    TIKTOK_CLIENT_KEY: blankToUndefined(process.env.TIKTOK_CLIENT_KEY),
+    TIKTOK_CLIENT_SECRET: blankToUndefined(process.env.TIKTOK_CLIENT_SECRET),
+    TIKTOK_ACCESS_TOKEN: blankToUndefined(process.env.TIKTOK_ACCESS_TOKEN),
   });
 
   if (!parsed.success) {

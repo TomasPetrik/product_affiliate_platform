@@ -5,6 +5,7 @@ import { Eye, MousePointerClick, Percent, Users } from "lucide-react";
 
 import { AnalyticsMetricTable } from "@/components/admin/analytics-metric-table";
 import { DateRangeFilter } from "@/components/admin/date-range-filter";
+import { MarketingFunnelCard } from "@/components/admin/marketing-funnel-card";
 import { StatCard } from "@/components/admin/stat-card";
 import { TimeSeriesChart } from "@/components/admin/time-series-chart";
 import { Button } from "@/components/ui/button";
@@ -13,6 +14,7 @@ import { formatCtr } from "@/lib/analytics-attribution";
 import { countryDetailHref, parseAnalyticsFilters } from "@/lib/analytics-query";
 import { resolveDateRange, type DateRangeSearchParams } from "@/lib/date-range";
 import { getProductAnalytics } from "@/server/services/analytics-reports.service";
+import { getProductMarketingFunnel } from "@/server/services/marketing-video.service";
 import { getProductByIdAdmin } from "@/server/services/product.service";
 
 export const metadata: Metadata = { title: "Product analytics" };
@@ -31,7 +33,10 @@ export default async function AdminProductAnalyticsPage({ params, searchParams }
   const query = await searchParams;
   const range = resolveDateRange(query);
   const filters = parseAnalyticsFilters(query);
-  const analytics = await getProductAnalytics(product.id, range, filters);
+  const [analytics, funnel] = await Promise.all([
+    getProductAnalytics(product.id, range, filters),
+    getProductMarketingFunnel(product.id, range),
+  ]);
   const basePath = `/admin/products/${product.id}/analytics`;
 
   return (
@@ -48,6 +53,11 @@ export default async function AdminProductAnalyticsPage({ params, searchParams }
       </div>
 
       <DateRangeFilter basePath={basePath} range={range} extraParams={filters} />
+
+      <MarketingFunnelCard
+        funnel={funnel}
+        editHref={`/admin/products/${product.id}/edit`}
+      />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Views" value={analytics.views.toLocaleString()} icon={Eye} />

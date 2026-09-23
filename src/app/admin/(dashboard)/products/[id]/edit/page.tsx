@@ -2,11 +2,13 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
 import { AdminFlash } from "@/components/admin/admin-flash";
+import { MarketingVideosPanel } from "@/components/admin/marketing-videos-panel";
 import { ProductForm, type ProductFormLinkValues } from "@/components/admin/product-form";
 import { ReplaceHeroImagePanel } from "@/components/admin/replace-hero-image-panel";
 import { RetailerOffersPanel } from "@/components/admin/retailer-offers-panel";
 import { adminNoticeMessage } from "@/lib/admin-notice";
 import { env } from "@/lib/env";
+import { listMarketingVideosForProduct } from "@/server/services/marketing-video.service";
 import {
   getProductByIdAdmin,
   listCategoriesForSelect,
@@ -26,11 +28,12 @@ interface EditProductPageProps {
 export default async function EditProductPage({ params, searchParams }: EditProductPageProps) {
   const { id } = await params;
   const query = await searchParams;
-  const [product, categories, marketplaces, offers] = await Promise.all([
+  const [product, categories, marketplaces, offers, marketingVideos] = await Promise.all([
     getProductByIdAdmin(id),
     listCategoriesForSelect(),
     listMarketplaces(),
     listRetailerOffersForProduct(id),
+    listMarketingVideosForProduct(id),
   ]);
 
   if (!product) {
@@ -113,6 +116,24 @@ export default async function EditProductPage({ params, searchParams }: EditProd
         }}
       />
       <RetailerOffersPanel productId={product.id} offers={offers} />
+      <MarketingVideosPanel
+        productId={product.id}
+        videos={marketingVideos.map((video) => ({
+          id: video.id,
+          title: video.title,
+          utmCampaign: video.utmCampaign,
+          posts: video.posts.map((post) => ({
+            id: post.id,
+            platform: post.platform,
+            externalId: post.externalId,
+            permalinkUrl: post.permalinkUrl,
+            viewCount: Number(post.viewCount),
+            syncStatus: post.syncStatus,
+            lastSyncedAt: post.lastSyncedAt,
+            lastSyncError: post.lastSyncError,
+          })),
+        }))}
+      />
     </div>
   );
 }

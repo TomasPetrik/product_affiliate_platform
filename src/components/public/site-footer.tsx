@@ -31,6 +31,7 @@ const FOOTER_LINK_GROUPS = [
       { href: "/disclosure", label: "Affiliate disclosure" },
       { href: "/terms", label: "Terms of Service" },
       { href: "/privacy", label: "Privacy Policy" },
+      { href: "/data-deletion", label: "Data deletion" },
       { href: "/privacy#cookies", label: "Cookie Policy" },
     ],
   },
@@ -82,6 +83,9 @@ export function SiteFooter() {
             </Link>
             <Link href="/privacy" className="underline-offset-2 hover:text-foreground hover:underline">
               Privacy Policy
+            </Link>
+            <Link href="/data-deletion" className="underline-offset-2 hover:text-foreground hover:underline">
+              Data deletion
             </Link>
             <PrivacySettingsLink>Privacy Settings</PrivacySettingsLink>
             <PrivacySettingsLink>Do Not Sell or Share My Personal Information</PrivacySettingsLink>

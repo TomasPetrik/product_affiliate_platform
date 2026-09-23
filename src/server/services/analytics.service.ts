@@ -8,6 +8,7 @@ import {
   getSearchAnalytics,
   getTimeSeriesAnalytics,
 } from "@/server/services/analytics-reports.service";
+import { getMarketingViewsByProductIds } from "@/server/services/marketing-video.service";
 import type {
   AnalyticsKpis,
   DashboardAnalytics,
@@ -236,7 +237,7 @@ export async function getDashboardAnalytics(
   const productIds = [...new Set([...viewsByProduct.map((row) => row.productId), ...clicksByProduct.map((row) => row.productId)])];
   const categoryIds = [...new Set([...viewsByCategory.map((row) => row.categoryId), ...clicksByCategory.map((row) => row.categoryId)])];
 
-  const [products, categories] = await Promise.all([
+  const [products, categories, marketingViewsByProduct] = await Promise.all([
     productIds.length
       ? prisma.product.findMany({
           where: { id: { in: productIds } },
@@ -249,6 +250,7 @@ export async function getDashboardAnalytics(
           select: { id: true, name: true, slug: true },
         })
       : Promise.resolve([]),
+    getMarketingViewsByProductIds(productIds),
   ]);
 
   const productById = new Map(products.map((product) => [product.id, product]));
@@ -259,12 +261,20 @@ export async function getDashboardAnalytics(
   const topProducts = viewsByProduct
     .map((row) => {
       const product = productById.get(row.productId);
+      const marketing = marketingViewsByProduct.get(row.productId);
       return {
         id: row.productId,
         label: product?.title ?? "Deleted product",
         href: `/admin/products/${row.productId}/analytics`,
         views: row._count.id,
         clicks: clicksByProductId.get(row.productId) ?? 0,
+        marketingViews: marketing?.total ?? 0,
+        platformViews: {
+          INSTAGRAM: marketing?.INSTAGRAM ?? 0,
+          FACEBOOK: marketing?.FACEBOOK ?? 0,
+          YOUTUBE: marketing?.YOUTUBE ?? 0,
+          TIKTOK: marketing?.TIKTOK ?? 0,
+        },
       };
     })
     .sort((a, b) => b.views - a.views || b.clicks - a.clicks)

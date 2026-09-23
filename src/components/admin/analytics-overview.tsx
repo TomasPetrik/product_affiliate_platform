@@ -121,12 +121,22 @@ export function AnalyticsOverview({ data, basePath }: AnalyticsOverviewProps) {
           </div>
 
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-            <Card>
+            <Card className="xl:col-span-2">
               <CardHeader>
                 <CardTitle className="text-sm">Top products</CardTitle>
+                <p className="text-xs text-muted-foreground">
+                  Video views are the latest synced lifetime totals from linked Instagram, Facebook,
+                  YouTube, and TikTok posts. Site Views / Clicks are first-party analytics for the
+                  selected date range.
+                </p>
               </CardHeader>
               <CardContent className="px-0">
-                <RankedTable rows={data.topProducts} emptyLabel="No product views in this range." />
+                <RankedTable
+                  rows={data.topProducts}
+                  emptyLabel="No product views in this range."
+                  metricLabel="Site views"
+                  showMarketingFunnel
+                />
               </CardContent>
             </Card>
             <Card>

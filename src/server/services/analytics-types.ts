@@ -21,6 +21,15 @@ export interface RankedRow {
   visitors?: number;
   sessions?: number;
   ctr?: number | null;
+  /** Latest synced lifetime marketing-video views (all platforms). */
+  marketingViews?: number;
+  /** Per-platform lifetime views for marketing posts linked to this product. */
+  platformViews?: {
+    INSTAGRAM: number;
+    FACEBOOK: number;
+    YOUTUBE: number;
+    TIKTOK: number;
+  };
 }
 
 export interface SeriesPoint {

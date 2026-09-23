@@ -28,6 +28,50 @@ function blankToNull(value: string | null | undefined): string | null {
 
 export { autoLabelFromPlatforms };
 
+export interface ProductMarketingViewTotals {
+  total: number;
+  INSTAGRAM: number;
+  FACEBOOK: number;
+  YOUTUBE: number;
+  TIKTOK: number;
+}
+
+const EMPTY_PLATFORM_VIEWS: ProductMarketingViewTotals = {
+  total: 0,
+  INSTAGRAM: 0,
+  FACEBOOK: 0,
+  YOUTUBE: 0,
+  TIKTOK: 0,
+};
+
+/** Lifetime synced view counts from linked marketing posts, keyed by product id. */
+export async function getMarketingViewsByProductIds(
+  productIds: string[],
+): Promise<Map<string, ProductMarketingViewTotals>> {
+  const result = new Map<string, ProductMarketingViewTotals>();
+  if (productIds.length === 0) return result;
+
+  const rows = await prisma.productMarketingVideoPost.findMany({
+    where: { marketingVideo: { productId: { in: productIds } } },
+    select: {
+      platform: true,
+      viewCount: true,
+      marketingVideo: { select: { productId: true } },
+    },
+  });
+
+  for (const row of rows) {
+    const productId = row.marketingVideo.productId;
+    const current = result.get(productId) ?? { ...EMPTY_PLATFORM_VIEWS };
+    const count = Number(row.viewCount);
+    current[row.platform] += count;
+    current.total += count;
+    result.set(productId, current);
+  }
+
+  return result;
+}
+
 function normalizePosts(posts: MarketingVideoPostInput[]) {
   const platforms = new Set<SocialPlatform>();
   const normalizedPosts: Array<{

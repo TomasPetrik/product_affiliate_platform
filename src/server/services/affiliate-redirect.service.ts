@@ -1,8 +1,10 @@
 import { unstable_cache } from "next/cache";
 
 import { affiliateGoHref, isProductSlug, parseLinkIdParam, parseMarketplaceParam } from "@/lib/affiliate-go";
+import { filterOffersByAmazonPreference } from "@/lib/amazon-offer-preference";
 import { env } from "@/lib/env";
 import { prisma } from "@/lib/prisma";
+import { getSiteSettings } from "@/server/services/site-settings.service";
 import { parseOutboundUrl } from "@/server/services/tracking.service";
 
 export const AFFILIATE_REDIRECT_CACHE_TAG = "affiliate-redirect";
@@ -43,34 +45,47 @@ async function lookupPublishedAffiliateTarget(
 ): Promise<ResolvedAffiliateTarget | null> {
   if (!isProductSlug(slug)) return null;
 
-  const product = await prisma.product.findUnique({
-    where: { slug },
-    select: {
-      id: true,
-      slug: true,
-      status: true,
-      affiliateLinks: {
-        where: { isActive: true, marketplace: { isActive: true } },
-        select: {
-          id: true,
-          affiliateUrl: true,
-          isPrimary: true,
-          marketplace: { select: { code: true } },
+  const [product, flags] = await Promise.all([
+    prisma.product.findUnique({
+      where: { slug },
+      select: {
+        id: true,
+        slug: true,
+        status: true,
+        affiliateLinks: {
+          where: { isActive: true, marketplace: { isActive: true } },
+          select: {
+            id: true,
+            affiliateUrl: true,
+            isPrimary: true,
+            lastKnownPrice: true,
+            marketplace: { select: { code: true } },
+          },
+          orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
         },
-        orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
       },
-    },
-  });
+    }),
+    getSiteSettings(),
+  ]);
 
   if (!product || product.status !== "PUBLISHED") {
     return null;
   }
 
+  const visibleLinks = filterOffersByAmazonPreference(
+    product.affiliateLinks.map((link) => ({
+      ...link,
+      marketplace: link.marketplace.code,
+      price: link.lastKnownPrice != null ? Number(link.lastKnownPrice) : null,
+    })),
+    flags,
+  );
+
   const selected = linkId
-    ? product.affiliateLinks.find((link) => link.id === linkId)
+    ? visibleLinks.find((link) => link.id === linkId)
     : marketplaceCode
-      ? product.affiliateLinks.find((link) => link.marketplace.code === marketplaceCode)
-      : (product.affiliateLinks.find((link) => link.isPrimary) ?? product.affiliateLinks[0]);
+      ? visibleLinks.find((link) => link.marketplace === marketplaceCode)
+      : (visibleLinks.find((link) => link.isPrimary) ?? visibleLinks[0]);
 
   if (!selected) {
     return null;
@@ -85,7 +100,7 @@ async function lookupPublishedAffiliateTarget(
     linkId: selected.id,
     productId: product.id,
     productSlug: product.slug,
-    marketplaceCode: selected.marketplace.code,
+    marketplaceCode: selected.marketplace,
     destinationUrl,
   };
 }
@@ -140,19 +155,51 @@ export function resolvePublishedAffiliateTargetByOfferId(offerId: string) {
 
   return unstable_cache(
     async (): Promise<ResolvedAffiliateTarget | null> => {
-      const link = await prisma.affiliateLink.findUnique({
-        where: { id: linkId },
-        select: {
-          id: true,
-          affiliateUrl: true,
-          isActive: true,
-          productId: true,
-          marketplace: { select: { code: true, isActive: true } },
-          product: { select: { slug: true, status: true } },
-        },
-      });
+      const [link, flags] = await Promise.all([
+        prisma.affiliateLink.findUnique({
+          where: { id: linkId },
+          select: {
+            id: true,
+            affiliateUrl: true,
+            isActive: true,
+            productId: true,
+            lastKnownPrice: true,
+            marketplace: { select: { code: true, isActive: true } },
+            product: {
+              select: {
+                slug: true,
+                status: true,
+                affiliateLinks: {
+                  where: { isActive: true, marketplace: { isActive: true } },
+                  select: {
+                    id: true,
+                    lastKnownPrice: true,
+                    marketplace: { select: { code: true } },
+                  },
+                },
+              },
+            },
+          },
+        }),
+        getSiteSettings(),
+      ]);
 
       if (!link || !link.isActive || !link.marketplace.isActive || link.product.status !== "PUBLISHED") {
+        return null;
+      }
+
+      const visibleIds = new Set(
+        filterOffersByAmazonPreference(
+          link.product.affiliateLinks.map((sibling) => ({
+            id: sibling.id,
+            marketplace: sibling.marketplace.code,
+            price: sibling.lastKnownPrice != null ? Number(sibling.lastKnownPrice) : null,
+          })),
+          flags,
+        ).map((sibling) => sibling.id),
+      );
+
+      if (!visibleIds.has(link.id)) {
         return null;
       }
 

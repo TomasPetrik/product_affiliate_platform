@@ -277,8 +277,7 @@ export async function getDashboardAnalytics(
         },
       };
     })
-    .sort((a, b) => b.views - a.views || b.clicks - a.clicks)
-    .slice(0, 8);
+    .sort((a, b) => b.views - a.views || b.clicks - a.clicks);
 
   const topCategories = viewsByCategory
     .map((row) => {

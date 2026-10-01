@@ -1,12 +1,13 @@
 import { BarChart3, ExternalLink, Eye, Layers, MousePointerClick, Percent, Search, Users } from "lucide-react";
 
 import { AnalyticsExportButtons } from "@/components/admin/analytics-export-buttons";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DateRangeFilter } from "@/components/admin/date-range-filter";
 import { EmptyState } from "@/components/admin/empty-state";
 import { RankedTable } from "@/components/admin/ranked-table";
+import { RefreshMarketingViewsButton } from "@/components/admin/refresh-marketing-views-button";
 import { StatCard } from "@/components/admin/stat-card";
 import { TimeSeriesChart } from "@/components/admin/time-series-chart";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { dateRangeLabel } from "@/lib/date-range";
 import type { DashboardAnalytics } from "@/server/services/analytics.service";
 
@@ -122,13 +123,16 @@ export function AnalyticsOverview({ data, basePath }: AnalyticsOverviewProps) {
 
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
             <Card className="xl:col-span-2">
-              <CardHeader>
-                <CardTitle className="text-sm">Top products</CardTitle>
-                <p className="text-xs text-muted-foreground">
-                  Video views are the latest synced lifetime totals from linked Instagram, Facebook,
-                  YouTube, and TikTok posts. Site Views / Clicks are first-party analytics for the
-                  selected date range.
-                </p>
+              <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
+                <div className="min-w-0">
+                  <CardTitle className="text-sm">Top products</CardTitle>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Video views are the latest synced lifetime totals from linked Instagram,
+                    Facebook, YouTube, and TikTok posts. Site Views / Clicks are first-party
+                    analytics for the selected date range.
+                  </p>
+                </div>
+                <RefreshMarketingViewsButton />
               </CardHeader>
               <CardContent className="px-0">
                 <RankedTable
@@ -136,6 +140,7 @@ export function AnalyticsOverview({ data, basePath }: AnalyticsOverviewProps) {
                   emptyLabel="No product views in this range."
                   metricLabel="Site views"
                   showMarketingFunnel
+                  previewLimit={8}
                 />
               </CardContent>
             </Card>

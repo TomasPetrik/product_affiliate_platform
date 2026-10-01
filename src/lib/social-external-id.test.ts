@@ -34,13 +34,28 @@ describe("parseSocialExternalId", () => {
     );
   });
 
-  it("requires Graph media IDs for Instagram and Facebook", () => {
+  it("accepts Graph media IDs for Instagram and Facebook", () => {
     assert.deepEqual(parseSocialExternalId("INSTAGRAM", "17841400000000000"), {
       ok: true,
       externalId: "17841400000000000",
     });
-    assert.equal(parseSocialExternalId("INSTAGRAM", "https://www.instagram.com/reel/abc/").ok, false);
+    const igUrl = parseSocialExternalId("INSTAGRAM", "https://www.instagram.com/reel/AbC_12-3/");
+    assert.equal(igUrl.ok, false);
+    if (!igUrl.ok) {
+      assert.equal(igUrl.error, "INSTAGRAM_URL_NEEDS_RESOLVE");
+    }
     assert.equal(parseSocialExternalId("FACEBOOK", "not-an-id").ok, false);
+  });
+});
+
+describe("extractInstagramShortcode", () => {
+  it("extracts reel and post shortcodes", async () => {
+    const { extractInstagramShortcode } = await import("./social-external-id");
+    assert.equal(
+      extractInstagramShortcode("https://www.instagram.com/reel/AbC_12-3/"),
+      "AbC_12-3",
+    );
+    assert.equal(extractInstagramShortcode("https://www.instagram.com/p/XYZ789/"), "XYZ789");
   });
 });
 

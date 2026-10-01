@@ -1,8 +1,13 @@
 import { Prisma } from "@/generated/prisma/client";
 import { affiliateGoHref } from "@/lib/affiliate-go";
+import {
+  filterOffersByAmazonPreference,
+  type AmazonOfferPreferenceFlags,
+} from "@/lib/amazon-offer-preference";
 import { categoryCoverImage } from "@/lib/category-images";
 import { pickLowestPricedOffer } from "@/lib/lowest-offer-price";
 import { prisma } from "@/lib/prisma";
+import { getSiteSettings } from "@/server/services/site-settings.service";
 import type { CategorySummary, MarketplaceLink, ProductDetail, ProductStatus, ProductSummary } from "@/types/catalog";
 
 /**
@@ -29,9 +34,31 @@ const productInclude = {
 };
 
 type ProductWithRelations = Prisma.ProductGetPayload<{ include: typeof productInclude }>;
+type AffiliateLinkWithMarketplace = ProductWithRelations["affiliateLinks"][number];
 
-function toMarketplaceLinks(product: ProductWithRelations): MarketplaceLink[] {
-  const links = product.affiliateLinks.flatMap((link) => {
+function visibleAffiliateLinks(
+  product: ProductWithRelations,
+  flags: AmazonOfferPreferenceFlags,
+): AffiliateLinkWithMarketplace[] {
+  const priced = product.affiliateLinks.flatMap((link) => {
+    if (!link.marketplace) return [];
+    return [
+      {
+        link,
+        marketplace: link.marketplace.code,
+        price: link.lastKnownPrice != null ? Number(link.lastKnownPrice) : null,
+      },
+    ];
+  });
+
+  return filterOffersByAmazonPreference(priced, flags).map((entry) => entry.link);
+}
+
+function toMarketplaceLinks(
+  product: ProductWithRelations,
+  flags: AmazonOfferPreferenceFlags,
+): MarketplaceLink[] {
+  const links = visibleAffiliateLinks(product, flags).flatMap((link) => {
     if (!link.marketplace) return [];
     return [
       {
@@ -55,12 +82,15 @@ function toMarketplaceLinks(product: ProductWithRelations): MarketplaceLink[] {
   });
 }
 
-function resolveDisplayPricing(product: ProductWithRelations): {
+function resolveDisplayPricing(
+  product: ProductWithRelations,
+  flags: AmazonOfferPreferenceFlags,
+): {
   displayPrice: number;
   originalPrice: number | null;
   currency: string;
 } {
-  const best = pickLowestPricedOffer(product.affiliateLinks);
+  const best = pickLowestPricedOffer(visibleAffiliateLinks(product, flags));
   if (best?.lastKnownPrice != null) {
     return {
       displayPrice: Number(best.lastKnownPrice),
@@ -101,8 +131,12 @@ function toCategorySummary(
   };
 }
 
-function toProductSummary(product: ProductWithRelations, categoryProductCount: number): ProductSummary {
-  const pricing = resolveDisplayPricing(product);
+function toProductSummary(
+  product: ProductWithRelations,
+  categoryProductCount: number,
+  flags: AmazonOfferPreferenceFlags,
+): ProductSummary {
+  const pricing = resolveDisplayPricing(product, flags);
   return {
     id: product.id,
     slug: product.slug,
@@ -119,13 +153,17 @@ function toProductSummary(product: ProductWithRelations, categoryProductCount: n
     isFeatured: product.isFeatured,
     isTrending: product.isTrending,
     imageUrl: product.images[0]?.url ?? product.ogImageUrl ?? null,
-    marketplaces: toMarketplaceLinks(product),
+    marketplaces: toMarketplaceLinks(product, flags),
     publishedAt: product.publishedAt ? product.publishedAt.toISOString() : product.createdAt.toISOString(),
   };
 }
 
-function toProductDetail(product: ProductWithRelations, categoryProductCount: number): ProductDetail {
-  const summary = toProductSummary(product, categoryProductCount);
+function toProductDetail(
+  product: ProductWithRelations,
+  categoryProductCount: number,
+  flags: AmazonOfferPreferenceFlags,
+): ProductDetail {
+  const summary = toProductSummary(product, categoryProductCount, flags);
   return {
     ...summary,
     longDescription: product.longDescription ?? product.shortDescription ?? "",
@@ -142,16 +180,25 @@ async function countPublishedInCategory(categoryId: string | null): Promise<numb
 }
 
 async function toSummaries(products: ProductWithRelations[]): Promise<ProductSummary[]> {
-  const counts = new Map<string, number>();
-  const categoryIds = [...new Set(products.map((product) => product.categoryId).filter((id): id is string => Boolean(id)))];
+  const [flags, counts] = await Promise.all([
+    getSiteSettings(),
+    (async () => {
+      const map = new Map<string, number>();
+      const categoryIds = [
+        ...new Set(products.map((product) => product.categoryId).filter((id): id is string => Boolean(id))),
+      ];
+      await Promise.all(
+        categoryIds.map(async (categoryId) => {
+          map.set(categoryId, await countPublishedInCategory(categoryId));
+        }),
+      );
+      return map;
+    })(),
+  ]);
 
-  await Promise.all(
-    categoryIds.map(async (categoryId) => {
-      counts.set(categoryId, await countPublishedInCategory(categoryId));
-    }),
+  return products.map((product) =>
+    toProductSummary(product, counts.get(product.categoryId ?? "") ?? 0, flags),
   );
-
-  return products.map((product) => toProductSummary(product, counts.get(product.categoryId ?? "") ?? 0));
 }
 
 export async function getAllCategories(): Promise<CategorySummary[]> {
@@ -211,7 +258,12 @@ export async function getProductBySlug(slug: string): Promise<ProductDetail | un
 
   if (!product) return undefined;
 
-  return toProductDetail(product, await countPublishedInCategory(product.categoryId));
+  const [flags, categoryProductCount] = await Promise.all([
+    getSiteSettings(),
+    countPublishedInCategory(product.categoryId),
+  ]);
+
+  return toProductDetail(product, categoryProductCount, flags);
 }
 
 /** Canonical product path for a short `/p/{publicId}` hop, or null if missing/unpublished. */

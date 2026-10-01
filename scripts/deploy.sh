@@ -128,11 +128,17 @@ fi
 REMOTE_STEPS+=" && echo '==> prisma generate + migrate' && npx prisma generate && npx prisma migrate deploy"
 REMOTE_STEPS+=" && echo '==> next build' && npm run build"
 
+# Stop the running app before rewriting `.next`. Serving a live process from a
+# mid-build (or just-replaced) Turbopack output causes ChunkLoadError /
+# global-error pages for anyone hitting the site during deploy.
+log "Stop $DEPLOY_SERVICE before remote build"
+"${SSH[@]}" "systemctl stop '$DEPLOY_SERVICE'"
+
 log "Install, migrate, and build on the VPS"
 "${SSH[@]}" "sudo -u '$DEPLOY_APP_USER' bash -lc \"$REMOTE_STEPS\""
 
-log "Restart $DEPLOY_SERVICE"
-"${SSH[@]}" "systemctl restart '$DEPLOY_SERVICE' && sleep 2 && systemctl is-active '$DEPLOY_SERVICE'"
+log "Start $DEPLOY_SERVICE"
+"${SSH[@]}" "systemctl start '$DEPLOY_SERVICE' && sleep 2 && systemctl is-active '$DEPLOY_SERVICE'"
 
 log "Health check $DEPLOY_HEALTH_URL"
 ok=0

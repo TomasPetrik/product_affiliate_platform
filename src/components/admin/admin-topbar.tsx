@@ -6,14 +6,6 @@ import { LogOut, Menu } from "lucide-react";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { AdminSidebar } from "@/components/admin/admin-sidebar";
 import { signOutAction } from "@/server/actions/auth.actions";
@@ -65,30 +57,21 @@ export function AdminTopbar({ user }: AdminTopbarProps) {
         View public site
       </Link>
 
-      <DropdownMenu>
-        <DropdownMenuTrigger render={<Button variant="ghost" className="gap-2 px-1.5" />}>
-          <Avatar className="h-8 w-8">
-            <AvatarFallback>{initialsFor(displayName)}</AvatarFallback>
-          </Avatar>
-          <span className="hidden text-sm font-medium sm:inline">{displayName}</span>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuLabel>
-            <p className="font-medium">{displayName}</p>
-            <p className="text-xs font-normal text-muted-foreground">{user.role}</p>
-          </DropdownMenuLabel>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            variant="destructive"
-            onClick={() => {
-              void signOutAction();
-            }}
-          >
-            <LogOut className="h-4 w-4" />
+      <div className="flex items-center gap-2">
+        <Avatar className="h-8 w-8">
+          <AvatarFallback>{initialsFor(displayName)}</AvatarFallback>
+        </Avatar>
+        <div className="hidden min-w-0 sm:block">
+          <p className="truncate text-sm font-medium leading-none">{displayName}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">{user.role}</p>
+        </div>
+        <form action={signOutAction}>
+          <Button type="submit" variant="outline" size="sm" className="gap-1.5">
+            <LogOut className="h-3.5 w-3.5" />
             Sign out
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+          </Button>
+        </form>
+      </div>
     </header>
   );
 }

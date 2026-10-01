@@ -271,7 +271,9 @@ export function MarketingVideosPanel({ productId, videos }: MarketingVideosPanel
                       ? "YouTube URL or 11-char ID"
                       : platform === "TIKTOK"
                         ? "TikTok video URL or numeric ID"
-                        : "Graph media / video ID (digits)"
+                        : platform === "INSTAGRAM"
+                          ? "Instagram reel URL or Graph media ID"
+                          : "Facebook video URL or Graph video ID"
                   }
                 />
               </div>

@@ -105,9 +105,27 @@ const envSchema = z.object({
   ANALYTICS_EXCLUDE_COUNTRIES: z.string().optional(),
 
   /**
-   * Meta (Instagram + Facebook) Graph API long-lived Page access token.
-   * Needs pages_read_engagement + instagram_manage_insights (or equivalent).
-   * Optional so the site boots without social sync configured.
+   * Meta / Facebook Login app credentials (Developer Portal).
+   * Used for OAuth authorize + token exchange. Optional so the site boots
+   * without Meta connected; Connect Meta in Admin → Settings requires both.
+   */
+  META_APP_ID: z.string().min(1).optional(),
+  META_APP_SECRET: z.string().min(1).optional(),
+  /**
+   * Facebook Login for Business configuration ID from Meta Developers
+   * (Facebook Login for Business → Configurations). Required for Page/Instagram
+   * permissions — plain Facebook Login rejects those scopes as "Invalid Scopes".
+   */
+  META_LOGIN_CONFIG_ID: z.string().min(1).optional(),
+  /**
+   * Optional preferred Facebook Page ID when the authorizing user manages multiple Pages.
+   * When unset, RadarCut picks a Page named like "RadarCut", else first Page with IG, else first Page.
+   */
+  META_PAGE_ID: z.string().min(1).optional(),
+
+  /**
+   * @deprecated Prefer Facebook Login OAuth (encrypted Page token in DB).
+   * Emergency fallback Page access token for Instagram/Facebook view sync.
    */
   META_ACCESS_TOKEN: z.string().min(1).optional(),
   /** Graph API version, e.g. v22.0 */
@@ -165,6 +183,10 @@ function loadEnv(): Env {
     ANALYTICS_RETENTION_DAYS: blankToUndefined(process.env.ANALYTICS_RETENTION_DAYS),
     ANALYTICS_EXCLUDE_IPS: blankToUndefined(process.env.ANALYTICS_EXCLUDE_IPS),
     ANALYTICS_EXCLUDE_COUNTRIES: blankToUndefined(process.env.ANALYTICS_EXCLUDE_COUNTRIES),
+    META_APP_ID: blankToUndefined(process.env.META_APP_ID),
+    META_APP_SECRET: blankToUndefined(process.env.META_APP_SECRET),
+    META_LOGIN_CONFIG_ID: blankToUndefined(process.env.META_LOGIN_CONFIG_ID),
+    META_PAGE_ID: blankToUndefined(process.env.META_PAGE_ID),
     META_ACCESS_TOKEN: blankToUndefined(process.env.META_ACCESS_TOKEN),
     META_GRAPH_API_VERSION: blankToUndefined(process.env.META_GRAPH_API_VERSION) ?? "v22.0",
     YOUTUBE_API_KEY: blankToUndefined(process.env.YOUTUBE_API_KEY),

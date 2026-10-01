@@ -1,7 +1,6 @@
 "use client";
 
 import { useActionState } from "react";
-import Link from "next/link";
 import { RefreshCw } from "lucide-react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -136,11 +135,8 @@ export function TikTokConnectionCard(props: TikTokConnectionCardProps) {
 
         <div className="flex flex-wrap gap-2">
           {props.oauthConfigured && (!props.connected || needsReauth) ? (
-            <Button
-              size="sm"
-              nativeButton={false}
-              render={<Link href="/api/tiktok/auth" />}
-            >
+            // Full-page navigation required — Next <Link> soft-nav breaks OAuth.
+            <Button size="sm" nativeButton={false} render={<a href="/api/tiktok/auth" />}>
               {needsReauth ? "Reconnect TikTok" : "Connect TikTok"}
             </Button>
           ) : null}

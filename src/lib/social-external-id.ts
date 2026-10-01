@@ -87,7 +87,7 @@ function parseMetaMediaId(
   raw: string,
   label: string,
 ): { ok: true; externalId: string } | { ok: false; error: string } {
-  // Graph media IDs are numeric. URLs rarely expose them — admin should paste from Graph API / Meta Business Suite.
+  // Graph media IDs are numeric. Share URLs use shortcodes — resolved server-side via Meta cache/API.
   if (META_MEDIA_ID.test(raw)) {
     return { ok: true, externalId: raw };
   }
@@ -97,10 +97,46 @@ function parseMetaMediaId(
     return { ok: true, externalId: raw };
   }
 
+  if (label === "Instagram" && extractInstagramShortcode(raw)) {
+    return {
+      ok: false,
+      error: "INSTAGRAM_URL_NEEDS_RESOLVE",
+    };
+  }
+
+  if (label === "Facebook" && looksLikeHttpUrl(raw)) {
+    return {
+      ok: false,
+      error: "FACEBOOK_URL_NEEDS_RESOLVE",
+    };
+  }
+
   return {
     ok: false,
-    error: `${label} needs the Graph media/video ID (digits), not the share URL. Find it in Meta Business Suite → Content or via the Graph API.`,
+    error: `${label} needs the Graph media/video ID (digits), not the share URL. Sync Meta Media in Settings and paste the ID from the cached list, or paste an Instagram/Facebook URL after Sync so RadarCut can resolve it.`,
   };
+}
+
+function looksLikeHttpUrl(raw: string): boolean {
+  return /^https?:\/\//i.test(raw) || raw.includes("facebook.com") || raw.includes("fb.watch");
+}
+
+/** Extract Instagram shortcode from /reel/{code}/, /p/{code}/, /tv/{code}/ URLs. */
+export function extractInstagramShortcode(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+
+  try {
+    const url = new URL(trimmed.startsWith("http") ? trimmed : `https://${trimmed}`);
+    const host = url.hostname.replace(/^www\./i, "").toLowerCase();
+    if (host !== "instagram.com" && !host.endsWith(".instagram.com")) {
+      return null;
+    }
+    const match = url.pathname.match(/\/(?:reel|p|tv)\/([A-Za-z0-9_-]+)/);
+    return match?.[1] ?? null;
+  } catch {
+    return null;
+  }
 }
 
 export const SOCIAL_PLATFORM_LABELS: Record<SocialPlatform, string> = {

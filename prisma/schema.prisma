@@ -771,3 +771,82 @@ model TikTokCachedVideo {
   @@index([viewCount])
   @@map("tiktok_cached_videos")
 }
+
+// ---------------------------------------------------------------------------
+// Meta / Facebook Login — Page + Instagram Professional connection
+// ---------------------------------------------------------------------------
+
+enum MetaConnectionStatus {
+  CONNECTED
+  NEEDS_REAUTH
+  DISCONNECTED
+}
+
+/// OAuth connection for RadarCut's Facebook Page + linked Instagram Professional account.
+/// Page access token is used for Graph API (encrypted at rest).
+model MetaOAuthConnection {
+  id                       String               @id @default(cuid())
+  key                      String               @unique @default("default")
+  facebookUserId           String
+  facebookUserName         String?
+  pageId                   String
+  pageName                 String?
+  /// Encrypted long-lived Page access token (primary credential for Graph calls).
+  pageAccessTokenEnc       String
+  /// Encrypted long-lived User access token (used to re-list pages / refresh).
+  userAccessTokenEnc       String
+  userTokenExpiresAt       DateTime?
+  /// Page tokens from long-lived user tokens usually do not expire; null = no expiry known.
+  pageTokenExpiresAt       DateTime?
+  instagramBusinessAccountId String?
+  instagramUsername        String?
+  scopes                   String
+  status                   MetaConnectionStatus @default(CONNECTED)
+  lastError                String?
+  lastSyncedAt             DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("meta_oauth_connections")
+}
+
+/// Cached Instagram / Facebook media from the connected Meta accounts.
+model MetaCachedMedia {
+  id          String         @id @default(cuid())
+  platform    SocialPlatform
+  externalId  String
+  title       String?
+  permalinkUrl String?
+  mediaType   String?
+  createTime  DateTime?
+  viewCount   BigInt         @default(0)
+  lastSyncedAt DateTime      @default(now())
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([platform, externalId])
+  @@index([platform, viewCount])
+  @@map("meta_cached_media")
+}
+
+// ---------------------------------------------------------------------------
+// Site-wide feature toggles (singleton)
+// ---------------------------------------------------------------------------
+
+/// Switchable storefront preferences. Singleton row (`key = "default"`).
+model SiteSetting {
+  id  String @id @default(cuid())
+  key String @unique @default("default")
+
+  /// When Amazon is cheapest (or tied) among a product's offers, hide non-Amazon offers.
+  preferAmazonWhenCheapest Boolean @default(false)
+  /// When enabled, only Amazon offers are shown regardless of price.
+  forceAmazonOnly Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("site_settings")
+}

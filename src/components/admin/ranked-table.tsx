@@ -1,5 +1,10 @@
-import Link from "next/link";
+"use client";
 
+import { useState } from "react";
+import Link from "next/link";
+import { ChevronsDownUp, ChevronsUpDown } from "lucide-react";
+
+import { Button } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -17,6 +22,8 @@ interface RankedTableProps {
   metricLabel?: string;
   /** Show marketing-video funnel columns (total + IG/FB/YT/TikTok). */
   showMarketingFunnel?: boolean;
+  /** When set, show this many rows until Full view is clicked. */
+  previewLimit?: number;
 }
 
 function formatCount(value: number | undefined): string {
@@ -29,7 +36,12 @@ export function RankedTable({
   showClicks = true,
   metricLabel = "Views",
   showMarketingFunnel = false,
+  previewLimit,
 }: RankedTableProps) {
+  const [expanded, setExpanded] = useState(false);
+  const canExpand = previewLimit !== undefined && rows.length > previewLimit;
+  const visibleRows = canExpand && !expanded ? rows.slice(0, previewLimit) : rows;
+
   const colCount =
     1 + // name
     (showMarketingFunnel ? 5 : 0) +
@@ -58,7 +70,7 @@ export function RankedTable({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {rows.map((row) => (
+          {visibleRows.map((row) => (
             <TableRow key={row.id}>
               <TableCell className="max-w-[14rem] font-medium sm:max-w-xs">
                 {row.href ? (
@@ -103,6 +115,34 @@ export function RankedTable({
           ) : null}
         </TableBody>
       </Table>
+      {canExpand ? (
+        <div className="flex items-center justify-between gap-3 border-t px-4 py-3">
+          <p className="text-xs text-muted-foreground">
+            {expanded
+              ? `Showing all ${rows.length.toLocaleString()} products`
+              : `Showing top ${previewLimit} of ${rows.length.toLocaleString()}`}
+          </p>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            aria-expanded={expanded}
+            onClick={() => setExpanded((value) => !value)}
+          >
+            {expanded ? (
+              <>
+                <ChevronsDownUp className="h-3.5 w-3.5" />
+                Show less
+              </>
+            ) : (
+              <>
+                <ChevronsUpDown className="h-3.5 w-3.5" />
+                Full view
+              </>
+            )}
+          </Button>
+        </div>
+      ) : null}
     </div>
   );
 }

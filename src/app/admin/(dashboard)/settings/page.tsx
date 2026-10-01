@@ -1,14 +1,20 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
+import { AmazonOfferSettingsCard } from "@/components/admin/amazon-offer-settings-card";
+import { MetaConnectionCard } from "@/components/admin/meta-connection-card";
 import { TikTokConnectionCard } from "@/components/admin/tiktok-connection-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getAdminSession } from "@/lib/auth";
 import { env } from "@/lib/env";
+import { getMetaRedirectUri } from "@/lib/meta";
 import { prisma } from "@/lib/prisma";
 import { getTikTokRedirectUri } from "@/lib/tiktok";
+import { getMetaConnectionPublic } from "@/server/services/meta-oauth.service";
+import { listCachedMetaMedia } from "@/server/services/meta-media.service";
+import { getSiteSettings } from "@/server/services/site-settings.service";
 import { getTikTokConnectionPublic } from "@/server/services/tiktok-oauth.service";
 import { listCachedTikTokVideos } from "@/server/services/tiktok-video.service";
 
@@ -17,25 +23,34 @@ export const metadata: Metadata = { title: "Settings" };
 export default async function AdminSettingsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ tiktok?: string }>;
+  searchParams: Promise<{ tiktok?: string; meta?: string }>;
 }) {
   const session = await getAdminSession();
   const params = await searchParams;
-  const [productCount, categoryCount, marketplaceCount, revenueCount, tiktok, cachedVideos] =
-    await Promise.all([
-      prisma.product.count(),
-      prisma.category.count(),
-      prisma.marketplace.count(),
-      prisma.revenueEntry.count(),
-      getTikTokConnectionPublic(),
-      listCachedTikTokVideos(40),
-    ]);
+  const [
+    productCount,
+    categoryCount,
+    marketplaceCount,
+    revenueCount,
+    tiktok,
+    cachedVideos,
+    meta,
+    cachedMetaMedia,
+    siteSettings,
+  ] = await Promise.all([
+    prisma.product.count(),
+    prisma.category.count(),
+    prisma.marketplace.count(),
+    prisma.revenueEntry.count(),
+    getTikTokConnectionPublic(),
+    listCachedTikTokVideos(40),
+    getMetaConnectionPublic(),
+    listCachedMetaMedia(40),
+    getSiteSettings(),
+  ]);
 
   const connectedLabel =
-    tiktok.connectedLabel ??
-    (tiktok.displayName
-      ? tiktok.displayName
-      : null);
+    tiktok.connectedLabel ?? (tiktok.displayName ? tiktok.displayName : null);
 
   return (
     <div className="flex flex-col gap-6">
@@ -81,6 +96,35 @@ export default async function AdminSettingsPage({
             </p>
           </CardContent>
         </Card>
+
+        <AmazonOfferSettingsCard
+          preferAmazonWhenCheapest={siteSettings.preferAmazonWhenCheapest}
+          forceAmazonOnly={siteSettings.forceAmazonOnly}
+        />
+
+        <MetaConnectionCard
+          oauthConfigured={meta.oauthConfigured}
+          loginConfigConfigured={Boolean(env.META_LOGIN_CONFIG_ID)}
+          connected={meta.connected}
+          status={meta.status}
+          connectedLabel={meta.connectedLabel}
+          pageName={meta.pageName}
+          pageId={meta.pageId}
+          instagramUsername={meta.instagramUsername}
+          instagramBusinessAccountId={meta.instagramBusinessAccountId}
+          lastSyncedAt={meta.lastSyncedAt?.toISOString() ?? null}
+          lastError={meta.lastError}
+          redirectUri={getMetaRedirectUri()}
+          flash={params.meta ?? null}
+          media={cachedMetaMedia.map((item) => ({
+            id: item.id,
+            platform: item.platform,
+            externalId: item.externalId,
+            title: item.title,
+            permalinkUrl: item.permalinkUrl,
+            viewCount: item.viewCount.toString(),
+          }))}
+        />
 
         <TikTokConnectionCard
           oauthConfigured={tiktok.oauthConfigured}

@@ -1,6 +1,11 @@
 import { env } from "@/lib/env";
 import type { SocialPlatform } from "@/generated/prisma/enums";
 import {
+  MetaAuthError,
+  getValidMetaPageAccessToken,
+  isMetaSyncConfigured,
+} from "@/server/services/meta-oauth.service";
+import {
   TikTokAuthError,
   getValidTikTokAccessToken,
   isTikTokSyncConfigured,
@@ -22,10 +27,6 @@ export class PlatformSyncError extends Error {
   }
 }
 
-function metaConfigured(): boolean {
-  return Boolean(env.META_ACCESS_TOKEN);
-}
-
 function youtubeConfigured(): boolean {
   return Boolean(env.YOUTUBE_API_KEY);
 }
@@ -34,7 +35,7 @@ export async function isPlatformSyncConfigured(platform: SocialPlatform): Promis
   switch (platform) {
     case "INSTAGRAM":
     case "FACEBOOK":
-      return metaConfigured();
+      return isMetaSyncConfigured();
     case "YOUTUBE":
       return youtubeConfigured();
     case "TIKTOK":
@@ -58,13 +59,26 @@ export async function fetchPlatformViewCount(
   }
 }
 
-async function fetchInstagramViews(mediaId: string): Promise<PlatformViewResult> {
-  if (!env.META_ACCESS_TOKEN) {
-    throw new PlatformSyncError("META_ACCESS_TOKEN is not configured", "INSTAGRAM");
+async function resolveMetaPageToken(platform: "INSTAGRAM" | "FACEBOOK"): Promise<string> {
+  try {
+    return await getValidMetaPageAccessToken();
+  } catch (error) {
+    if (error instanceof MetaAuthError) {
+      throw new PlatformSyncError(
+        error.needsReauth
+          ? "Meta requires reconnection. Open Admin → Settings → Reconnect Meta."
+          : error.message,
+        platform,
+      );
+    }
+    throw error;
   }
+}
 
+async function fetchInstagramViews(mediaId: string): Promise<PlatformViewResult> {
+  const accessToken = await resolveMetaPageToken("INSTAGRAM");
   const version = env.META_GRAPH_API_VERSION;
-  const token = encodeURIComponent(env.META_ACCESS_TOKEN);
+  const token = encodeURIComponent(accessToken);
   const insightsUrl = `https://graph.facebook.com/${version}/${encodeURIComponent(mediaId)}/insights?metric=views&access_token=${token}`;
   const insights = await fetchJson<{
     data?: Array<{ name?: string; values?: Array<{ value?: number }>; total_value?: { value?: number } }>;
@@ -84,17 +98,14 @@ async function fetchInstagramViews(mediaId: string): Promise<PlatformViewResult>
     );
   }
 
-  const permalinkUrl = await fetchMetaPermalink(mediaId, "INSTAGRAM");
+  const permalinkUrl = await fetchMetaPermalink(mediaId, "INSTAGRAM", accessToken);
   return { viewCount: Math.floor(viewCount), permalinkUrl };
 }
 
 async function fetchFacebookViews(videoId: string): Promise<PlatformViewResult> {
-  if (!env.META_ACCESS_TOKEN) {
-    throw new PlatformSyncError("META_ACCESS_TOKEN is not configured", "FACEBOOK");
-  }
-
+  const accessToken = await resolveMetaPageToken("FACEBOOK");
   const version = env.META_GRAPH_API_VERSION;
-  const token = encodeURIComponent(env.META_ACCESS_TOKEN);
+  const token = encodeURIComponent(accessToken);
   const url = `https://graph.facebook.com/${version}/${encodeURIComponent(videoId)}?fields=views,permalink_url&access_token=${token}`;
   const data = await fetchJson<{
     views?: number | string;
@@ -120,11 +131,11 @@ async function fetchFacebookViews(videoId: string): Promise<PlatformViewResult> 
 async function fetchMetaPermalink(
   mediaId: string,
   platform: "INSTAGRAM" | "FACEBOOK",
+  accessToken: string,
 ): Promise<string | null> {
-  if (!env.META_ACCESS_TOKEN) return null;
   try {
     const version = env.META_GRAPH_API_VERSION;
-    const token = encodeURIComponent(env.META_ACCESS_TOKEN);
+    const token = encodeURIComponent(accessToken);
     const url = `https://graph.facebook.com/${version}/${encodeURIComponent(mediaId)}?fields=permalink&access_token=${token}`;
     const data = await fetchJson<{ permalink?: string }>(url, platform);
     return data.permalink ?? null;

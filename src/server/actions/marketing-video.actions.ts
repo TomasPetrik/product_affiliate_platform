@@ -206,6 +206,24 @@ export async function deleteMarketingVideoPostAction(formData: FormData): Promis
   revalidateProduct(productId);
 }
 
+function formatSyncMessage(summary: {
+  total: number;
+  synced: number;
+  failed: number;
+  skipped: number;
+}): string {
+  if (summary.total === 0) {
+    return "No platform posts to sync.";
+  }
+
+  return (
+    `Synced ${summary.synced}/${summary.total} posts` +
+    (summary.failed || summary.skipped
+      ? ` (${summary.failed} failed, ${summary.skipped} skipped).`
+      : ".")
+  );
+}
+
 export async function syncMarketingVideoViewsAction(
   _prev: MarketingVideoActionState,
   formData: FormData,
@@ -226,21 +244,41 @@ export async function syncMarketingVideoViewsAction(
       after: summary,
     });
     revalidateProduct(productId);
+    revalidatePath("/admin/analytics");
+    revalidatePath("/admin");
 
-    if (summary.total === 0) {
-      return { ok: true, message: "No platform posts to sync." };
-    }
-
-    return {
-      ok: true,
-      message: `Synced ${summary.synced}/${summary.total} posts` +
-        (summary.failed || summary.skipped
-          ? ` (${summary.failed} failed, ${summary.skipped} skipped).`
-          : "."),
-    };
+    return { ok: true, message: formatSyncMessage(summary) };
   } catch (error) {
     return {
       error: error instanceof Error ? error.message : "Sync failed.",
+    };
+  }
+}
+
+/** Sync all linked marketing video posts and refresh analytics view counts. */
+export async function refreshAnalyticsMarketingVideoViewsAction(
+  _prev: MarketingVideoActionState,
+  _formData: FormData,
+): Promise<MarketingVideoActionState> {
+  const session = await requireAdminSession();
+
+  try {
+    const summary = await syncMarketingVideoPosts();
+    await writeAuditLog({
+      actor: session,
+      action: "MARKETING_VIDEO_SYNCED",
+      entityType: "ProductMarketingVideoPost",
+      entityId: "all",
+      after: summary,
+    });
+    revalidatePath("/admin/analytics");
+    revalidatePath("/admin");
+    revalidatePath("/admin/products");
+
+    return { ok: true, message: formatSyncMessage(summary) };
+  } catch (error) {
+    return {
+      error: error instanceof Error ? error.message : "Could not refresh video views.",
     };
   }
 }

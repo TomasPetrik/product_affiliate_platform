@@ -2,6 +2,7 @@ import type { SocialPlatform } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/prisma";
 import {
   autoLabelFromPlatforms,
+  extractInstagramShortcode,
   parseSocialExternalId,
   SOCIAL_PLATFORM_LABELS,
   SOCIAL_PLATFORMS,
@@ -72,7 +73,144 @@ export async function getMarketingViewsByProductIds(
   return result;
 }
 
-function normalizePosts(posts: MarketingVideoPostInput[]) {
+async function resolvePlatformExternalId(
+  platform: SocialPlatform,
+  raw: string,
+  permalinkHint?: string | null,
+): Promise<{ externalId: string; permalinkUrl: string | null }> {
+  const parsed = parseSocialExternalId(platform, raw);
+  if (parsed.ok) {
+    return { externalId: parsed.externalId, permalinkUrl: blankToNull(permalinkHint) };
+  }
+
+  if (
+    (platform === "INSTAGRAM" && parsed.error === "INSTAGRAM_URL_NEEDS_RESOLVE") ||
+    (platform === "FACEBOOK" && parsed.error === "FACEBOOK_URL_NEEDS_RESOLVE")
+  ) {
+    const resolved = await resolveMetaShareUrl(platform, raw);
+    if (resolved) {
+      return {
+        externalId: resolved.externalId,
+        permalinkUrl: blankToNull(permalinkHint) ?? resolved.permalinkUrl,
+      };
+    }
+    throw new Error(
+      platform === "INSTAGRAM"
+        ? "Could not resolve that Instagram URL to a Graph media ID. Open Admin → Settings → Sync Meta Media, then paste the URL again (or copy the numeric ID from the cached list)."
+        : "Could not resolve that Facebook URL to a Graph video ID. Sync Meta Media in Settings, then paste the URL again (or copy the numeric ID from the cached list).",
+    );
+  }
+
+  throw new Error(parsed.error);
+}
+
+async function resolveMetaShareUrl(
+  platform: "INSTAGRAM" | "FACEBOOK",
+  raw: string,
+): Promise<{ externalId: string; permalinkUrl: string | null } | null> {
+  if (platform === "INSTAGRAM") {
+    const shortcode = extractInstagramShortcode(raw);
+    if (!shortcode) return null;
+
+    const cached = await prisma.metaCachedMedia.findFirst({
+      where: {
+        platform: "INSTAGRAM",
+        OR: [
+          { permalinkUrl: { contains: `/reel/${shortcode}` } },
+          { permalinkUrl: { contains: `/p/${shortcode}` } },
+          { permalinkUrl: { contains: `/tv/${shortcode}` } },
+          { permalinkUrl: { contains: `/${shortcode}` } },
+        ],
+      },
+      orderBy: { lastSyncedAt: "desc" },
+    });
+    if (cached) {
+      return { externalId: cached.externalId, permalinkUrl: cached.permalinkUrl };
+    }
+
+    try {
+      const { getMetaConnectionInternal, getValidMetaPageAccessToken } = await import(
+        "@/server/services/meta-oauth.service"
+      );
+      const { metaGraphUrl } = await import("@/lib/meta");
+      const connection = await getMetaConnectionInternal();
+      if (!connection?.instagramBusinessAccountId || connection.status !== "CONNECTED") {
+        return null;
+      }
+      const token = await getValidMetaPageAccessToken();
+      let nextUrl: string | null = metaGraphUrl(`/${connection.instagramBusinessAccountId}/media`, {
+        fields: "id,permalink",
+        limit: "50",
+        access_token: token,
+      });
+      let pages = 0;
+      while (nextUrl && pages < 15) {
+        pages += 1;
+        const response = await fetch(nextUrl, { cache: "no-store", signal: AbortSignal.timeout(25_000) });
+        const data = (await response.json()) as {
+          data?: Array<{ id?: string; permalink?: string }>;
+          paging?: { next?: string };
+        };
+        if (!response.ok) break;
+        for (const item of data.data ?? []) {
+          if (!item.id || !item.permalink) continue;
+          if (
+            item.permalink.includes(`/reel/${shortcode}`) ||
+            item.permalink.includes(`/p/${shortcode}`) ||
+            item.permalink.includes(`/tv/${shortcode}`)
+          ) {
+            await prisma.metaCachedMedia.upsert({
+              where: {
+                platform_externalId: { platform: "INSTAGRAM", externalId: item.id },
+              },
+              create: {
+                platform: "INSTAGRAM",
+                externalId: item.id,
+                permalinkUrl: item.permalink,
+                lastSyncedAt: new Date(),
+              },
+              update: {
+                permalinkUrl: item.permalink,
+                lastSyncedAt: new Date(),
+              },
+            });
+            return { externalId: item.id, permalinkUrl: item.permalink };
+          }
+        }
+        nextUrl = data.paging?.next ?? null;
+      }
+    } catch {
+      return null;
+    }
+    return null;
+  }
+
+  try {
+    const url = new URL(raw.startsWith("http") ? raw : `https://${raw}`);
+    const videoMatch = url.pathname.match(/\/(?:videos|reel|watch)\/(\d+)/);
+    const idFromPath = videoMatch?.[1] ?? url.searchParams.get("v");
+    if (idFromPath && /^\d{5,}$/.test(idFromPath)) {
+      return { externalId: idFromPath, permalinkUrl: url.toString() };
+    }
+
+    const cached = await prisma.metaCachedMedia.findFirst({
+      where: {
+        platform: "FACEBOOK",
+        permalinkUrl: { contains: url.pathname.slice(0, 80) },
+      },
+      orderBy: { lastSyncedAt: "desc" },
+    });
+    if (cached) {
+      return { externalId: cached.externalId, permalinkUrl: cached.permalinkUrl };
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+async function normalizePostsAsync(posts: MarketingVideoPostInput[]) {
   const platforms = new Set<SocialPlatform>();
   const normalizedPosts: Array<{
     platform: SocialPlatform;
@@ -89,15 +227,16 @@ function normalizePosts(posts: MarketingVideoPostInput[]) {
     }
     platforms.add(post.platform);
 
-    const parsed = parseSocialExternalId(post.platform, post.externalIdOrUrl);
-    if (!parsed.ok) {
-      throw new Error(parsed.error);
-    }
+    const resolved = await resolvePlatformExternalId(
+      post.platform,
+      post.externalIdOrUrl,
+      post.permalinkUrl,
+    );
 
     normalizedPosts.push({
       platform: post.platform,
-      externalId: parsed.externalId,
-      permalinkUrl: blankToNull(post.permalinkUrl),
+      externalId: resolved.externalId,
+      permalinkUrl: resolved.permalinkUrl,
     });
   }
 
@@ -121,7 +260,7 @@ export async function saveMarketingVideo(input: SaveMarketingVideoInput) {
     throw new Error("Add at least one platform post (Instagram, Facebook, YouTube, or TikTok).");
   }
 
-  const normalizedPosts = normalizePosts(input.posts);
+  const normalizedPosts = await normalizePostsAsync(input.posts);
   const title = autoLabelFromPlatforms(normalizedPosts.map((post) => post.platform));
 
   return prisma.productMarketingVideo.create({
@@ -183,7 +322,7 @@ export async function addMarketingVideoPost(
     throw new Error(`${SOCIAL_PLATFORM_LABELS[post.platform]} is already linked on this video.`);
   }
 
-  const [normalized] = normalizePosts([post]);
+  const [normalized] = await normalizePostsAsync([post]);
   const previousPlatforms = existing.posts.map((row) => row.platform);
   const nextPlatforms = [...previousPlatforms, normalized.platform];
   const previousAuto = autoLabelFromPlatforms(previousPlatforms);

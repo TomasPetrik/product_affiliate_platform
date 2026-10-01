@@ -3,6 +3,10 @@
 import { useActionState } from "react";
 import { RefreshCw } from "lucide-react";
 
+import {
+  MarketingVideoSyncResultsDialog,
+  useMarketingVideoSyncResultsDialog,
+} from "@/components/admin/marketing-video-sync-results-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -16,6 +20,10 @@ export function RefreshMarketingViewsButton() {
   const [state, action, pending] = useActionState(
     refreshAnalyticsMarketingVideoViewsAction,
     initialState,
+  );
+  const { open, setOpen, summary } = useMarketingVideoSyncResultsDialog(
+    state.syncSummary,
+    state.ok,
   );
 
   return (
@@ -31,11 +39,12 @@ export function RefreshMarketingViewsButton() {
           <AlertDescription>{state.error}</AlertDescription>
         </Alert>
       ) : null}
-      {state.ok && state.message ? (
-        <Alert className="max-w-sm">
-          <AlertDescription>{state.message}</AlertDescription>
-        </Alert>
-      ) : null}
+      <MarketingVideoSyncResultsDialog
+        open={open}
+        onOpenChange={setOpen}
+        summary={summary}
+        message={state.message}
+      />
     </div>
   );
 }

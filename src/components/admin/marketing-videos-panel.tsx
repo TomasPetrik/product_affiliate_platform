@@ -4,6 +4,10 @@ import { useActionState } from "react";
 import { RefreshCw } from "lucide-react";
 
 import { DeleteEntityButton } from "@/components/admin/delete-entity-button";
+import {
+  MarketingVideoSyncResultsDialog,
+  useMarketingVideoSyncResultsDialog,
+} from "@/components/admin/marketing-video-sync-results-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -154,6 +158,7 @@ function AddPlatformForm({
 export function MarketingVideosPanel({ productId, videos }: MarketingVideosPanelProps) {
   const [saveState, saveAction, savePending] = useActionState(saveMarketingVideoAction, initialState);
   const [syncState, syncAction, syncPending] = useActionState(syncMarketingVideoViewsAction, initialState);
+  const syncDialog = useMarketingVideoSyncResultsDialog(syncState.syncSummary, syncState.ok);
 
   return (
     <Card>
@@ -175,7 +180,17 @@ export function MarketingVideosPanel({ productId, videos }: MarketingVideosPanel
       </CardHeader>
       <CardContent className="grid gap-6">
         <ActionAlerts state={saveState} />
-        <ActionAlerts state={syncState} />
+        {syncState.error ? (
+          <Alert variant="destructive">
+            <AlertDescription>{syncState.error}</AlertDescription>
+          </Alert>
+        ) : null}
+        <MarketingVideoSyncResultsDialog
+          open={syncDialog.open}
+          onOpenChange={syncDialog.setOpen}
+          summary={syncDialog.summary}
+          message={syncState.message}
+        />
 
         {videos.length === 0 ? (
           <p className="text-sm text-muted-foreground">No marketing videos linked yet.</p>

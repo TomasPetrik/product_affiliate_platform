@@ -137,7 +137,7 @@ export function AnalyticsOverview({ data, basePath }: AnalyticsOverviewProps) {
               <CardContent className="px-0">
                 <RankedTable
                   rows={data.topProducts}
-                  emptyLabel="No product views in this range."
+                  emptyLabel="No product activity in this range."
                   metricLabel="Site views"
                   showMarketingFunnel
                   previewLimit={8}

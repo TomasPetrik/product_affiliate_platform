@@ -13,12 +13,16 @@ import {
   saveMarketingVideo,
   updateMarketingVideoLabel,
 } from "@/server/services/marketing-video.service";
-import { syncMarketingVideoPosts } from "@/server/services/marketing-video-sync.service";
+import {
+  syncMarketingVideoPosts,
+  type MarketingVideoSyncSummary,
+} from "@/server/services/marketing-video-sync.service";
 
 export interface MarketingVideoActionState {
   error?: string;
   ok?: boolean;
   message?: string;
+  syncSummary?: MarketingVideoSyncSummary;
 }
 
 function revalidateProduct(productId: string): void {
@@ -247,7 +251,11 @@ export async function syncMarketingVideoViewsAction(
     revalidatePath("/admin/analytics");
     revalidatePath("/admin");
 
-    return { ok: true, message: formatSyncMessage(summary) };
+    return {
+      ok: true,
+      message: formatSyncMessage(summary),
+      syncSummary: summary,
+    };
   } catch (error) {
     return {
       error: error instanceof Error ? error.message : "Sync failed.",
@@ -275,7 +283,11 @@ export async function refreshAnalyticsMarketingVideoViewsAction(
     revalidatePath("/admin");
     revalidatePath("/admin/products");
 
-    return { ok: true, message: formatSyncMessage(summary) };
+    return {
+      ok: true,
+      message: formatSyncMessage(summary),
+      syncSummary: summary,
+    };
   } catch (error) {
     return {
       error: error instanceof Error ? error.message : "Could not refresh video views.",

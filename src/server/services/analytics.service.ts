@@ -255,19 +255,20 @@ export async function getDashboardAnalytics(
 
   const productById = new Map(products.map((product) => [product.id, product]));
   const categoryById = new Map(categories.map((category) => [category.id, category]));
+  const viewsByProductId = new Map(viewsByProduct.map((row) => [row.productId, row._count.id]));
   const clicksByProductId = new Map(clicksByProduct.map((row) => [row.productId, row._count.id]));
   const clicksByCategoryId = new Map(clicksByCategory.map((row) => [row.categoryId, row.count]));
 
-  const topProducts = viewsByProduct
-    .map((row) => {
-      const product = productById.get(row.productId);
-      const marketing = marketingViewsByProduct.get(row.productId);
+  const topProducts = productIds
+    .map((productId) => {
+      const product = productById.get(productId);
+      const marketing = marketingViewsByProduct.get(productId);
       return {
-        id: row.productId,
+        id: productId,
         label: product?.title ?? "Deleted product",
-        href: `/admin/products/${row.productId}/analytics`,
-        views: row._count.id,
-        clicks: clicksByProductId.get(row.productId) ?? 0,
+        href: `/admin/products/${productId}/analytics`,
+        views: viewsByProductId.get(productId) ?? 0,
+        clicks: clicksByProductId.get(productId) ?? 0,
         marketingViews: marketing?.total ?? 0,
         platformViews: {
           INSTAGRAM: marketing?.INSTAGRAM ?? 0,
@@ -277,7 +278,10 @@ export async function getDashboardAnalytics(
         },
       };
     })
-    .sort((a, b) => b.views - a.views || b.clicks - a.clicks);
+    .sort(
+      (a, b) =>
+        b.marketingViews - a.marketingViews || b.views - a.views || b.clicks - a.clicks,
+    );
 
   const topCategories = viewsByCategory
     .map((row) => {

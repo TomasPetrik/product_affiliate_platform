@@ -289,6 +289,21 @@ export async function syncMetaMediaAndMarketingPosts(): Promise<MetaMediaSyncSum
       where: { key: "default", status: "CONNECTED" },
       data: { lastSyncedAt: now, lastError: null },
     });
+
+    // Keep Page feed webhook subscription fresh so Facebook comments keep arriving.
+    try {
+      const { getMetaConnectionInternal, subscribeMetaPageToWebhooks } = await import(
+        "@/server/services/meta-oauth.service"
+      );
+      const { getValidMetaPageAccessToken } = await import("@/server/services/meta-oauth.service");
+      const connection = await getMetaConnectionInternal();
+      if (connection?.pageId && connection.status === "CONNECTED") {
+        const token = await getValidMetaPageAccessToken();
+        await subscribeMetaPageToWebhooks(connection.pageId, token);
+      }
+    } catch {
+      // Non-fatal: sync succeeded even if re-subscribe failed.
+    }
   } catch (error) {
     summary.failed += 1;
     summary.error =

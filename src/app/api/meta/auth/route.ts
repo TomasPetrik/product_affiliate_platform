@@ -12,8 +12,10 @@ import {
 
 export const dynamic = "force-dynamic";
 
-/** Start Meta / Facebook Login OAuth. GET /api/meta/auth */
-export async function GET() {
+/** Start Meta / Facebook Login OAuth. GET /api/meta/auth
+ *  Optional `?classic=1` skips META_LOGIN_CONFIG_ID and uses explicit scopes.
+ */
+export async function GET(request: Request) {
   const session = await getAdminSession();
   if (!session) {
     const login = new URL("/admin/login", env.NEXT_PUBLIC_SITE_URL);
@@ -27,8 +29,13 @@ export async function GET() {
     return NextResponse.redirect(settings);
   }
 
+  const forceClassic = new URL(request.url).searchParams.get("classic") === "1";
+  const igOnly = new URL(request.url).searchParams.get("ig_only") === "1";
   const state = await createMetaOAuthState();
-  const authorizeUrl = buildMetaAuthorizeUrl(state);
+  const authorizeUrl = buildMetaAuthorizeUrl(state, {
+    forceClassic: forceClassic || igOnly,
+    igOnly,
+  });
   const response = NextResponse.redirect(authorizeUrl);
   response.cookies.set(META_OAUTH_STATE_COOKIE, state, metaOAuthStateCookieOptions());
   response.headers.set("Cache-Control", "no-store");

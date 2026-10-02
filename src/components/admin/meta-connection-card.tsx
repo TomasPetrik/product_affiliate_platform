@@ -35,6 +35,25 @@ export interface MetaConnectionCardProps {
     permalinkUrl: string | null;
     viewCount: string;
   }>;
+  webhookEvents?: Array<{
+    id: string;
+    createdAt: string;
+    object: string | null;
+    fields: string | null;
+    summary: string;
+    commentEventCount: number;
+    signatureOk: boolean;
+  }>;
+  autoReplyLogs?: Array<{
+    id: string;
+    createdAt: string;
+    platform: string;
+    status: string;
+    commentText: string | null;
+    productTitle: string | null;
+    keyword: string | null;
+    errorMessage: string | null;
+  }>;
 }
 
 const initialState: MetaActionState = {};
@@ -82,8 +101,10 @@ export function MetaConnectionCard(props: MetaConnectionCardProps) {
         <div>
           <CardTitle className="text-sm">Meta (Facebook + Instagram)</CardTitle>
           <p className="mt-1 text-xs text-muted-foreground">
-            Facebook Login for Business (config_id) for Page + Instagram Professional media and
-            views. Requires META_LOGIN_CONFIG_ID from Meta Developers.
+            Facebook Login for Business for Page + Instagram media, views, and comment auto-replies.
+            Login Config must include comment scopes; reconnect after adding them. Webhooks:
+            callback <code className="text-xs">/api/meta/webhooks</code> with{" "}
+            <code className="text-xs">META_WEBHOOK_VERIFY_TOKEN</code>.
           </p>
         </div>
         {props.connected ? (
@@ -176,13 +197,48 @@ export function MetaConnectionCard(props: MetaConnectionCardProps) {
           </p>
         )}
 
+        {props.oauthConfigured && (!props.connected || needsReauth) && props.loginConfigConfigured ? (
+          <p className="text-xs text-muted-foreground">
+            If Connect Meta shows Facebook&apos;s generic error, try{" "}
+            <strong>Connect (classic scopes)</strong>. If that fails with{" "}
+            <code className="text-[10px]">pages_read_user_content</code>, add that permission under
+            Use Cases → Manage everything on your Page, or use{" "}
+            <strong>Connect (Instagram only)</strong> for IG comments without Page engagement
+            scopes. Also confirm App Domains = radarcut.com, Privacy Policy URL is set, and Valid
+            OAuth Redirect URIs includes{" "}
+            <code className="break-all text-[10px]">{props.redirectUri}</code>.
+          </p>
+        ) : null}
+
         <div className="flex flex-wrap gap-2">
           {props.oauthConfigured && (!props.connected || needsReauth) ? (
             // Full-page navigation required — Next <Link> soft-nav to this API
             // route breaks the OAuth redirect and surfaces global-error.
-            <Button size="sm" nativeButton={false} render={<a href="/api/meta/auth" />}>
-              {needsReauth ? "Reconnect Meta" : "Connect Meta"}
-            </Button>
+            <>
+              <Button size="sm" nativeButton={false} render={<a href="/api/meta/auth" />}>
+                {needsReauth ? "Reconnect Meta" : "Connect Meta"}
+              </Button>
+              {props.loginConfigConfigured ? (
+                <>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    nativeButton={false}
+                    render={<a href="/api/meta/auth?classic=1" />}
+                  >
+                    Connect (classic scopes)
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    nativeButton={false}
+                    render={<a href="/api/meta/auth?ig_only=1" />}
+                  >
+                    Connect (Instagram only)
+                  </Button>
+                </>
+              ) : null}
+            </>
           ) : null}
 
           {props.connected ? (
@@ -240,6 +296,93 @@ export function MetaConnectionCard(props: MetaConnectionCardProps) {
             No cached media yet. Click Sync Meta Media after connecting.
           </p>
         ) : null}
+
+        <div className="grid gap-2">
+          <p className="text-xs font-medium text-foreground">Webhook deliveries</p>
+          <p className="text-xs text-muted-foreground">
+            After Meta → Webhooks → Instagram → <code className="text-[10px]">comments</code> →
+            Test, refresh this page. A new row here means RadarCut received the POST.
+          </p>
+          {(props.webhookEvents?.length ?? 0) > 0 ? (
+            <ul className="max-h-56 space-y-2 overflow-y-auto rounded-md border p-2">
+              {props.webhookEvents!.map((event) => (
+                <li
+                  key={event.id}
+                  className="grid gap-0.5 border-b border-dashed pb-2 last:border-0 last:pb-0"
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant={event.signatureOk ? "secondary" : "destructive"}>
+                      {event.signatureOk ? "OK" : "Bad signature"}
+                    </Badge>
+                    {event.object ? <Badge variant="outline">{event.object}</Badge> : null}
+                    {event.fields ? (
+                      <span className="text-[11px] text-muted-foreground">{event.fields}</span>
+                    ) : null}
+                  </div>
+                  <p className="text-xs">{event.summary}</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    {new Date(event.createdAt).toLocaleString()}
+                    {event.commentEventCount > 0
+                      ? ` · ${event.commentEventCount} comment event(s)`
+                      : ""}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              No webhook POSTs recorded yet. Use Meta&apos;s Test button, then refresh Settings.
+            </p>
+          )}
+        </div>
+
+        <div className="grid gap-2">
+          <p className="text-xs font-medium text-foreground">Comment auto-reply attempts</p>
+          <p className="text-xs text-muted-foreground">
+            Only appears when a comment matched a keyword on a linked marketing-video post.
+            Dashboard Test payloads usually will not create a reply attempt.
+          </p>
+          {(props.autoReplyLogs?.length ?? 0) > 0 ? (
+            <ul className="max-h-56 space-y-2 overflow-y-auto rounded-md border p-2">
+              {props.autoReplyLogs!.map((log) => (
+                <li
+                  key={log.id}
+                  className="grid gap-0.5 border-b border-dashed pb-2 last:border-0 last:pb-0"
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge
+                      variant={
+                        log.status === "SUCCESS"
+                          ? "secondary"
+                          : log.status === "ERROR"
+                            ? "destructive"
+                            : "outline"
+                      }
+                    >
+                      {log.status}
+                    </Badge>
+                    <Badge variant="outline">{log.platform}</Badge>
+                    {log.keyword ? (
+                      <span className="font-mono text-[11px]">{log.keyword}</span>
+                    ) : null}
+                  </div>
+                  <p className="text-xs">
+                    {log.productTitle ?? "Product"}
+                    {log.commentText ? ` · “${log.commentText.slice(0, 80)}”` : ""}
+                  </p>
+                  {log.errorMessage ? (
+                    <p className="text-[11px] text-destructive">{log.errorMessage}</p>
+                  ) : null}
+                  <p className="text-[11px] text-muted-foreground">
+                    {new Date(log.createdAt).toLocaleString()}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-xs text-muted-foreground">No auto-reply attempts yet.</p>
+          )}
+        </div>
 
         <p className="text-[11px] leading-relaxed text-muted-foreground">
           Valid OAuth Redirect URI must be exactly:{" "}

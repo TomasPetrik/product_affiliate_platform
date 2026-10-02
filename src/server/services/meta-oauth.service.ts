@@ -211,6 +211,59 @@ export async function completeMetaOAuth(code: string): Promise<void> {
       data: { key: META_CONNECTION_KEY, ...data },
     });
   }
+
+  try {
+    await subscribeMetaPageToWebhooks(page.id, page.access_token);
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Page webhook subscription failed";
+    await prisma.metaOAuthConnection.updateMany({
+      where: { key: META_CONNECTION_KEY },
+      data: { lastError: `Connected, but webhook subscribe failed: ${message}`.slice(0, 500) },
+    });
+  }
+}
+
+/**
+ * Subscribe the connected Page so Meta delivers feed (FB comments) webhooks.
+ * Instagram `comments` are configured on the Instagram object in App Dashboard;
+ * Page subscription is still required for the Facebook Login path.
+ */
+export async function subscribeMetaPageToWebhooks(
+  pageId: string,
+  pageAccessToken: string,
+): Promise<void> {
+  const url = metaGraphUrl(`/${pageId}/subscribed_apps`, {
+    access_token: pageAccessToken,
+    // feed = Page comments/posts; messages helps Messenger-related delivery for private replies
+    subscribed_fields: "feed,messages",
+  });
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      cache: "no-store",
+      signal: AbortSignal.timeout(25_000),
+    });
+  } catch (error) {
+    throw new MetaAuthError(
+      error instanceof Error ? error.message : "Failed to subscribe Page to webhooks",
+      "webhook_subscribe_network",
+    );
+  }
+
+  const data = (await response.json().catch(() => ({}))) as {
+    success?: boolean;
+    error?: { message?: string };
+  };
+
+  if (!response.ok || data.error || data.success === false) {
+    throw new MetaAuthError(
+      data.error?.message ?? `Page webhook subscription failed (HTTP ${response.status})`,
+      "webhook_subscribe_failed",
+    );
+  }
 }
 
 async function markNeedsReauth(message: string): Promise<void> {

@@ -17,6 +17,10 @@ import { listCachedMetaMedia } from "@/server/services/meta-media.service";
 import { getSiteSettings } from "@/server/services/site-settings.service";
 import { getTikTokConnectionPublic } from "@/server/services/tiktok-oauth.service";
 import { listCachedTikTokVideos } from "@/server/services/tiktok-video.service";
+import {
+  listRecentCommentAutoReplyLogs,
+  listRecentMetaWebhookEvents,
+} from "@/server/services/meta-webhook-events.service";
 
 export const metadata: Metadata = { title: "Settings" };
 
@@ -37,6 +41,8 @@ export default async function AdminSettingsPage({
     meta,
     cachedMetaMedia,
     siteSettings,
+    webhookEvents,
+    autoReplyLogs,
   ] = await Promise.all([
     prisma.product.count(),
     prisma.category.count(),
@@ -47,6 +53,8 @@ export default async function AdminSettingsPage({
     getMetaConnectionPublic(),
     listCachedMetaMedia(40),
     getSiteSettings(),
+    listRecentMetaWebhookEvents(15),
+    listRecentCommentAutoReplyLogs(15),
   ]);
 
   const connectedLabel =
@@ -123,6 +131,25 @@ export default async function AdminSettingsPage({
             title: item.title,
             permalinkUrl: item.permalinkUrl,
             viewCount: item.viewCount.toString(),
+          }))}
+          webhookEvents={webhookEvents.map((event) => ({
+            id: event.id,
+            createdAt: event.createdAt.toISOString(),
+            object: event.object,
+            fields: event.fields,
+            summary: event.summary,
+            commentEventCount: event.commentEventCount,
+            signatureOk: event.signatureOk,
+          }))}
+          autoReplyLogs={autoReplyLogs.map((log) => ({
+            id: log.id,
+            createdAt: log.createdAt.toISOString(),
+            platform: log.platform,
+            status: log.status,
+            commentText: log.commentText,
+            productTitle: log.product.title,
+            keyword: log.rule?.keyword ?? null,
+            errorMessage: log.errorMessage,
           }))}
         />
 

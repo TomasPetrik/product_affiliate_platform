@@ -123,7 +123,9 @@ model Product {
   imports          ProductImport[]
   revenueEntries   RevenueEntry[]
   priceSyncChanges PriceSyncChange[]
-  marketingVideos  ProductMarketingVideo[]
+  marketingVideos       ProductMarketingVideo[]
+  commentAutoReplyRules CommentAutoReplyRule[]
+  commentAutoReplyLogs  CommentAutoReplyLog[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -719,6 +721,69 @@ model ProductMarketingVideoPostSnapshot {
 }
 
 // ---------------------------------------------------------------------------
+// Comment keyword auto-replies (Instagram / Facebook marketing-video posts)
+// ---------------------------------------------------------------------------
+
+enum CommentAutoReplyStatus {
+  SUCCESS
+  SKIPPED
+  ERROR
+}
+
+/// Keyword → public comment and/or private DM for a product (linked marketing posts only).
+model CommentAutoReplyRule {
+  id                 String  @id @default(cuid())
+  productId          String
+  product            Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  /// Case-insensitive substring match against the comment text.
+  keyword            String
+  /// Public reply posted under the user's comment.
+  publicReplyMessage String  @default("Just sent you a DM with the link ✨")
+  /// Private DM body (product URL is appended separately).
+  dmReplyMessage     String  @default("Enjoy ✨😊")
+  /// Free-text product / hop URL included in the DM.
+  replyUrl           String
+  enablePublicReply  Boolean @default(true)
+  enablePrivateDm    Boolean @default(true)
+  enableInstagram    Boolean @default(true)
+  enableFacebook     Boolean @default(true)
+  isActive           Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  logs CommentAutoReplyLog[]
+
+  @@index([productId, isActive])
+  @@map("comment_auto_reply_rules")
+}
+
+/// Deduped log of attempted / sent comment replies (unique on Meta comment id).
+model CommentAutoReplyLog {
+  id                String                 @id @default(cuid())
+  ruleId            String?
+  rule              CommentAutoReplyRule?  @relation(fields: [ruleId], references: [id], onDelete: SetNull)
+  productId         String
+  product           Product                @relation(fields: [productId], references: [id], onDelete: Cascade)
+  platform          SocialPlatform
+  mediaExternalId   String
+  /// Meta comment id — one reply attempt per inbound comment.
+  commentId         String                 @unique
+  commentText       String?
+  replyCommentId    String?
+  replyBody         String?
+  status            CommentAutoReplyStatus
+  errorMessage      String?
+
+  createdAt DateTime @default(now())
+
+  @@index([productId])
+  @@index([platform, mediaExternalId])
+  @@index([createdAt])
+  @@map("comment_auto_reply_logs")
+}
+
+// ---------------------------------------------------------------------------
 // TikTok Login Kit (Display API) — single RadarCut account connection
 // ---------------------------------------------------------------------------
 
@@ -829,6 +894,25 @@ model MetaCachedMedia {
   @@unique([platform, externalId])
   @@index([platform, viewCount])
   @@map("meta_cached_media")
+}
+
+/// Recent Meta webhook deliveries (for Admin → Settings connectivity checks).
+model MetaWebhookEvent {
+  id                 String   @id @default(cuid())
+  /// Meta payload `object`, e.g. instagram | page.
+  object             String?
+  /// Comma-separated change fields, e.g. comments,feed.
+  fields             String?
+  /// Short human-readable summary for the admin UI.
+  summary            String
+  eventCount         Int      @default(0)
+  commentEventCount  Int      @default(0)
+  signatureOk        Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@map("meta_webhook_events")
 }
 
 // ---------------------------------------------------------------------------

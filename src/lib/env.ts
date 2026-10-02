@@ -131,6 +131,13 @@ const envSchema = z.object({
   /** Graph API version, e.g. v22.0 */
   META_GRAPH_API_VERSION: z.string().min(1).default("v22.0"),
 
+  /**
+   * Verify token for Meta webhook handshake (GET hub.verify_token).
+   * Register the same value in Meta App Dashboard → Webhooks.
+   * Optional so the site boots; the webhook route rejects verification when unset.
+   */
+  META_WEBHOOK_VERIFY_TOKEN: z.string().min(8).optional(),
+
   /** YouTube Data API v3 key (public video statistics). */
   YOUTUBE_API_KEY: z.string().min(1).optional(),
 
@@ -189,6 +196,7 @@ function loadEnv(): Env {
     META_PAGE_ID: blankToUndefined(process.env.META_PAGE_ID),
     META_ACCESS_TOKEN: blankToUndefined(process.env.META_ACCESS_TOKEN),
     META_GRAPH_API_VERSION: blankToUndefined(process.env.META_GRAPH_API_VERSION) ?? "v22.0",
+    META_WEBHOOK_VERIFY_TOKEN: blankToUndefined(process.env.META_WEBHOOK_VERIFY_TOKEN),
     YOUTUBE_API_KEY: blankToUndefined(process.env.YOUTUBE_API_KEY),
     TIKTOK_CLIENT_KEY: blankToUndefined(process.env.TIKTOK_CLIENT_KEY),
     TIKTOK_CLIENT_SECRET: blankToUndefined(process.env.TIKTOK_CLIENT_SECRET),

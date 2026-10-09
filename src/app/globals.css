@@ -199,3 +199,40 @@
     letter-spacing: -0.02em;
   }
 }
+
+/* Dual-thumb range used by video-frame span editor. */
+.dual-range-thumb {
+  pointer-events: none;
+}
+
+.dual-range-thumb::-webkit-slider-thumb {
+  pointer-events: auto;
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 9999px;
+  background: var(--foreground);
+  border: 2px solid var(--background);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--foreground) 25%, transparent);
+  cursor: pointer;
+}
+
+.dual-range-thumb::-moz-range-thumb {
+  pointer-events: auto;
+  width: 16px;
+  height: 16px;
+  border-radius: 9999px;
+  background: var(--foreground);
+  border: 2px solid var(--background);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--foreground) 25%, transparent);
+  cursor: pointer;
+}
+
+.dual-range-thumb::-webkit-slider-runnable-track {
+  background: transparent;
+}
+
+.dual-range-thumb::-moz-range-track {
+  background: transparent;
+}

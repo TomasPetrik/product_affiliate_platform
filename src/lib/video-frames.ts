@@ -14,6 +14,8 @@ export interface ExtractedFrame {
   blob: Blob;
   url: string;
   filename: string;
+  /** True when `url` is a server path (do not revoke as object URL). */
+  persisted?: boolean;
 }
 
 const CRC_TABLE = (() => {
@@ -100,6 +102,9 @@ export function createZipBlob(files: { name: string; data: Uint8Array }[]): Blob
 
 /** Evenly spaced timestamps; for count ≥ 2 includes span start and end. */
 export function timestampsForSpan(start: number, end: number, count: number): number[] {
+  if (!Number.isFinite(start) || !Number.isFinite(end) || !Number.isFinite(count)) {
+    return [];
+  }
   const safeCount = Math.max(0, Math.floor(count));
   if (safeCount === 0) {
     return [];
@@ -147,8 +152,11 @@ export function totalFrameCount(spans: FrameSpan[]): number {
 }
 
 export function clampSpan(span: FrameSpan, duration: number): FrameSpan {
-  const start = Math.min(Math.max(0, span.start), Math.max(0, duration));
-  const end = Math.min(Math.max(start, span.end), Math.max(0, duration));
+  const safeDuration = Number.isFinite(duration) && duration > 0 ? duration : 0;
+  const rawStart = Number.isFinite(span.start) ? span.start : 0;
+  const rawEnd = Number.isFinite(span.end) ? span.end : rawStart;
+  const start = Math.min(Math.max(0, rawStart), safeDuration);
+  const end = Math.min(Math.max(start, rawEnd), safeDuration);
   return {
     ...span,
     start,

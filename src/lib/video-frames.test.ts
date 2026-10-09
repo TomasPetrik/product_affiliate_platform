@@ -23,6 +23,11 @@ describe("timestampsForSpan", () => {
   it("returns start for a single frame", () => {
     assert.deepEqual(timestampsForSpan(1, 3, 1), [1]);
   });
+
+  it("rejects non-finite bounds", () => {
+    assert.deepEqual(timestampsForSpan(Number.NaN, 2, 2), []);
+    assert.deepEqual(timestampsForSpan(0, Number.POSITIVE_INFINITY, 2), []);
+  });
 });
 
 describe("formatVideoTime", () => {

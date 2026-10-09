@@ -1002,3 +1002,62 @@ model SiteSetting {
 
   @@map("site_settings")
 }
+
+// ---------------------------------------------------------------------------
+// Admin tools: video frame extraction projects
+// ---------------------------------------------------------------------------
+
+enum VideoFrameAssetKind {
+  FRAME
+  THUMBNAIL
+}
+
+/// Named admin project: source video + span config + extracted stills.
+model VideoFrameProject {
+  id            String  @id @default(cuid())
+  name          String
+  videoFileName String?
+  videoMimeType String?
+  /// Public path, e.g. /uploads/video-frames/{id}/source.mp4
+  videoPath     String?
+  videoBytes    BigInt  @default(0)
+  durationSec   Float   @default(0)
+  videoWidth    Int?
+  videoHeight   Int?
+
+  /// FrameSpan[] JSON: { id, start, end, frameCount }
+  spansJson Json @default("[]")
+
+  framesBytes     BigInt @default(0)
+  thumbnailsBytes BigInt @default(0)
+  totalBytes      BigInt @default(0)
+
+  assets VideoFrameAsset[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([updatedAt])
+  @@map("video_frame_projects")
+}
+
+model VideoFrameAsset {
+  id         String              @id @default(cuid())
+  projectId  String
+  project    VideoFrameProject   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  kind       VideoFrameAssetKind
+  spanId     String?
+  frameIndex Int?
+  timeSec    Float
+  fileName   String
+  /// Public path under /uploads/video-frames/{projectId}/…
+  path       String
+  bytes      Int
+  width      Int?
+  height     Int?
+
+  createdAt DateTime @default(now())
+
+  @@index([projectId, kind])
+  @@map("video_frame_assets")
+}

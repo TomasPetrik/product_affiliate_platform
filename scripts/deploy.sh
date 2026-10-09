@@ -86,6 +86,8 @@ RSYNC_EXCLUDES=(
   --exclude 'public/uploads/products/*'
   --include 'storage/uploads/products/.gitkeep'
   --exclude 'storage/uploads/products/*'
+  --include 'storage/uploads/video-frames/.gitkeep'
+  --exclude 'storage/uploads/video-frames/*'
 )
 
 log() {
@@ -110,6 +112,7 @@ log "Fix ownership and keep server .env private"
 "${SSH[@]}" "set -euo pipefail
   test -f '$DEPLOY_APP_DIR/.env'
   mkdir -p '$DEPLOY_APP_DIR/storage/uploads/products'
+  mkdir -p '$DEPLOY_APP_DIR/storage/uploads/video-frames'
   mkdir -p '$DEPLOY_APP_DIR/public/uploads/products'
   # One-time move of legacy public uploads into durable storage (runtime-safe).
   if compgen -G '$DEPLOY_APP_DIR/public/uploads/products/*' > /dev/null; then

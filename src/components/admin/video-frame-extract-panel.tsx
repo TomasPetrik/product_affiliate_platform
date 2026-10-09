@@ -3,19 +3,19 @@
 import {
   useCallback,
   useEffect,
-  useId,
   useRef,
   useState,
-  type DragEvent,
 } from "react";
+import { useRouter } from "next/navigation";
 import { Dialog } from "@base-ui/react/dialog";
 import {
+  Check,
+  CloudUpload,
   Download,
   Film,
   Loader2,
   Plus,
   Trash2,
-  Upload,
   X,
 } from "lucide-react";
 
@@ -38,21 +38,20 @@ import {
   type FrameSpan,
 } from "@/lib/video-frames";
 import { cn } from "@/lib/utils";
+import {
+  saveVideoFrameProjectAction,
+  saveVideoFrameProjectFramesAction,
+} from "@/server/actions/video-frame-project.actions";
+import type { VideoFrameProjectDetail } from "@/server/services/video-frame-project.service";
 
-const ACCEPT = "video/mp4,video/webm,video/quicktime,video/x-m4v";
-const ACCEPT_SET = new Set([
-  "video/mp4",
-  "video/webm",
-  "video/quicktime",
-  "video/x-m4v",
-]);
-const MAX_VIDEO_BYTES = 200 * 1024 * 1024;
 const JPEG_QUALITY = 0.92;
+const AUTOSAVE_DEBOUNCE_MS = 600;
 const PREVIEW_JPEG_QUALITY = 0.7;
 /** Tiny scrubber hints only — full resolution opens on click. */
 const PREVIEW_MAX_WIDTH = 384;
 const LIVE_FRAME_DEBOUNCE_MS = 80;
 const SCRUB_HINT_HEIGHT_PX = 192;
+const EXPORT_THUMB_HEIGHT_PX = 160;
 
 const SPAN_COLORS = [
   "bg-[var(--accent-warm)]",
@@ -64,7 +63,23 @@ const SPAN_COLORS = [
 
 function seekVideo(video: HTMLVideoElement, time: number): Promise<void> {
   return new Promise((resolve, reject) => {
-    const target = Math.min(Math.max(0, time), Math.max(0, video.duration - 0.001));
+    if (!Number.isFinite(time)) {
+      reject(new Error("Invalid seek time."));
+      return;
+    }
+
+    const duration = video.duration;
+    // Before metadata (or for some streams) duration is NaN/Infinity — never assign that.
+    if (!Number.isFinite(duration) || duration <= 0) {
+      reject(new Error("Video duration is not ready yet."));
+      return;
+    }
+
+    const target = Math.min(Math.max(0, time), Math.max(0, duration - 0.001));
+    if (!Number.isFinite(target)) {
+      reject(new Error("Invalid seek target."));
+      return;
+    }
 
     const cleanup = () => {
       video.removeEventListener("seeked", onSeeked);
@@ -90,6 +105,15 @@ function seekVideo(video: HTMLVideoElement, time: number): Promise<void> {
     video.addEventListener("error", onError);
     video.currentTime = target;
   });
+}
+
+function isSeekableVideo(video: HTMLVideoElement | null): video is HTMLVideoElement {
+  return (
+    !!video &&
+    video.readyState >= 1 &&
+    Number.isFinite(video.duration) &&
+    video.duration > 0
+  );
 }
 
 function downloadBlob(blob: Blob, filename: string) {
@@ -170,7 +194,7 @@ function ensurePreviewTimes(
 
     const previewVideo = options.videoRef.current;
     const previewCanvas = options.canvasRef.current;
-    if (!previewVideo || !previewCanvas || previewVideo.readyState < 1) {
+    if (!isSeekableVideo(previewVideo) || !previewCanvas) {
       if (options.generationRef.current === options.generation) {
         options.setLoading?.(false);
       }
@@ -183,6 +207,9 @@ function ensurePreviewTimes(
       for (const time of missing) {
         if (options.generationRef.current !== options.generation) {
           return;
+        }
+        if (!Number.isFinite(time)) {
+          continue;
         }
         const key = previewTimeKey(time);
         if (options.cacheRef.current[key]) {
@@ -227,9 +254,27 @@ function prunePreviewCache(
   setPreviewUrls({ ...cacheRef.current });
 }
 
-export function VideoFrameExtractPanel() {
-  const inputId = useId();
-  const inputRef = useRef<HTMLInputElement>(null);
+function framesFromProject(project: VideoFrameProjectDetail): ExtractedFrame[] {
+  return project.assets
+    .filter((asset) => asset.kind === "FRAME")
+    .map((asset, index) => ({
+      id: asset.id,
+      spanId: asset.spanId ?? "span",
+      index: asset.frameIndex ?? index,
+      time: asset.timeSec,
+      blob: new Blob(),
+      url: asset.path,
+      filename: asset.fileName,
+      persisted: true,
+    }));
+}
+
+export function VideoFrameExtractPanel({
+  project,
+}: {
+  project: VideoFrameProjectDetail;
+}) {
+  const router = useRouter();
   const videoRef = useRef<HTMLVideoElement>(null);
   const previewVideoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -239,24 +284,48 @@ export function VideoFrameExtractPanel() {
   const liveGenerationRef = useRef(0);
   const exportGenerationRef = useRef(0);
   const spansRef = useRef<FrameSpan[]>([]);
+  const localFrameUrlsRef = useRef<Set<string>>(new Set());
+  const [autosaveReady, setAutosaveReady] = useState(false);
 
-  const [file, setFile] = useState<File | null>(null);
-  const [videoUrl, setVideoUrl] = useState<string | null>(null);
-  const [duration, setDuration] = useState(0);
+  const initialDuration =
+    Number.isFinite(project.durationSec) && project.durationSec > 0 ? project.durationSec : 0;
+  const initialSpans =
+    project.spans.length > 0
+      ? project.spans
+          .filter(
+            (span) =>
+              Number.isFinite(span.start) &&
+              Number.isFinite(span.end) &&
+              Number.isFinite(span.frameCount),
+          )
+          .map((span) =>
+            initialDuration > 0 ? clampSpan(span, initialDuration) : span,
+          )
+      : initialDuration > 0
+        ? createDefaultSpans(initialDuration)
+        : [];
+
+  const [name, setName] = useState(project.name);
+  const [videoUrl] = useState<string | null>(project.videoPath);
+  const [duration, setDuration] = useState(initialDuration);
   /** Live slider values while dragging. */
-  const [spans, setSpans] = useState<FrameSpan[]>([]);
+  const [spans, setSpans] = useState<FrameSpan[]>(initialSpans);
   /** Committed on pointer release — drives Export preview strip. */
-  const [committedSpans, setCommittedSpans] = useState<FrameSpan[]>([]);
-  const [frames, setFrames] = useState<ExtractedFrame[]>([]);
+  const [committedSpans, setCommittedSpans] = useState<FrameSpan[]>(initialSpans);
+  const [frames, setFrames] = useState<ExtractedFrame[]>(() => framesFromProject(project));
   const [previewUrls, setPreviewUrls] = useState<Record<string, string>>({});
   const [previewReady, setPreviewReady] = useState(false);
   const [liveFrameLoading, setLiveFrameLoading] = useState(false);
   const [exportPreviewLoading, setExportPreviewLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [dragging, setDragging] = useState(false);
   const [extracting, setExtracting] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
-  const [videoAspect, setVideoAspect] = useState(16 / 9);
+  const [videoAspect, setVideoAspect] = useState(
+    project.videoWidth && project.videoHeight
+      ? project.videoWidth / project.videoHeight
+      : 16 / 9,
+  );
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [lightbox, setLightbox] = useState<{
     label: string;
     time: number;
@@ -267,19 +336,12 @@ export function VideoFrameExtractPanel() {
 
   useEffect(() => {
     return () => {
-      if (videoUrl) {
-        URL.revokeObjectURL(videoUrl);
+      for (const url of localFrameUrlsRef.current) {
+        URL.revokeObjectURL(url);
       }
+      localFrameUrlsRef.current.clear();
     };
-  }, [videoUrl]);
-
-  useEffect(() => {
-    return () => {
-      for (const frame of frames) {
-        URL.revokeObjectURL(frame.url);
-      }
-    };
-  }, [frames]);
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -292,66 +354,21 @@ export function VideoFrameExtractPanel() {
     spansRef.current = spans;
   }, [spans]);
 
-  function clearFrames() {
+  useEffect(() => {
+    const timer = window.setTimeout(() => setAutosaveReady(true), 500);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  function clearLocalFrames() {
     setFrames((prev) => {
       for (const frame of prev) {
-        URL.revokeObjectURL(frame.url);
+        if (localFrameUrlsRef.current.has(frame.url)) {
+          URL.revokeObjectURL(frame.url);
+          localFrameUrlsRef.current.delete(frame.url);
+        }
       }
       return [];
     });
-  }
-
-  function clearPreviews() {
-    liveGenerationRef.current += 1;
-    exportGenerationRef.current += 1;
-    revokePreviewMap(previewCacheRef.current);
-    previewCacheRef.current = {};
-    setPreviewUrls({});
-    setLiveFrameLoading(false);
-    setExportPreviewLoading(false);
-    setPreviewReady(false);
-  }
-
-  function selectFile(candidate: File | null) {
-    setError(null);
-    clearFrames();
-    clearPreviews();
-    closeLightbox();
-
-    if (!candidate) {
-      setFile(null);
-      setVideoUrl((prev) => {
-        if (prev) URL.revokeObjectURL(prev);
-        return null;
-      });
-      setDuration(0);
-      setSpans([]);
-      setCommittedSpans([]);
-      setVideoAspect(16 / 9);
-      if (inputRef.current) {
-        inputRef.current.value = "";
-      }
-      return;
-    }
-
-    if (!ACCEPT_SET.has(candidate.type) && !/\.(mp4|webm|mov|m4v)$/i.test(candidate.name)) {
-      setError("Use an MP4, WebM, or MOV video.");
-      return;
-    }
-
-    if (candidate.size > MAX_VIDEO_BYTES) {
-      setError(`Video must be ${Math.round(MAX_VIDEO_BYTES / (1024 * 1024))}MB or smaller.`);
-      return;
-    }
-
-    setFile(candidate);
-    setVideoUrl((prev) => {
-      if (prev) URL.revokeObjectURL(prev);
-      return URL.createObjectURL(candidate);
-    });
-    setDuration(0);
-    setSpans([]);
-    setCommittedSpans([]);
   }
 
   function closeLightbox() {
@@ -366,7 +383,8 @@ export function VideoFrameExtractPanel() {
   async function openFullFrame(time: number, label: string) {
     const previewVideo = previewVideoRef.current;
     const previewCanvas = previewCanvasRef.current;
-    if (!previewVideo || !previewCanvas) {
+    if (!isSeekableVideo(previewVideo) || !previewCanvas || !Number.isFinite(time)) {
+      setError("Video is not ready for frame preview yet.");
       return;
     }
 
@@ -390,6 +408,12 @@ export function VideoFrameExtractPanel() {
     }
   }
 
+  function markPreviewReady() {
+    if (isSeekableVideo(previewVideoRef.current)) {
+      setPreviewReady(true);
+    }
+  }
+
   function onVideoLoaded() {
     const video = videoRef.current;
     if (!video || !Number.isFinite(video.duration) || video.duration <= 0) {
@@ -399,10 +423,23 @@ export function VideoFrameExtractPanel() {
     if (video.videoWidth > 0 && video.videoHeight > 0) {
       setVideoAspect(video.videoWidth / video.videoHeight);
     }
-    const next = createDefaultSpans(video.duration);
-    setDuration(video.duration);
-    setSpans(next);
-    setCommittedSpans(next);
+    const nextDuration = video.duration;
+    setDuration(nextDuration);
+    setError(null);
+    markPreviewReady();
+
+    if (spansRef.current.length === 0) {
+      const next = createDefaultSpans(nextDuration);
+      spansRef.current = next;
+      setSpans(next);
+      setCommittedSpans(next);
+      return;
+    }
+
+    const clamped = spansRef.current.map((span) => clampSpan(span, nextDuration));
+    spansRef.current = clamped;
+    setSpans(clamped);
+    setCommittedSpans(clamped);
   }
 
   function updateSpan(id: string, patch: Partial<FrameSpan>) {
@@ -432,6 +469,7 @@ export function VideoFrameExtractPanel() {
     );
     setSpans((prev) => {
       const next = [...prev, nextSpan];
+      spansRef.current = next;
       setCommittedSpans(next);
       return next;
     });
@@ -440,10 +478,55 @@ export function VideoFrameExtractPanel() {
   function removeSpan(id: string) {
     setSpans((prev) => {
       const next = prev.filter((span) => span.id !== id);
+      spansRef.current = next;
       setCommittedSpans(next);
       return next;
     });
   }
+
+  // Autosave name + committed spans (+ video metadata once known).
+  useEffect(() => {
+    if (!autosaveReady || extracting) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      const trimmed = name.trim();
+      if (!trimmed) {
+        return;
+      }
+
+      setSaveState("saving");
+      void saveVideoFrameProjectAction({
+        projectId: project.id,
+        name: trimmed,
+        spans: committedSpans,
+        durationSec: duration > 0 ? duration : undefined,
+        videoWidth: videoRef.current?.videoWidth || project.videoWidth,
+        videoHeight: videoRef.current?.videoHeight || project.videoHeight,
+      }).then((result) => {
+        if (result.error) {
+          setSaveState("error");
+          setError(result.error);
+          return;
+        }
+        setSaveState("saved");
+        router.refresh();
+      });
+    }, AUTOSAVE_DEBOUNCE_MS);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    autosaveReady,
+    committedSpans,
+    name,
+    duration,
+    extracting,
+    project.id,
+    project.videoWidth,
+    project.videoHeight,
+    router,
+  ]);
 
   const timelineSpans = spans;
   const plannedMarks = committedSpans.flatMap((span, spanIndex) =>
@@ -457,7 +540,15 @@ export function VideoFrameExtractPanel() {
 
   // Live first/last boundary frames while dragging (especially last frame above end slider).
   useEffect(() => {
-    if (!videoUrl || duration <= 0 || extracting || spans.length === 0 || !previewReady) {
+    if (
+      !videoUrl ||
+      !Number.isFinite(duration) ||
+      duration <= 0 ||
+      extracting ||
+      spans.length === 0 ||
+      !previewReady ||
+      !isSeekableVideo(previewVideoRef.current)
+    ) {
       return;
     }
 
@@ -486,7 +577,15 @@ export function VideoFrameExtractPanel() {
 
   // Full export-preview strip: only when spans are committed (pointer release).
   useEffect(() => {
-    if (!videoUrl || duration <= 0 || extracting || committedSpans.length === 0 || !previewReady) {
+    if (
+      !videoUrl ||
+      !Number.isFinite(duration) ||
+      duration <= 0 ||
+      extracting ||
+      committedSpans.length === 0 ||
+      !previewReady ||
+      !isSeekableVideo(previewVideoRef.current)
+    ) {
       return;
     }
 
@@ -548,7 +647,7 @@ export function VideoFrameExtractPanel() {
     setExtracting(true);
     setError(null);
     setProgress({ done: 0, total: jobs.length });
-    clearFrames();
+    clearLocalFrames();
 
     const wasPaused = video.paused;
     video.pause();
@@ -562,6 +661,8 @@ export function VideoFrameExtractPanel() {
         const blob = await captureFrameBlob(video, canvas, job.time, {
           quality: JPEG_QUALITY,
         });
+        const url = URL.createObjectURL(blob);
+        localFrameUrlsRef.current.add(url);
 
         nextFrames.push({
           id: crypto.randomUUID(),
@@ -569,16 +670,53 @@ export function VideoFrameExtractPanel() {
           index: job.index,
           time: job.time,
           blob,
-          url: URL.createObjectURL(blob),
+          url,
           filename: job.filename,
         });
         setProgress({ done: i + 1, total: jobs.length });
       }
 
       setFrames(nextFrames);
+
+      const formData = new FormData();
+      formData.set("projectId", project.id);
+      formData.set(
+        "framesMeta",
+        JSON.stringify(
+          nextFrames.map((frame) => ({
+            spanId: frame.spanId,
+            frameIndex: frame.index,
+            timeSec: frame.time,
+            fileName: frame.filename,
+            width: canvas.width || undefined,
+            height: canvas.height || undefined,
+          })),
+        ),
+      );
+      for (const frame of nextFrames) {
+        formData.append("frameFiles", frame.blob, frame.filename);
+      }
+
+      setSaveState("saving");
+      const saved = await saveVideoFrameProjectFramesAction(formData);
+      if (saved.error) {
+        setSaveState("error");
+        setError(saved.error);
+      } else if (saved.project) {
+        for (const url of localFrameUrlsRef.current) {
+          URL.revokeObjectURL(url);
+        }
+        localFrameUrlsRef.current.clear();
+        setFrames(framesFromProject(saved.project));
+        setSaveState("saved");
+        router.refresh();
+      }
     } catch (err) {
       for (const frame of nextFrames) {
-        URL.revokeObjectURL(frame.url);
+        if (localFrameUrlsRef.current.has(frame.url)) {
+          URL.revokeObjectURL(frame.url);
+          localFrameUrlsRef.current.delete(frame.url);
+        }
       }
       setError(err instanceof Error ? err.message : "Frame extraction failed.");
     } finally {
@@ -587,104 +725,88 @@ export function VideoFrameExtractPanel() {
         void video.play().catch(() => undefined);
       }
     }
-  }, [duration, committedSpans]);
+  }, [duration, committedSpans, project.id, router]);
 
   async function downloadAllZip() {
     if (frames.length === 0) {
       return;
     }
     const files = await Promise.all(
-      frames.map(async (frame) => ({
-        name: frame.filename,
-        data: new Uint8Array(await frame.blob.arrayBuffer()),
-      })),
+      frames.map(async (frame) => {
+        if (frame.blob.size > 0) {
+          return {
+            name: frame.filename,
+            data: new Uint8Array(await frame.blob.arrayBuffer()),
+          };
+        }
+        const response = await fetch(frame.url);
+        const buffer = await response.arrayBuffer();
+        return {
+          name: frame.filename,
+          data: new Uint8Array(buffer),
+        };
+      }),
     );
-    const base = file?.name.replace(/\.[^.]+$/, "") || "frames";
+    const base = project.videoFileName?.replace(/\.[^.]+$/, "") || project.name || "frames";
     downloadBlob(createZipBlob(files), `${base}-frames.zip`);
   }
 
-  function onDrop(event: DragEvent<HTMLLabelElement>) {
-    event.preventDefault();
-    event.stopPropagation();
-    setDragging(false);
-    selectFile(event.dataTransfer.files?.[0] ?? null);
+  async function downloadFrame(frame: ExtractedFrame) {
+    if (frame.blob.size > 0) {
+      downloadBlob(frame.blob, frame.filename);
+      return;
+    }
+    const response = await fetch(frame.url);
+    const blob = await response.blob();
+    downloadBlob(blob, frame.filename);
   }
 
-  const maxMb = Math.round(MAX_VIDEO_BYTES / (1024 * 1024));
   const plannedTotal = totalFrameCount(committedSpans);
 
   return (
     <div className="flex flex-col gap-6">
       <Card>
-        <CardHeader>
+        <CardHeader className="flex flex-row items-start justify-between gap-3">
           <CardTitle className="flex items-center gap-2 text-base">
             <Film className="h-4 w-4" />
-            Upload video
+            Project video
           </CardTitle>
+          <p className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+            {saveState === "saving" ? (
+              <>
+                <Loader2 className="size-3.5 animate-spin" />
+                Saving…
+              </>
+            ) : null}
+            {saveState === "saved" ? (
+              <>
+                <Check className="size-3.5" />
+                Saved
+              </>
+            ) : null}
+            {saveState === "error" ? (
+              <>
+                <CloudUpload className="size-3.5 text-destructive" />
+                Save failed
+              </>
+            ) : null}
+          </p>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          <input
-            ref={inputRef}
-            id={inputId}
-            type="file"
-            accept={ACCEPT}
-            className="sr-only"
-            disabled={extracting}
-            onChange={(event) => selectFile(event.target.files?.[0] ?? null)}
-          />
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="project-name-field">Project name</Label>
+            <Input
+              id="project-name-field"
+              value={name}
+              maxLength={120}
+              disabled={extracting}
+              onChange={(event) => setName(event.target.value)}
+            />
+          </div>
 
-          <label
-            htmlFor={inputId}
-            onDragEnter={(event) => {
-              event.preventDefault();
-              if (!extracting) setDragging(true);
-            }}
-            onDragOver={(event) => {
-              event.preventDefault();
-              if (!extracting) setDragging(true);
-            }}
-            onDragLeave={(event) => {
-              event.preventDefault();
-              setDragging(false);
-            }}
-            onDrop={onDrop}
-            className={cn(
-              "flex cursor-pointer flex-col gap-3 rounded-xl border border-dashed border-border bg-muted/30 p-4 transition-colors",
-              dragging && "border-primary bg-primary/5",
-              extracting && "pointer-events-none opacity-60",
-            )}
-          >
-            <div className="flex items-center gap-3">
-              <div className="flex size-16 items-center justify-center rounded-lg bg-background text-muted-foreground ring-1 ring-border">
-                <Upload className="size-6" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium">
-                  {file ? "Ready to extract" : "Drag & drop a video"}
-                </p>
-                <p className="mt-0.5 text-xs text-muted-foreground">
-                  {file
-                    ? `${file.name} · ${(file.size / (1024 * 1024)).toFixed(2)}MB`
-                    : `or click to browse · MP4, WebM, MOV · ${maxMb}MB max`}
-                </p>
-              </div>
-              {file ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label="Clear selected video"
-                  onClick={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    selectFile(null);
-                  }}
-                >
-                  <X className="size-4" />
-                </Button>
-              ) : null}
-            </div>
-          </label>
+          {project.videoFileName ? (
+            <p className="text-xs text-muted-foreground">{project.videoFileName}</p>
+          ) : null}
 
           {error ? (
             <Alert variant="destructive">
@@ -704,7 +826,11 @@ export function VideoFrameExtractPanel() {
                 onLoadedMetadata={onVideoLoaded}
               />
             </div>
-          ) : null}
+          ) : (
+            <Alert variant="destructive">
+              <AlertDescription>This project has no source video on disk.</AlertDescription>
+            </Alert>
+          )}
 
           {videoUrl ? (
             <video
@@ -714,7 +840,9 @@ export function VideoFrameExtractPanel() {
               playsInline
               preload="auto"
               className="pointer-events-none absolute h-px w-px opacity-0"
-              onLoadedData={() => setPreviewReady(true)}
+              onLoadedMetadata={markPreviewReady}
+              onLoadedData={markPreviewReady}
+              onCanPlay={markPreviewReady}
             />
           ) : null}
 
@@ -723,14 +851,13 @@ export function VideoFrameExtractPanel() {
         </CardContent>
       </Card>
 
-      {duration > 0 ? (
+      {videoUrl && Number.isFinite(duration) && duration > 0 ? (
         <Card>
           <CardHeader className="flex flex-row items-start justify-between gap-3">
             <div>
               <CardTitle className="text-base">Frame spans</CardTitle>
               <p className="mt-1 text-sm text-muted-foreground">
-                Drag start/end like a video editor — a small aspect-true hint floats over the
-                slider. Export strip updates on release. Click any thumb for full resolution.
+                One range slider per span (start + end thumbs). Export preview updates on release.
               </p>
             </div>
             <Button type="button" variant="outline" size="sm" className="gap-1.5" onClick={addSpan}>
@@ -738,44 +865,44 @@ export function VideoFrameExtractPanel() {
               Add span
             </Button>
           </CardHeader>
-          <CardContent className="flex flex-col gap-5">
-            <div className="flex flex-col gap-2">
-              <div className="relative h-10 overflow-hidden rounded-lg bg-muted ring-1 ring-border">
-                {timelineSpans.map((span, index) => {
-                  const left = (span.start / duration) * 100;
-                  const width = Math.max(((span.end - span.start) / duration) * 100, 0.4);
-                  return (
-                    <div
-                      key={span.id}
-                      className={cn(
-                        "absolute top-1 bottom-1 rounded-md opacity-80",
-                        SPAN_COLORS[index % SPAN_COLORS.length],
-                      )}
-                      style={{ left: `${left}%`, width: `${width}%` }}
-                      title={`Span ${index + 1}: ${formatVideoTime(span.start)} – ${formatVideoTime(span.end)}`}
-                    />
-                  );
-                })}
-                {plannedMarks.map((mark) => (
-                  <div
-                    key={`${mark.spanId}-${mark.index}`}
-                    className="absolute top-0 bottom-0 w-px bg-foreground/70"
-                    style={{ left: `${(mark.time / duration) * 100}%` }}
-                  />
-                ))}
-              </div>
-              <div className="flex justify-between text-xs text-muted-foreground">
-                <span>0:00.0</span>
-                <span className="inline-flex items-center gap-1.5">
-                  {exportPreviewLoading || liveFrameLoading ? (
-                    <Loader2 className="size-3 animate-spin" />
-                  ) : null}
-                  {formatVideoTime(duration)} · {plannedTotal} planned frames
+          <CardContent className="flex flex-col gap-4">
+            <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+              <span>
+                Timeline · {formatVideoTime(duration)} · {plannedTotal} planned frames
+              </span>
+              {exportPreviewLoading || liveFrameLoading ? (
+                <span className="inline-flex items-center gap-1">
+                  <Loader2 className="size-3 animate-spin" />
+                  Updating
                 </span>
-              </div>
+              ) : null}
+            </div>
+            <div className="relative h-6 overflow-hidden rounded-md bg-muted ring-1 ring-border">
+              {timelineSpans.map((span, index) => {
+                const left = (span.start / duration) * 100;
+                const width = Math.max(((span.end - span.start) / duration) * 100, 0.4);
+                return (
+                  <div
+                    key={span.id}
+                    className={cn(
+                      "absolute top-1 bottom-1 rounded-sm opacity-80",
+                      SPAN_COLORS[index % SPAN_COLORS.length],
+                    )}
+                    style={{ left: `${left}%`, width: `${width}%` }}
+                    title={`Span ${index + 1}: ${formatVideoTime(span.start)} – ${formatVideoTime(span.end)}`}
+                  />
+                );
+              })}
+              {plannedMarks.map((mark) => (
+                <div
+                  key={`${mark.spanId}-${mark.index}`}
+                  className="absolute top-0 bottom-0 w-px bg-foreground/60"
+                  style={{ left: `${(mark.time / duration) * 100}%` }}
+                />
+              ))}
             </div>
 
-            <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-3">
               {spans.map((span, index) => {
                 const committed =
                   committedSpans.find((item) => item.id === span.id) ?? span;
@@ -790,20 +917,19 @@ export function VideoFrameExtractPanel() {
                 return (
                   <div
                     key={span.id}
-                    className="flex flex-col gap-3 rounded-xl border border-border bg-muted/20 p-4"
+                    className="rounded-xl border border-border bg-muted/15 p-3"
                   >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
+                    <div className="mb-3 flex items-center justify-between gap-2">
+                      <div className="flex min-w-0 items-center gap-2">
                         <span
                           className={cn(
-                            "size-2.5 rounded-full",
+                            "size-2 shrink-0 rounded-full",
                             SPAN_COLORS[index % SPAN_COLORS.length],
                           )}
                         />
                         <p className="text-sm font-medium">Span {index + 1}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {formatVideoTime(span.start)} – {formatVideoTime(span.end)} ·{" "}
-                          {span.frameCount} frames
+                        <p className="truncate text-xs text-muted-foreground">
+                          {formatVideoTime(span.start)} – {formatVideoTime(span.end)}
                         </p>
                       </div>
                       <Button
@@ -818,132 +944,113 @@ export function VideoFrameExtractPanel() {
                       </Button>
                     </div>
 
-                    <div className="grid gap-5 md:grid-cols-2">
-                      <ScrubberField
-                        id={`${span.id}-start`}
-                        label={`Start (${formatVideoTime(span.start)})`}
-                        hintLabel="First"
-                        value={span.start}
-                        min={0}
-                        max={duration}
-                        step={0.1}
-                        url={previewUrls[startKey]}
-                        loading={liveFrameLoading && !previewUrls[startKey]}
-                        aspect={videoAspect}
-                        disabled={extracting}
-                        onChange={(start) =>
-                          updateSpan(span.id, {
-                            start,
-                            end: Math.max(start, span.end),
-                          })
-                        }
-                        onCommit={() => commitSpans()}
-                        onOpenFull={() => void openFullFrame(span.start, "First frame")}
-                      />
-                      <ScrubberField
-                        id={`${span.id}-end`}
-                        label={`End (${formatVideoTime(span.end)})`}
-                        hintLabel="Last"
-                        value={span.end}
-                        min={0}
-                        max={duration}
-                        step={0.1}
-                        url={previewUrls[endKey]}
-                        loading={liveFrameLoading && !previewUrls[endKey]}
-                        aspect={videoAspect}
-                        disabled={extracting}
-                        emphasize
-                        onChange={(end) =>
-                          updateSpan(span.id, {
-                            end,
-                            start: Math.min(span.start, end),
-                          })
-                        }
-                        onCommit={() => commitSpans()}
-                        onOpenFull={() => void openFullFrame(span.end, "Last frame")}
-                      />
-                    </div>
-
-                    <div className="grid gap-4 sm:grid-cols-[1fr_140px]">
-                      <div className="flex flex-col gap-1.5">
-                        <Label htmlFor={`${span.id}-count`}>
-                          Frames in span ({span.frameCount})
-                        </Label>
-                        <input
-                          id={`${span.id}-count`}
-                          type="range"
-                          min={1}
-                          max={60}
-                          step={1}
-                          value={span.frameCount}
+                    <div className="grid gap-4 lg:grid-cols-2">
+                      <div className="flex min-w-0 flex-col gap-3">
+                        <DualRangeScrubber
+                          start={span.start}
+                          end={span.end}
+                          min={0}
+                          max={duration}
+                          step={0.1}
+                          startUrl={previewUrls[startKey]}
+                          endUrl={previewUrls[endKey]}
+                          loading={liveFrameLoading}
+                          aspect={videoAspect}
                           disabled={extracting}
-                          onChange={(event) =>
-                            updateSpan(span.id, { frameCount: Number(event.target.value) })
+                          onChangeStart={(start) =>
+                            updateSpan(span.id, {
+                              start,
+                              end: Math.max(start, span.end),
+                            })
                           }
-                          onPointerUp={() => commitSpans()}
-                          onKeyUp={() => commitSpans()}
-                          className="w-full accent-foreground"
+                          onChangeEnd={(end) =>
+                            updateSpan(span.id, {
+                              end,
+                              start: Math.min(span.start, end),
+                            })
+                          }
+                          onCommit={() => commitSpans()}
+                          onOpenStart={() => void openFullFrame(span.start, "First frame")}
+                          onOpenEnd={() => void openFullFrame(span.end, "Last frame")}
                         />
-                      </div>
-                      <div className="flex flex-col gap-1.5">
-                        <Label htmlFor={`${span.id}-count-input`}>Exact count</Label>
-                        <Input
-                          id={`${span.id}-count-input`}
-                          type="number"
-                          min={1}
-                          max={120}
-                          value={span.frameCount}
-                          disabled={extracting}
-                          onChange={(event) => {
-                            const frameCount = Number(event.target.value) || 1;
-                            const next = spans.map((item) =>
-                              item.id === span.id
-                                ? clampSpan({ ...item, frameCount }, duration)
-                                : item,
-                            );
-                            setSpans(next);
-                            setCommittedSpans(next);
-                          }}
-                        />
-                      </div>
-                    </div>
 
-                    <div className="flex flex-col gap-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="text-xs font-medium text-muted-foreground">
-                          Export preview ({exportTimes.length})
-                        </p>
-                        {exportPreviewLoading ? (
-                          <p className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-                            <Loader2 className="size-3 animate-spin" />
-                            Updating…
-                          </p>
-                        ) : null}
+                        <div className="flex items-center gap-3">
+                          <Label htmlFor={`${span.id}-count`} className="shrink-0 text-xs">
+                            Frames in span
+                          </Label>
+                          <input
+                            id={`${span.id}-count`}
+                            type="range"
+                            min={1}
+                            max={60}
+                            step={1}
+                            value={span.frameCount}
+                            disabled={extracting}
+                            onChange={(event) =>
+                              updateSpan(span.id, { frameCount: Number(event.target.value) })
+                            }
+                            onPointerUp={() => commitSpans()}
+                            onKeyUp={() => commitSpans()}
+                            className="min-w-0 flex-1 accent-foreground"
+                          />
+                          <Input
+                            id={`${span.id}-count-input`}
+                            type="number"
+                            min={1}
+                            max={120}
+                            value={span.frameCount}
+                            disabled={extracting}
+                            className="w-16"
+                            onChange={(event) => {
+                              const frameCount = Number(event.target.value) || 1;
+                              const next = spans.map((item) =>
+                                item.id === span.id
+                                  ? clampSpan({ ...item, frameCount }, duration)
+                                  : item,
+                              );
+                              setSpans(next);
+                              spansRef.current = next;
+                              setCommittedSpans(next);
+                            }}
+                          />
+                        </div>
                       </div>
-                      <div className="flex items-end gap-1.5 overflow-x-auto pb-1">
-                        {exportTimes.map((time, frameIndex) => {
-                          const key = previewTimeKey(time);
-                          const isEdge =
-                            frameIndex === 0 || frameIndex === exportTimes.length - 1;
-                          const label =
-                            frameIndex === 0
-                              ? "First"
-                              : frameIndex === exportTimes.length - 1
-                                ? "Last"
-                                : `#${frameIndex + 1}`;
-                          return (
-                            <TinyThumb
-                              key={`${span.id}-export-${frameIndex}-${key}`}
-                              label={label}
-                              time={time}
-                              url={previewUrls[key]}
-                              loading={exportPreviewLoading && !previewUrls[key]}
-                              aspect={videoAspect}
-                              emphasize={isEdge}
-                              onOpenFull={() => void openFullFrame(time, label)}
-                            />
-                          );
-                        })}
+
+                      <div className="flex min-w-0 flex-col gap-2 border-t border-border pt-3 lg:border-t-0 lg:border-l lg:pt-0 lg:pl-4">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-xs font-medium text-muted-foreground">
+                            Export preview ({exportTimes.length})
+                          </p>
+                          {exportPreviewLoading ? (
+                            <Loader2 className="size-3 animate-spin text-muted-foreground" />
+                          ) : null}
+                        </div>
+                        <div className="flex items-end gap-1.5 overflow-x-auto pb-0.5">
+                          {exportTimes.map((time, frameIndex) => {
+                            const key = previewTimeKey(time);
+                            const isEdge =
+                              frameIndex === 0 || frameIndex === exportTimes.length - 1;
+                            const label =
+                              frameIndex === 0
+                                ? "First"
+                                : frameIndex === exportTimes.length - 1
+                                  ? "Last"
+                                  : `#${frameIndex + 1}`;
+                            return (
+                              <TinyThumb
+                                key={`${span.id}-export-${frameIndex}-${key}`}
+                                label={label}
+                                time={time}
+                                url={previewUrls[key]}
+                                loading={exportPreviewLoading && !previewUrls[key]}
+                                aspect={videoAspect}
+                                height={EXPORT_THUMB_HEIGHT_PX}
+                                emphasize={isEdge}
+                                onOpenFull={() => void openFullFrame(time, label)}
+                              />
+                            );
+                          })}
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -1018,10 +1125,10 @@ export function VideoFrameExtractPanel() {
                     variant="ghost"
                     size="icon-xs"
                     aria-label={`Download ${frame.filename}`}
-                    onClick={() => downloadBlob(frame.blob, frame.filename)}
-                  >
-                    <Download className="size-3.5" />
-                  </Button>
+                      onClick={() => void downloadFrame(frame)}
+                    >
+                      <Download className="size-3.5" />
+                    </Button>
                 </div>
               ))}
             </div>
@@ -1075,104 +1182,176 @@ export function VideoFrameExtractPanel() {
   );
 }
 
-function ScrubberField({
-  id,
-  label,
-  hintLabel,
-  value,
+function DualRangeScrubber({
+  start,
+  end,
   min,
   max,
   step,
-  url,
+  startUrl,
+  endUrl,
   loading,
   aspect,
   disabled,
-  emphasize = false,
-  onChange,
+  onChangeStart,
+  onChangeEnd,
   onCommit,
-  onOpenFull,
+  onOpenStart,
+  onOpenEnd,
 }: {
-  id: string;
-  label: string;
-  hintLabel: string;
-  value: number;
+  start: number;
+  end: number;
   min: number;
   max: number;
   step: number;
-  url?: string;
+  startUrl?: string;
+  endUrl?: string;
   loading: boolean;
   aspect: number;
   disabled?: boolean;
-  emphasize?: boolean;
-  onChange: (value: number) => void;
+  onChangeStart: (value: number) => void;
+  onChangeEnd: (value: number) => void;
   onCommit: () => void;
-  onOpenFull: () => void;
+  onOpenStart: () => void;
+  onOpenEnd: () => void;
 }) {
-  const pct = max > min ? ((value - min) / (max - min)) * 100 : 0;
+  const span = Math.max(max - min, 0.0001);
+  const startPct = ((start - min) / span) * 100;
+  const endPct = ((end - min) / span) * 100;
+  const startOnTop = startPct > 100 - endPct;
 
   return (
     <div className="flex flex-col gap-1.5">
-      <Label htmlFor={id}>{label}</Label>
-      <div className="relative" style={{ paddingTop: SCRUB_HINT_HEIGHT_PX + 18 }}>
-        <button
-          type="button"
-          disabled={!url && !loading}
-          onClick={onOpenFull}
-          className={cn(
-            "absolute top-0 z-10 flex -translate-x-1/2 flex-col items-center gap-0.5 rounded-md outline-none transition-opacity hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring",
-            emphasize && "drop-shadow-sm",
-          )}
-          style={{ left: `${pct}%` }}
-          title={`${hintLabel} · click for full resolution`}
-        >
-          <span
-            className={cn(
-              "flex items-center justify-center overflow-hidden rounded border bg-background shadow-sm",
-              emphasize ? "border-foreground/35" : "border-border",
-            )}
-            style={{
-              height: SCRUB_HINT_HEIGHT_PX,
-              width: Math.round(SCRUB_HINT_HEIGHT_PX * aspect),
-            }}
-          >
-            {url ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={url}
-                alt=""
-                className="h-full w-auto max-w-none object-contain"
-                draggable={false}
-              />
-            ) : (
-              <span className="text-muted-foreground">
-                {loading ? (
-                  <Loader2 className="size-3.5 animate-spin" />
-                ) : (
-                  <Film className="size-3.5 opacity-40" />
-                )}
-              </span>
-            )}
-          </span>
-          <span className="rounded bg-background/95 px-1 text-[10px] leading-4 text-muted-foreground ring-1 ring-border">
-            {hintLabel} · {formatVideoTime(value)}
-          </span>
-        </button>
-
-        <input
-          id={id}
-          type="range"
-          min={min}
-          max={max}
-          step={step}
-          value={value}
-          disabled={disabled}
-          onChange={(event) => onChange(Number(event.target.value))}
-          onPointerUp={onCommit}
-          onKeyUp={onCommit}
-          className="relative z-0 w-full accent-foreground"
-        />
+      <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+        <span>Start {formatVideoTime(start)}</span>
+        <span>End {formatVideoTime(end)}</span>
       </div>
+
+      <div className="relative" style={{ paddingTop: SCRUB_HINT_HEIGHT_PX + 14 }}>
+        <HintThumb
+          label="Start"
+          url={startUrl}
+          loading={loading && !startUrl}
+          aspect={aspect}
+          pct={startPct}
+          onOpen={onOpenStart}
+        />
+        <HintThumb
+          label="End"
+          url={endUrl}
+          loading={loading && !endUrl}
+          aspect={aspect}
+          pct={endPct}
+          emphasize
+          onOpen={onOpenEnd}
+        />
+
+        <div className="relative h-7">
+          <div className="pointer-events-none absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-muted ring-1 ring-border" />
+          <div
+            className="pointer-events-none absolute top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-foreground/70"
+            style={{ left: `${startPct}%`, width: `${Math.max(endPct - startPct, 0.5)}%` }}
+          />
+
+          <input
+            type="range"
+            min={min}
+            max={max}
+            step={step}
+            value={start}
+            disabled={disabled}
+            aria-label="Span start"
+            onChange={(event) => {
+              const next = Number(event.target.value);
+              onChangeStart(Math.min(next, end));
+            }}
+            onPointerUp={onCommit}
+            onKeyUp={onCommit}
+            className="dual-range-thumb absolute inset-0 w-full appearance-none bg-transparent"
+            style={{ zIndex: startOnTop ? 4 : 3 }}
+          />
+          <input
+            type="range"
+            min={min}
+            max={max}
+            step={step}
+            value={end}
+            disabled={disabled}
+            aria-label="Span end"
+            onChange={(event) => {
+              const next = Number(event.target.value);
+              onChangeEnd(Math.max(next, start));
+            }}
+            onPointerUp={onCommit}
+            onKeyUp={onCommit}
+            className="dual-range-thumb absolute inset-0 w-full appearance-none bg-transparent"
+            style={{ zIndex: startOnTop ? 3 : 4 }}
+          />
+        </div>
+      </div>
+
     </div>
+  );
+}
+
+function HintThumb({
+  label,
+  url,
+  loading,
+  aspect,
+  pct,
+  emphasize = false,
+  onOpen,
+}: {
+  label: string;
+  url?: string;
+  loading: boolean;
+  aspect: number;
+  pct: number;
+  emphasize?: boolean;
+  onOpen: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={!url && !loading}
+      onClick={onOpen}
+      className="absolute top-0 z-10 flex -translate-x-1/2 flex-col items-center gap-0.5 outline-none transition-opacity hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring"
+      style={{ left: `${pct}%` }}
+      title={`${label} · click for full resolution`}
+    >
+      <span
+        className={cn(
+          "flex items-center justify-center overflow-hidden rounded border bg-background shadow-sm",
+          emphasize ? "border-foreground/35" : "border-border",
+        )}
+        style={{
+          height: SCRUB_HINT_HEIGHT_PX,
+          width: Math.round(SCRUB_HINT_HEIGHT_PX * aspect),
+        }}
+      >
+        {url ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={url}
+            alt=""
+            className="h-full w-auto max-w-none object-contain"
+            draggable={false}
+          />
+        ) : (
+          <span className="text-muted-foreground">
+            {loading ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <Film className="size-3.5 opacity-40" />
+            )}
+          </span>
+        )}
+      </span>
+      <span className="rounded bg-background/95 px-1 text-[10px] leading-4 text-muted-foreground ring-1 ring-border">
+        {label}
+      </span>
+    </button>
   );
 }
 
@@ -1182,6 +1361,7 @@ function TinyThumb({
   url,
   loading,
   aspect,
+  height = EXPORT_THUMB_HEIGHT_PX,
   emphasize = false,
   onOpenFull,
 }: {
@@ -1190,10 +1370,10 @@ function TinyThumb({
   url?: string;
   loading: boolean;
   aspect: number;
+  height?: number;
   emphasize?: boolean;
   onOpenFull: () => void;
 }) {
-  const height = 160;
   const width = Math.round(height * aspect);
 
   return (

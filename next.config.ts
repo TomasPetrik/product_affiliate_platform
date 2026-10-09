@@ -21,8 +21,8 @@ const nextConfig: NextConfig = {
     // has no meaningful effect on build time.
     cpus: 1,
     serverActions: {
-      // Gallery uploads allow up to 8 × 5MB images plus multipart overhead.
-      bodySizeLimit: "45mb",
+      // Product gallery uploads + video-frame project source videos (up to 200MB).
+      bodySizeLimit: "210mb",
     },
   },
   async headers() {

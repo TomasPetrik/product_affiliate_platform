@@ -48,3 +48,5 @@ next-env.d.ts
 !/public/uploads/products/.gitkeep
 /storage/uploads/products/*
 !/storage/uploads/products/.gitkeep
+/storage/uploads/video-frames/*
+!/storage/uploads/video-frames/.gitkeep

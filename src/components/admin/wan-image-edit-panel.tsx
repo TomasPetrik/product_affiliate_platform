@@ -539,6 +539,7 @@ export function WanImageEditPanel({ configured }: WanImageEditPanelProps) {
         outputs: update.outputs,
         inferenceMs: update.inferenceMs,
         error: update.error,
+        source: "standalone",
       };
       await saveWanHistoryEntry(entry);
       pendingHistoryRef.current = null;
@@ -843,13 +844,14 @@ export function WanImageEditPanel({ configured }: WanImageEditPanelProps) {
                 <History className="size-4 text-muted-foreground" />
                 <p className="text-sm font-medium">Generation history</p>
                 <span className="text-xs text-muted-foreground">
-                  Saved in this browser · tap to prefill
+                  This browser · includes video-frame edits · tap to prefill
                 </span>
               </div>
 
               {history.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
-                  Completed runs appear here so you can restore inputs and outputs.
+                  Completed runs from this tool and video-frame Wan edits appear here with
+                  prompt, refs, and outputs.
                 </p>
               ) : (
                 <ul className="grid max-h-80 gap-2 overflow-y-auto pr-1">
@@ -884,6 +886,12 @@ export function WanImageEditPanel({ configured }: WanImageEditPanelProps) {
                                   <span>
                                     {entry.referenceImages.length} ref
                                     {entry.referenceImages.length === 1 ? "" : "s"}
+                                  </span>
+                                ) : null}
+                                {entry.source === "video-frame" ? (
+                                  <span className="text-foreground/80">
+                                    Video frame
+                                    {entry.sourceLabel ? ` · ${entry.sourceLabel}` : ""}
                                   </span>
                                 ) : null}
                               </p>

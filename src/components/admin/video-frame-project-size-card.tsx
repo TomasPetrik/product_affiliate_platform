@@ -7,18 +7,26 @@ interface VideoFrameProjectSizeCardProps {
   videoBytes: number;
   framesBytes: number;
   thumbnailsBytes: number;
+  editedBytes: number;
+  clipsBytes: number;
   totalBytes: number;
   frameCount: number;
   thumbnailCount: number;
+  editedCount: number;
+  clipCount: number;
 }
 
 export function VideoFrameProjectSizeCard({
   videoBytes,
   framesBytes,
   thumbnailsBytes,
+  editedBytes,
+  clipsBytes,
   totalBytes,
   frameCount,
   thumbnailCount,
+  editedCount,
+  clipCount,
 }: VideoFrameProjectSizeCardProps) {
   const rows = [
     { label: "Original video", value: formatByteSize(videoBytes) },
@@ -29,6 +37,14 @@ export function VideoFrameProjectSizeCard({
     {
       label: `Thumbnails (${thumbnailCount})`,
       value: formatByteSize(thumbnailsBytes),
+    },
+    {
+      label: `Wan edits (${editedCount})`,
+      value: formatByteSize(editedBytes),
+    },
+    {
+      label: `Generated clips (${clipCount})`,
+      value: formatByteSize(clipsBytes),
     },
     { label: "Total project size", value: formatByteSize(totalBytes), emphasize: true },
   ];
@@ -42,7 +58,7 @@ export function VideoFrameProjectSizeCard({
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <dl className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+        <dl className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
           {rows.map((row) => (
             <div
               key={row.label}

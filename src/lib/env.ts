@@ -177,6 +177,13 @@ const envSchema = z.object({
    * Optional so the site boots without it; the tool shows a clear message when missing.
    */
   WAVESPEED_API_KEY: z.string().min(1).optional(),
+
+  /**
+   * Krea API token for video generation (Admin → Tools → Krea video).
+   * Create at https://www.krea.ai/settings/api-tokens and fund API balance at
+   * https://www.krea.ai/app/api/ — separate from Krea web-app compute units.
+   */
+  KREA_API_KEY: z.string().min(1).optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;
@@ -230,6 +237,7 @@ function loadEnv(): Env {
       process.env.TIKTOK_ACCOUNT_AUTHORIZATION_URL,
     ),
     WAVESPEED_API_KEY: blankToUndefined(process.env.WAVESPEED_API_KEY),
+    KREA_API_KEY: blankToUndefined(process.env.KREA_API_KEY),
   });
 
   if (!parsed.success) {

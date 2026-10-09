@@ -35,6 +35,8 @@ export interface WanImageEditPollState {
   status: string;
   outputs: string[];
   inferenceMs?: number;
+  /** 0–100 when WaveSpeed reports it. */
+  progress?: number;
 }
 
 async function fileToUpload(file: File, fallbackName: string) {
@@ -168,6 +170,7 @@ export async function pollWanImageEditAction(
       status: prediction.status,
       outputs: prediction.outputs,
       inferenceMs: prediction.timings?.inference,
+      progress: prediction.progress,
       error: prediction.error,
     };
   } catch (error) {

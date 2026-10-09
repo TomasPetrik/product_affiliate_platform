@@ -3,8 +3,10 @@ import { describe, it } from "node:test";
 
 import {
   DEFAULT_WAN_SIZE,
+  estimateWanProgressPercent,
   isWanCompleted,
   isWanTerminalFailure,
+  normalizeWanProgressPercent,
   randomWanSeed,
   unwrapWaveSpeedData,
   validateWanSize,
@@ -30,6 +32,30 @@ describe("prediction status helpers", () => {
     assert.equal(isWanCompleted("completed"), true);
     assert.equal(isWanTerminalFailure("failed"), true);
     assert.equal(isWanTerminalFailure("processing"), false);
+  });
+});
+
+describe("estimateWanProgressPercent", () => {
+  it("prefers API progress and caps below 100 until completed", () => {
+    assert.equal(normalizeWanProgressPercent(0.42), 42);
+    assert.equal(normalizeWanProgressPercent(75), 75);
+    assert.equal(
+      estimateWanProgressPercent({
+        status: "processing",
+        startedAt: Date.now(),
+        apiProgress: 55,
+        phase: "polling",
+      }),
+      55,
+    );
+    assert.equal(
+      estimateWanProgressPercent({
+        status: "completed",
+        startedAt: Date.now() - 10_000,
+        phase: "completed",
+      }),
+      100,
+    );
   });
 });
 

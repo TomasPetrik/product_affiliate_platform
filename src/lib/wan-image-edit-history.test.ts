@@ -20,6 +20,7 @@ function entry(partial: Partial<WanHistoryEntry> & Pick<WanHistoryEntry, "id" | 
     predictionId: "pred",
     status: "completed",
     outputs: [],
+    source: "standalone",
     ...partial,
   };
 }

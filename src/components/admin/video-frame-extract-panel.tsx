@@ -10,11 +10,13 @@ import { useRouter } from "next/navigation";
 import { Dialog } from "@base-ui/react/dialog";
 import {
   Check,
+  Clapperboard,
   CloudUpload,
   Download,
   Film,
   Loader2,
   Plus,
+  Sparkles,
   Trash2,
   X,
 } from "lucide-react";
@@ -24,6 +26,18 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  VideoFrameKreaClipDialog,
+  type SpanClipFrameCandidate,
+} from "@/components/admin/video-frame-krea-clip-dialog";
+import {
+  VideoFrameWanClipDialog,
+  type WanClipJob,
+} from "@/components/admin/video-frame-wan-clip-dialog";
+import {
+  VideoFrameWanEditDialog,
+  type WanFrameJob,
+} from "@/components/admin/video-frame-wan-edit-dialog";
 import {
   clampSpan,
   createDefaultSpans,
@@ -39,14 +53,40 @@ import {
 } from "@/lib/video-frames";
 import { cn } from "@/lib/utils";
 import {
+  DEFAULT_WAN_SIZE,
+  estimateWanProgressPercent,
+  isWanCompleted,
+  isWanTerminalFailure,
+} from "@/lib/wan-image-edit";
+import {
+  createWanHistoryId,
+  fileToStoredImage,
+  saveWanHistoryEntry,
+  type WanHistoryEntry,
+} from "@/lib/wan-image-edit-history";
+import { estimateWanVideoProgressPercent } from "@/lib/wan-video";
+import {
+  createWanVideoHistoryId,
+  fileToWanVideoStoredImage,
+  saveWanVideoHistoryEntry,
+  type WanVideoHistoryEntry,
+} from "@/lib/wan-video-history";
+import {
+  saveVideoFrameClipAction,
+  saveVideoFrameEditAction,
   saveVideoFrameProjectAction,
   saveVideoFrameProjectFramesAction,
 } from "@/server/actions/video-frame-project.actions";
+import type { VideoFrameProjectAssetDto } from "@/server/services/video-frame-project.service";
+import { pollWanImageEditAction } from "@/server/actions/wan-image-edit.actions";
+import { pollWanVideoAction } from "@/server/actions/wan-video.actions";
 import type { VideoFrameProjectDetail } from "@/server/services/video-frame-project.service";
 
 const JPEG_QUALITY = 0.92;
 const AUTOSAVE_DEBOUNCE_MS = 600;
 const PREVIEW_JPEG_QUALITY = 0.7;
+const WAN_POLL_INTERVAL_MS = 2000;
+const WAN_PROGRESS_TICK_MS = 500;
 /** Tiny scrubber hints only — full resolution opens on click. */
 const PREVIEW_MAX_WIDTH = 384;
 const LIVE_FRAME_DEBOUNCE_MS = 80;
@@ -269,10 +309,73 @@ function framesFromProject(project: VideoFrameProjectDetail): ExtractedFrame[] {
     }));
 }
 
+function editedUrlsFromProject(project: VideoFrameProjectDetail): Record<string, string> {
+  const map: Record<string, string> = {};
+  for (const asset of project.assets) {
+    if (asset.kind !== "EDITED") {
+      continue;
+    }
+    map[previewTimeKey(asset.timeSec)] = asset.path;
+  }
+  return map;
+}
+
+function clipsFromProject(project: VideoFrameProjectDetail): VideoFrameProjectAssetDto[] {
+  return project.assets
+    .filter((asset) => asset.kind === "CLIP")
+    .sort((a, b) => b.timeSec - a.timeSec || a.fileName.localeCompare(b.fileName));
+}
+
+function findAssetNearTime(
+  assets: VideoFrameProjectDetail["assets"],
+  time: number,
+  kind: "FRAME" | "EDITED",
+) {
+  const rounded = Math.round(time * 10) / 10;
+  return (
+    assets.find(
+      (asset) =>
+        asset.kind === kind && Math.round(asset.timeSec * 10) / 10 === rounded,
+    ) ?? null
+  );
+}
+
+function spanClipCandidates(input: {
+  exportTimes: number[];
+  assets: VideoFrameProjectDetail["assets"];
+  editedUrls: Record<string, string>;
+  previewUrls: Record<string, string>;
+}): SpanClipFrameCandidate[] {
+  return input.exportTimes.map((time, frameIndex) => {
+    const key = previewTimeKey(time);
+    const editedAsset = findAssetNearTime(input.assets, time, "EDITED");
+    const frameAsset = findAssetNearTime(input.assets, time, "FRAME");
+    const editedUrl = input.editedUrls[key] ?? editedAsset?.path ?? null;
+    const label =
+      frameIndex === 0
+        ? "First"
+        : frameIndex === input.exportTimes.length - 1
+          ? "Last"
+          : `#${frameIndex + 1}`;
+    return {
+      time,
+      label,
+      thumbUrl: editedUrl ?? input.previewUrls[key] ?? null,
+      editedUrl,
+      editedAssetId: editedAsset?.id ?? null,
+      frameAssetId: frameAsset?.id ?? null,
+    };
+  });
+}
+
 export function VideoFrameExtractPanel({
   project,
+  waveSpeedConfigured = false,
+  kreaConfigured = false,
 }: {
   project: VideoFrameProjectDetail;
+  waveSpeedConfigured?: boolean;
+  kreaConfigured?: boolean;
 }) {
   const router = useRouter();
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -326,13 +429,47 @@ export function VideoFrameExtractPanel({
       : 16 / 9,
   );
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [editedUrls, setEditedUrls] = useState<Record<string, string>>(() =>
+    editedUrlsFromProject(project),
+  );
+  const [wanJobs, setWanJobs] = useState<Record<string, WanFrameJob>>({});
+  const [wanEdit, setWanEdit] = useState<{
+    label: string;
+    time: number;
+    url: string;
+    blob: Blob | null;
+  } | null>(null);
+  const [wanEditLoadingTime, setWanEditLoadingTime] = useState<number | null>(null);
+  const [kreaClip, setKreaClip] = useState<{
+    spanIndex: number;
+    candidates: SpanClipFrameCandidate[];
+  } | null>(null);
+  const [wanClip, setWanClip] = useState<{
+    spanId: string;
+    spanIndex: number;
+    candidates: SpanClipFrameCandidate[];
+  } | null>(null);
+  const [wanClipJobs, setWanClipJobs] = useState<Record<string, WanClipJob>>({});
+  const [spanClips, setSpanClips] = useState<VideoFrameProjectAssetDto[]>(() =>
+    clipsFromProject(project),
+  );
+  const [clipLightbox, setClipLightbox] = useState<VideoFrameProjectAssetDto | null>(
+    null,
+  );
+
+  useEffect(() => {
+    setSpanClips(clipsFromProject(project));
+  }, [project]);
   const [lightbox, setLightbox] = useState<{
     label: string;
     time: number;
     url: string;
   } | null>(null);
-  const [lightboxLoading, setLightboxLoading] = useState(false);
-  const lightboxUrlRef = useRef<string | null>(null);
+  const wanEditUrlRef = useRef<string | null>(null);
+  const wanJobsRef = useRef(wanJobs);
+  const wanSavingRef = useRef<Set<string>>(new Set());
+  const wanClipJobsRef = useRef(wanClipJobs);
+  const wanClipSavingRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     return () => {
@@ -359,6 +496,568 @@ export function VideoFrameExtractPanel({
     return () => window.clearTimeout(timer);
   }, []);
 
+  useEffect(() => {
+    setEditedUrls(editedUrlsFromProject(project));
+  }, [project]);
+
+  useEffect(() => {
+    wanJobsRef.current = wanJobs;
+  }, [wanJobs]);
+
+  useEffect(() => {
+    wanClipJobsRef.current = wanClipJobs;
+  }, [wanClipJobs]);
+
+  const pollingJobSignature = Object.values(wanJobs)
+    .filter((job) => job.phase === "polling" && job.predictionId)
+    .map((job) => job.predictionId)
+    .sort()
+    .join("|");
+
+  useEffect(() => {
+    if (!pollingJobSignature) {
+      return;
+    }
+
+    let cancelled = false;
+
+    async function persistJobHistory(
+      job: WanFrameJob,
+      update: {
+        status: string;
+        outputs: string[];
+        inferenceMs?: number;
+        error?: string;
+      },
+    ) {
+      if (!job.mainImage || !job.historyId) {
+        return;
+      }
+      try {
+        const entry: WanHistoryEntry = {
+          id: job.historyId,
+          createdAt: new Date().toISOString(),
+          prompt: job.prompt,
+          size: job.size || DEFAULT_WAN_SIZE,
+          seed: job.seed,
+          mainImage: await fileToStoredImage(job.mainImage),
+          referenceImages: await Promise.all(
+            job.referenceImages.map((file) => fileToStoredImage(file)),
+          ),
+          predictionId: job.predictionId ?? "",
+          status: update.status,
+          outputs: update.outputs,
+          inferenceMs: update.inferenceMs,
+          error: update.error,
+          source: "video-frame",
+          sourceLabel: `${project.name} · ${job.label} · ${formatVideoTime(job.time)}`,
+        };
+        await saveWanHistoryEntry(entry);
+      } catch {
+        // History is best-effort (shared Wan image edit IndexedDB).
+      }
+    }
+
+    async function persistCompletedJob(job: WanFrameJob, outputUrl: string, inferenceMs?: number) {
+      const key = previewTimeKey(job.time);
+      if (wanSavingRef.current.has(key)) {
+        return;
+      }
+      wanSavingRef.current.add(key);
+
+      setWanJobs((prev) => ({
+        ...prev,
+        [key]: {
+          ...job,
+          phase: "saving",
+          status: "saving",
+          outputUrl,
+          progress: 97,
+          error: null,
+          inferenceMs,
+        },
+      }));
+
+      await persistJobHistory(job, {
+        status: "completed",
+        outputs: [outputUrl],
+        inferenceMs,
+      });
+
+      try {
+        const saved = await saveVideoFrameEditAction({
+          projectId: project.id,
+          timeSec: job.time,
+          sourceUrl: outputUrl,
+          prompt: job.prompt || undefined,
+        });
+        if (cancelled) {
+          return;
+        }
+        if (saved.error || !saved.project) {
+          setWanJobs((prev) => ({
+            ...prev,
+            [key]: {
+              ...(prev[key] ?? job),
+              phase: "failed",
+              status: "failed",
+              error: saved.error ?? "Could not save edited frame.",
+              progress: 0,
+            },
+          }));
+          await persistJobHistory(job, {
+            status: "failed",
+            outputs: [outputUrl],
+            inferenceMs,
+            error: saved.error ?? "Could not save edited frame.",
+          });
+          return;
+        }
+        const edited = saved.project.assets
+          .filter((asset) => asset.kind === "EDITED")
+          .find(
+            (asset) =>
+              Math.round(asset.timeSec * 10) / 10 === Math.round(job.time * 10) / 10,
+          );
+        const editUrl = edited?.path ?? outputUrl;
+        setEditedUrls((prev) => ({ ...prev, [key]: editUrl }));
+        setWanJobs((prev) => ({
+          ...prev,
+          [key]: {
+            ...(prev[key] ?? job),
+            phase: "completed",
+            status: "completed",
+            outputUrl: editUrl,
+            progress: 100,
+            error: null,
+            apiProgress: 100,
+            inferenceMs,
+          },
+        }));
+        router.refresh();
+      } finally {
+        wanSavingRef.current.delete(key);
+      }
+    }
+
+    async function pollActiveJobs() {
+      const active = Object.values(wanJobsRef.current).filter(
+        (job) => job.phase === "polling" && job.predictionId,
+      );
+      for (const job of active) {
+        if (cancelled || !job.predictionId) {
+          continue;
+        }
+        const result = await pollWanImageEditAction(job.predictionId);
+        if (cancelled) {
+          return;
+        }
+        const key = previewTimeKey(job.time);
+        const latest = wanJobsRef.current[key];
+        if (!latest || latest.predictionId !== job.predictionId || latest.phase !== "polling") {
+          continue;
+        }
+
+        if (result.error && result.status === "failed") {
+          const failedJob: WanFrameJob = {
+            ...latest,
+            phase: "failed",
+            status: result.status,
+            error: result.error ?? "Generation failed.",
+            progress: 0,
+            apiProgress: result.progress ?? latest.apiProgress,
+            inferenceMs: result.inferenceMs,
+          };
+          setWanJobs((prev) => ({ ...prev, [key]: failedJob }));
+          await persistJobHistory(failedJob, {
+            status: result.status,
+            outputs: result.outputs,
+            inferenceMs: result.inferenceMs,
+            error: result.error,
+          });
+          continue;
+        }
+
+        if (isWanCompleted(result.status) && result.outputs[0]) {
+          await persistCompletedJob(latest, result.outputs[0], result.inferenceMs);
+          continue;
+        }
+
+        if (isWanTerminalFailure(result.status)) {
+          const failedJob: WanFrameJob = {
+            ...latest,
+            phase: "failed",
+            status: result.status,
+            error: result.error || `Generation ${result.status}.`,
+            progress: 0,
+            apiProgress: result.progress ?? latest.apiProgress,
+            inferenceMs: result.inferenceMs,
+          };
+          setWanJobs((prev) => ({ ...prev, [key]: failedJob }));
+          await persistJobHistory(failedJob, {
+            status: result.status,
+            outputs: result.outputs,
+            inferenceMs: result.inferenceMs,
+            error: failedJob.error ?? undefined,
+          });
+          continue;
+        }
+
+        const apiProgress = result.progress ?? latest.apiProgress;
+        setWanJobs((prev) => ({
+          ...prev,
+          [key]: {
+            ...latest,
+            status: result.status,
+            apiProgress,
+            progress: estimateWanProgressPercent({
+              status: result.status,
+              startedAt: latest.startedAt,
+              apiProgress,
+              phase: "polling",
+            }),
+            error: null,
+          },
+        }));
+      }
+    }
+
+    void pollActiveJobs();
+    const interval = window.setInterval(() => {
+      void pollActiveJobs();
+    }, WAN_POLL_INTERVAL_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [pollingJobSignature, project.id, project.name, router]);
+
+  const activeWanSignature = Object.values(wanJobs)
+    .filter(
+      (job) =>
+        job.phase === "submitting" || job.phase === "polling" || job.phase === "saving",
+    )
+    .map((job) => previewTimeKey(job.time))
+    .sort()
+    .join("|");
+
+  useEffect(() => {
+    if (!activeWanSignature) {
+      return;
+    }
+
+    const tick = window.setInterval(() => {
+      setWanJobs((prev) => {
+        let changed = false;
+        const next: Record<string, WanFrameJob> = { ...prev };
+        for (const [key, job] of Object.entries(prev)) {
+          if (
+            job.phase !== "submitting" &&
+            job.phase !== "polling" &&
+            job.phase !== "saving"
+          ) {
+            continue;
+          }
+          const progress = estimateWanProgressPercent({
+            status: job.status,
+            startedAt: job.startedAt,
+            apiProgress: job.apiProgress,
+            phase: job.phase,
+          });
+          if (progress !== job.progress) {
+            next[key] = { ...job, progress };
+            changed = true;
+          }
+        }
+        return changed ? next : prev;
+      });
+    }, WAN_PROGRESS_TICK_MS);
+
+    return () => window.clearInterval(tick);
+  }, [activeWanSignature]);
+
+  const pollingClipJobSignature = Object.values(wanClipJobs)
+    .filter((job) => job.phase === "polling" && job.predictionId)
+    .map((job) => job.predictionId)
+    .sort()
+    .join("|");
+
+  useEffect(() => {
+    if (!pollingClipJobSignature) {
+      return;
+    }
+
+    let cancelled = false;
+
+    async function persistClipJobHistory(
+      job: WanClipJob,
+      update: {
+        status: string;
+        outputs: string[];
+        inferenceMs?: number;
+        error?: string;
+      },
+    ) {
+      if (!job.historyId) {
+        return;
+      }
+      try {
+        const entry: WanVideoHistoryEntry = {
+          id: job.historyId,
+          createdAt: new Date().toISOString(),
+          prompt: job.prompt,
+          duration: job.duration,
+          resolution: job.resolution,
+          aspectRatio: job.aspectRatio,
+          seed: job.seed,
+          generateAudio: job.generateAudio,
+          enablePromptExpansion: job.enablePromptExpansion,
+          referenceImages: await Promise.all(
+            job.referenceImages.map((file) => fileToWanVideoStoredImage(file)),
+          ),
+          predictionId: job.predictionId ?? "",
+          status: update.status,
+          outputs: update.outputs,
+          inferenceMs: update.inferenceMs,
+          error: update.error,
+          source: "video-frame",
+          sourceLabel: `${project.name} · ${job.spanLabel}`,
+        };
+        await saveWanVideoHistoryEntry(entry);
+      } catch {
+        // History is best-effort.
+      }
+    }
+
+    async function persistCompletedClipJob(
+      job: WanClipJob,
+      outputUrl: string,
+      inferenceMs?: number,
+    ) {
+      const key = job.spanId;
+      if (wanClipSavingRef.current.has(key)) {
+        return;
+      }
+      wanClipSavingRef.current.add(key);
+
+      setWanClipJobs((prev) => ({
+        ...prev,
+        [key]: {
+          ...job,
+          phase: "saving",
+          status: "saving",
+          outputUrl,
+          progress: 97,
+          error: null,
+          inferenceMs,
+        },
+      }));
+
+      await persistClipJobHistory(job, {
+        status: "completed",
+        outputs: [outputUrl],
+        inferenceMs,
+      });
+
+      try {
+        const saved = await saveVideoFrameClipAction({
+          projectId: project.id,
+          spanId: job.spanId,
+          timeSec: job.timeSec,
+          sourceUrl: outputUrl,
+          provider: "wan",
+          prompt: job.prompt || undefined,
+        });
+        if (cancelled) {
+          return;
+        }
+        if (saved.error || !saved.project) {
+          setWanClipJobs((prev) => ({
+            ...prev,
+            [key]: {
+              ...(prev[key] ?? job),
+              phase: "failed",
+              status: "failed",
+              error: saved.error ?? "Could not save clip.",
+              progress: 0,
+            },
+          }));
+          await persistClipJobHistory(job, {
+            status: "failed",
+            outputs: [outputUrl],
+            inferenceMs,
+            error: saved.error ?? "Could not save clip.",
+          });
+          return;
+        }
+        setSpanClips(clipsFromProject(saved.project));
+        const spanClipAssets = saved.project.assets.filter(
+          (asset) => asset.kind === "CLIP" && asset.spanId === job.spanId,
+        );
+        const clipUrl = spanClipAssets[spanClipAssets.length - 1]?.path ?? outputUrl;
+        setWanClipJobs((prev) => ({
+          ...prev,
+          [key]: {
+            ...(prev[key] ?? job),
+            phase: "completed",
+            status: "completed",
+            outputUrl: clipUrl,
+            progress: 100,
+            error: null,
+            apiProgress: 100,
+            inferenceMs,
+          },
+        }));
+        router.refresh();
+      } finally {
+        wanClipSavingRef.current.delete(key);
+      }
+    }
+
+    async function pollActiveClipJobs() {
+      const active = Object.values(wanClipJobsRef.current).filter(
+        (job) => job.phase === "polling" && job.predictionId,
+      );
+      for (const job of active) {
+        if (cancelled || !job.predictionId) {
+          continue;
+        }
+        const result = await pollWanVideoAction(job.predictionId);
+        if (cancelled) {
+          return;
+        }
+        const key = job.spanId;
+        const latest = wanClipJobsRef.current[key];
+        if (
+          !latest ||
+          latest.predictionId !== job.predictionId ||
+          latest.phase !== "polling"
+        ) {
+          continue;
+        }
+
+        if (result.error && result.status === "failed") {
+          const failedJob: WanClipJob = {
+            ...latest,
+            phase: "failed",
+            status: result.status,
+            error: result.error ?? "Generation failed.",
+            progress: 0,
+            apiProgress: result.progress ?? latest.apiProgress,
+            inferenceMs: result.inferenceMs,
+          };
+          setWanClipJobs((prev) => ({ ...prev, [key]: failedJob }));
+          await persistClipJobHistory(failedJob, {
+            status: result.status,
+            outputs: result.outputs,
+            inferenceMs: result.inferenceMs,
+            error: result.error,
+          });
+          continue;
+        }
+
+        if (isWanCompleted(result.status) && result.outputs[0]) {
+          await persistCompletedClipJob(latest, result.outputs[0], result.inferenceMs);
+          continue;
+        }
+
+        if (isWanTerminalFailure(result.status)) {
+          const failedJob: WanClipJob = {
+            ...latest,
+            phase: "failed",
+            status: result.status,
+            error: result.error || `Generation ${result.status}.`,
+            progress: 0,
+            apiProgress: result.progress ?? latest.apiProgress,
+            inferenceMs: result.inferenceMs,
+          };
+          setWanClipJobs((prev) => ({ ...prev, [key]: failedJob }));
+          await persistClipJobHistory(failedJob, {
+            status: result.status,
+            outputs: result.outputs,
+            inferenceMs: result.inferenceMs,
+            error: failedJob.error ?? undefined,
+          });
+          continue;
+        }
+
+        const apiProgress = result.progress ?? latest.apiProgress;
+        setWanClipJobs((prev) => ({
+          ...prev,
+          [key]: {
+            ...latest,
+            status: result.status,
+            apiProgress,
+            progress: estimateWanVideoProgressPercent({
+              status: result.status,
+              startedAt: latest.startedAt,
+              apiProgress,
+              phase: "polling",
+            }),
+            error: null,
+          },
+        }));
+      }
+    }
+
+    void pollActiveClipJobs();
+    const interval = window.setInterval(() => {
+      void pollActiveClipJobs();
+    }, WAN_POLL_INTERVAL_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [pollingClipJobSignature, project.id, project.name, router]);
+
+  const activeWanClipSignature = Object.values(wanClipJobs)
+    .filter(
+      (job) =>
+        job.phase === "submitting" ||
+        job.phase === "polling" ||
+        job.phase === "saving",
+    )
+    .map((job) => job.spanId)
+    .sort()
+    .join("|");
+
+  useEffect(() => {
+    if (!activeWanClipSignature) {
+      return;
+    }
+
+    const tick = window.setInterval(() => {
+      setWanClipJobs((prev) => {
+        let changed = false;
+        const next: Record<string, WanClipJob> = { ...prev };
+        for (const [key, job] of Object.entries(prev)) {
+          if (
+            job.phase !== "submitting" &&
+            job.phase !== "polling" &&
+            job.phase !== "saving"
+          ) {
+            continue;
+          }
+          const progress = estimateWanVideoProgressPercent({
+            status: job.status,
+            startedAt: job.startedAt,
+            apiProgress: job.apiProgress,
+            phase: job.phase,
+          });
+          if (progress !== job.progress) {
+            next[key] = { ...job, progress };
+            changed = true;
+          }
+        }
+        return changed ? next : prev;
+      });
+    }, WAN_PROGRESS_TICK_MS);
+
+    return () => window.clearInterval(tick);
+  }, [activeWanClipSignature]);
+
   function clearLocalFrames() {
     setFrames((prev) => {
       for (const frame of prev) {
@@ -371,13 +1070,231 @@ export function VideoFrameExtractPanel({
     });
   }
 
-  function closeLightbox() {
-    if (lightboxUrlRef.current) {
-      URL.revokeObjectURL(lightboxUrlRef.current);
-      lightboxUrlRef.current = null;
+  function closeWanEdit() {
+    if (wanEditUrlRef.current) {
+      URL.revokeObjectURL(wanEditUrlRef.current);
+      wanEditUrlRef.current = null;
     }
-    setLightbox(null);
-    setLightboxLoading(false);
+    setWanEdit(null);
+    setWanEditLoadingTime(null);
+  }
+
+  function buildSpanClipCandidates(exportTimes: number[]): SpanClipFrameCandidate[] | null {
+    const candidates = spanClipCandidates({
+      exportTimes,
+      assets: project.assets,
+      editedUrls,
+      previewUrls,
+    });
+    if (candidates.length === 0) {
+      setError("This span has no planned frames to generate a clip from.");
+      return null;
+    }
+    return candidates;
+  }
+
+  function openKreaClip(spanIndex: number, exportTimes: number[]) {
+    const candidates = buildSpanClipCandidates(exportTimes);
+    if (!candidates) return;
+    setKreaClip({ spanIndex, candidates });
+  }
+
+  function openWanClip(spanId: string, spanIndex: number, exportTimes: number[]) {
+    const candidates = buildSpanClipCandidates(exportTimes);
+    if (!candidates) return;
+    setWanClip({ spanId, spanIndex, candidates });
+  }
+
+  function upsertWanClipJob(job: WanClipJob) {
+    setWanClipJobs((prev) => {
+      const existing = prev[job.spanId];
+      const merged: WanClipJob = {
+        ...existing,
+        ...job,
+        historyId: job.historyId || existing?.historyId || createWanVideoHistoryId(),
+        referenceImages: job.referenceImages?.length
+          ? job.referenceImages
+          : (existing?.referenceImages ?? []),
+        progress: estimateWanVideoProgressPercent({
+          status: job.status,
+          startedAt: job.startedAt,
+          apiProgress: job.apiProgress,
+          phase: job.phase,
+        }),
+      };
+      return { ...prev, [job.spanId]: merged };
+    });
+  }
+
+  function onWanClipJobSubmitError(spanId: string, message: string) {
+    const existing = wanClipJobsRef.current[spanId];
+    const failed: WanClipJob = {
+      spanId,
+      spanLabel: existing?.spanLabel ?? "Span",
+      prompt: existing?.prompt ?? "",
+      duration: existing?.duration ?? 5,
+      resolution: existing?.resolution ?? "720p",
+      aspectRatio: existing?.aspectRatio ?? "9:16",
+      seed: existing?.seed ?? "",
+      generateAudio: existing?.generateAudio ?? true,
+      enablePromptExpansion: existing?.enablePromptExpansion ?? false,
+      predictionId: existing?.predictionId ?? null,
+      phase: "failed",
+      status: "failed",
+      apiProgress: null,
+      progress: 0,
+      error: message,
+      outputUrl: existing?.outputUrl ?? null,
+      startedAt: existing?.startedAt ?? Date.now(),
+      historyId: existing?.historyId ?? createWanVideoHistoryId(),
+      referenceImages: existing?.referenceImages ?? [],
+      timeSec: existing?.timeSec ?? 0,
+    };
+    setWanClipJobs((prev) => ({ ...prev, [spanId]: failed }));
+    if (failed.referenceImages.length > 0) {
+      void (async () => {
+        try {
+          await saveWanVideoHistoryEntry({
+            id: failed.historyId,
+            createdAt: new Date().toISOString(),
+            prompt: failed.prompt,
+            duration: failed.duration,
+            resolution: failed.resolution,
+            aspectRatio: failed.aspectRatio,
+            seed: failed.seed,
+            generateAudio: failed.generateAudio,
+            enablePromptExpansion: failed.enablePromptExpansion,
+            referenceImages: await Promise.all(
+              failed.referenceImages.map((file) => fileToWanVideoStoredImage(file)),
+            ),
+            predictionId: failed.predictionId ?? "",
+            status: "failed",
+            outputs: [],
+            error: message,
+            source: "video-frame",
+            sourceLabel: `${project.name} · ${failed.spanLabel}`,
+          });
+        } catch {
+          // History is best-effort.
+        }
+      })();
+    }
+  }
+
+  async function captureFrameFileForKrea(time: number): Promise<File> {
+    const previewVideo = previewVideoRef.current;
+    const previewCanvas = previewCanvasRef.current;
+    if (!isSeekableVideo(previewVideo) || !previewCanvas || !Number.isFinite(time)) {
+      throw new Error("Video is not ready to capture frames yet.");
+    }
+    previewVideo.pause();
+    const blob = await captureFrameBlob(previewVideo, previewCanvas, time, {
+      quality: JPEG_QUALITY,
+    });
+    return new File([blob], `frame-${formatVideoTime(time)}.jpg`, {
+      type: "image/jpeg",
+    });
+  }
+
+  async function openWanEdit(time: number, label: string) {
+    const previewVideo = previewVideoRef.current;
+    const previewCanvas = previewCanvasRef.current;
+    if (!isSeekableVideo(previewVideo) || !previewCanvas || !Number.isFinite(time)) {
+      setError("Video is not ready for frame preview yet.");
+      return;
+    }
+
+    closeWanEdit();
+    setWanEditLoadingTime(time);
+
+    try {
+      previewVideo.pause();
+      const blob = await captureFrameBlob(previewVideo, previewCanvas, time, {
+        quality: JPEG_QUALITY,
+      });
+      const url = URL.createObjectURL(blob);
+      wanEditUrlRef.current = url;
+      setWanEdit({ label, time, url, blob });
+    } catch {
+      setError("Could not open frame for Wan edit.");
+      closeWanEdit();
+    } finally {
+      setWanEditLoadingTime(null);
+    }
+  }
+
+  function upsertWanJob(job: WanFrameJob) {
+    const key = previewTimeKey(job.time);
+    setWanJobs((prev) => {
+      const existing = prev[key];
+      const merged: WanFrameJob = {
+        ...existing,
+        ...job,
+        historyId: job.historyId || existing?.historyId || createWanHistoryId(),
+        size: job.size || existing?.size || DEFAULT_WAN_SIZE,
+        seed: job.seed ?? existing?.seed ?? "",
+        mainImage: job.mainImage ?? existing?.mainImage ?? null,
+        referenceImages: job.referenceImages?.length
+          ? job.referenceImages
+          : (existing?.referenceImages ?? []),
+        progress: estimateWanProgressPercent({
+          status: job.status,
+          startedAt: job.startedAt,
+          apiProgress: job.apiProgress,
+          phase: job.phase,
+        }),
+      };
+      return { ...prev, [key]: merged };
+    });
+  }
+
+  function onWanJobSubmitError(time: number, message: string) {
+    const key = previewTimeKey(time);
+    const existing = wanJobsRef.current[key];
+    const failed: WanFrameJob = {
+      time,
+      label: existing?.label ?? "Frame",
+      prompt: existing?.prompt ?? "",
+      predictionId: existing?.predictionId ?? null,
+      phase: "failed",
+      status: "failed",
+      apiProgress: null,
+      progress: 0,
+      error: message,
+      outputUrl: existing?.outputUrl ?? null,
+      startedAt: existing?.startedAt ?? Date.now(),
+      historyId: existing?.historyId ?? createWanHistoryId(),
+      size: existing?.size ?? DEFAULT_WAN_SIZE,
+      seed: existing?.seed ?? "",
+      mainImage: existing?.mainImage ?? null,
+      referenceImages: existing?.referenceImages ?? [],
+    };
+    setWanJobs((prev) => ({ ...prev, [key]: failed }));
+    if (failed.mainImage) {
+      void (async () => {
+        try {
+          await saveWanHistoryEntry({
+            id: failed.historyId,
+            createdAt: new Date().toISOString(),
+            prompt: failed.prompt,
+            size: failed.size,
+            seed: failed.seed,
+            mainImage: await fileToStoredImage(failed.mainImage!),
+            referenceImages: await Promise.all(
+              failed.referenceImages.map((file) => fileToStoredImage(file)),
+            ),
+            predictionId: failed.predictionId ?? "",
+            status: "failed",
+            outputs: [],
+            error: message,
+            source: "video-frame",
+            sourceLabel: `${project.name} · ${failed.label} · ${formatVideoTime(failed.time)}`,
+          });
+        } catch {
+          // best-effort
+        }
+      })();
+    }
   }
 
   async function openFullFrame(time: number, label: string) {
@@ -388,23 +1305,16 @@ export function VideoFrameExtractPanel({
       return;
     }
 
-    closeLightbox();
-    setLightboxLoading(true);
-    setLightbox({ label, time, url: "" });
-
+    setLightbox(null);
     try {
       previewVideo.pause();
       const blob = await captureFrameBlob(previewVideo, previewCanvas, time, {
         quality: JPEG_QUALITY,
       });
       const url = URL.createObjectURL(blob);
-      lightboxUrlRef.current = url;
       setLightbox({ label, time, url });
     } catch {
       setError("Could not open full-resolution frame.");
-      closeLightbox();
-    } finally {
-      setLightboxLoading(false);
     }
   }
 
@@ -932,16 +1842,58 @@ export function VideoFrameExtractPanel({
                           {formatVideoTime(span.start)} – {formatVideoTime(span.end)}
                         </p>
                       </div>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label={`Remove span ${index + 1}`}
-                        disabled={spans.length <= 1}
-                        onClick={() => removeSpan(span.id)}
-                      >
-                        <Trash2 className="size-4" />
-                      </Button>
+                      <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="gap-1.5"
+                          disabled={extracting || exportTimes.length === 0}
+                          onClick={() => openKreaClip(index, exportTimes)}
+                        >
+                          <Clapperboard className="size-3.5" />
+                          Krea clip
+                        </Button>
+                        {(() => {
+                          const clipJob = wanClipJobs[span.id];
+                          const clipBusy =
+                            clipJob != null &&
+                            (clipJob.phase === "submitting" ||
+                              clipJob.phase === "polling" ||
+                              clipJob.phase === "saving");
+                          return (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="gap-1.5"
+                              disabled={extracting || exportTimes.length === 0}
+                              onClick={() => openWanClip(span.id, index, exportTimes)}
+                            >
+                              {clipBusy ? (
+                                <Loader2 className="size-3.5 animate-spin" />
+                              ) : (
+                                <Sparkles className="size-3.5" />
+                              )}
+                              {clipBusy
+                                ? `Wan ${clipJob.progress}%`
+                                : clipJob?.phase === "failed"
+                                  ? "Wan clip · retry"
+                                  : "Wan clip"}
+                            </Button>
+                          );
+                        })()}
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label={`Remove span ${index + 1}`}
+                          disabled={spans.length <= 1}
+                          onClick={() => removeSpan(span.id)}
+                        >
+                          <Trash2 className="size-4" />
+                        </Button>
+                      </div>
                     </div>
 
                     <div className="grid gap-4 lg:grid-cols-2">
@@ -1036,21 +1988,212 @@ export function VideoFrameExtractPanel({
                                 : frameIndex === exportTimes.length - 1
                                   ? "Last"
                                   : `#${frameIndex + 1}`;
+                            const editedUrl = editedUrls[key];
+                            const wanJob = wanJobs[key];
+                            const wanBusy =
+                              wanJob != null &&
+                              (wanJob.phase === "submitting" ||
+                                wanJob.phase === "polling" ||
+                                wanJob.phase === "saving");
                             return (
-                              <TinyThumb
+                              <div
                                 key={`${span.id}-export-${frameIndex}-${key}`}
-                                label={label}
-                                time={time}
-                                url={previewUrls[key]}
-                                loading={exportPreviewLoading && !previewUrls[key]}
-                                aspect={videoAspect}
-                                height={EXPORT_THUMB_HEIGHT_PX}
-                                emphasize={isEdge}
-                                onOpenFull={() => void openFullFrame(time, label)}
-                              />
+                                className="flex shrink-0 flex-col items-center gap-1"
+                              >
+                                <TinyThumb
+                                  label={label}
+                                  time={time}
+                                  url={previewUrls[key]}
+                                  loading={
+                                    (exportPreviewLoading && !previewUrls[key]) ||
+                                    (wanEditLoadingTime !== null &&
+                                      previewTimeKey(wanEditLoadingTime) === key)
+                                  }
+                                  aspect={videoAspect}
+                                  height={EXPORT_THUMB_HEIGHT_PX}
+                                  emphasize={isEdge}
+                                  titleSuffix=" · Wan edit"
+                                  onOpenFull={() => void openWanEdit(time, label)}
+                                />
+                                {wanBusy ? (
+                                  <div className="w-full min-w-[4.5rem] max-w-[5.5rem]">
+                                    <div className="mb-0.5 flex items-center justify-between gap-1 text-[9px] text-muted-foreground">
+                                      <span className="truncate">
+                                        {wanJob.phase === "saving" ? "Saving" : "Wan"}
+                                      </span>
+                                      <span className="tabular-nums font-medium text-foreground">
+                                        {wanJob.progress}%
+                                      </span>
+                                    </div>
+                                    <div
+                                      className="h-1.5 overflow-hidden rounded-full bg-muted ring-1 ring-border"
+                                      role="progressbar"
+                                      aria-valuenow={wanJob.progress}
+                                      aria-valuemin={0}
+                                      aria-valuemax={100}
+                                    >
+                                      <div
+                                        className="h-full rounded-full bg-foreground transition-[width] duration-500 ease-out"
+                                        style={{ width: `${wanJob.progress}%` }}
+                                      />
+                                    </div>
+                                  </div>
+                                ) : null}
+                                {editedUrl ? (
+                                  <TinyThumb
+                                    label="Edited"
+                                    time={time}
+                                    url={editedUrl}
+                                    loading={false}
+                                    aspect={videoAspect}
+                                    height={Math.round(EXPORT_THUMB_HEIGHT_PX * 0.85)}
+                                    emphasize={false}
+                                    titleSuffix=" · Wan edit"
+                                    onOpenFull={() => void openWanEdit(time, label)}
+                                  />
+                                ) : wanJob?.phase === "failed" ? (
+                                  <button
+                                    type="button"
+                                    className="max-w-[5.5rem] text-[10px] text-destructive underline-offset-2 hover:underline"
+                                    onClick={() => void openWanEdit(time, label)}
+                                  >
+                                    Edit failed — retry
+                                  </button>
+                                ) : null}
+                              </div>
                             );
                           })}
                         </div>
+
+                        {(() => {
+                          const clipsForSpan = spanClips.filter(
+                            (clip) => clip.spanId === span.id,
+                          );
+                          const clipJob = wanClipJobs[span.id];
+                          const clipBusy =
+                            clipJob != null &&
+                            (clipJob.phase === "submitting" ||
+                              clipJob.phase === "polling" ||
+                              clipJob.phase === "saving");
+                          if (clipsForSpan.length === 0 && !clipBusy && clipJob?.phase !== "failed") {
+                            return null;
+                          }
+                          return (
+                            <div className="mt-3 grid gap-2 border-t border-border pt-3">
+                              <p className="text-xs font-medium text-muted-foreground">
+                                Generated clips
+                                {clipsForSpan.length > 0
+                                  ? ` (${clipsForSpan.length})`
+                                  : ""}
+                              </p>
+                              {clipBusy ? (
+                                <div className="rounded-lg border bg-background/80 p-2">
+                                  <div className="mb-1 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                                    <span className="truncate">
+                                      Wan clip ·{" "}
+                                      {clipJob.phase === "saving"
+                                        ? "Saving"
+                                        : (clipJob.status ?? "Generating")}
+                                    </span>
+                                    <span className="tabular-nums font-medium text-foreground">
+                                      {clipJob.progress}%
+                                    </span>
+                                  </div>
+                                  <div
+                                    className="h-1.5 overflow-hidden rounded-full bg-muted ring-1 ring-border"
+                                    role="progressbar"
+                                    aria-valuenow={clipJob.progress}
+                                    aria-valuemin={0}
+                                    aria-valuemax={100}
+                                  >
+                                    <div
+                                      className="h-full rounded-full bg-foreground transition-[width] duration-500 ease-out"
+                                      style={{ width: `${clipJob.progress}%` }}
+                                    />
+                                  </div>
+                                  <button
+                                    type="button"
+                                    className="mt-1.5 text-[10px] text-muted-foreground underline-offset-2 hover:underline"
+                                    onClick={() =>
+                                      openWanClip(span.id, index, exportTimes)
+                                    }
+                                  >
+                                    Open dialog
+                                  </button>
+                                </div>
+                              ) : null}
+                              {clipJob?.phase === "failed" && !clipBusy ? (
+                                <button
+                                  type="button"
+                                  className="text-left text-[11px] text-destructive underline-offset-2 hover:underline"
+                                  onClick={() =>
+                                    openWanClip(span.id, index, exportTimes)
+                                  }
+                                >
+                                  Wan clip failed — retry
+                                  {clipJob.error ? `: ${clipJob.error}` : ""}
+                                </button>
+                              ) : null}
+                              <ul className="grid gap-2">
+                                {clipsForSpan.map((clip) => {
+                                  const provider = clip.fileName.includes("-wan-")
+                                    ? "Wan"
+                                    : clip.fileName.includes("-krea-")
+                                      ? "Krea"
+                                      : "Clip";
+                                  return (
+                                    <li
+                                      key={clip.id}
+                                      className="flex flex-wrap items-center gap-3 rounded-lg border bg-background/80 p-2"
+                                    >
+                                      <video
+                                        src={clip.path}
+                                        muted
+                                        playsInline
+                                        preload="metadata"
+                                        className="h-20 w-auto max-w-[9rem] rounded-md bg-black object-contain ring-1 ring-border"
+                                      />
+                                      <div className="min-w-0 flex-1">
+                                        <p className="truncate text-sm font-medium">
+                                          {provider} · {clip.fileName}
+                                        </p>
+                                        <p className="text-xs text-muted-foreground">
+                                          {(clip.bytes / (1024 * 1024)).toFixed(2)}MB
+                                        </p>
+                                      </div>
+                                      <div className="flex gap-1.5">
+                                        <Button
+                                          type="button"
+                                          variant="outline"
+                                          size="sm"
+                                          onClick={() => setClipLightbox(clip)}
+                                        >
+                                          Open
+                                        </Button>
+                                        <Button
+                                          type="button"
+                                          variant="ghost"
+                                          size="sm"
+                                          nativeButton={false}
+                                          render={
+                                            <a
+                                              href={clip.path}
+                                              download={clip.fileName}
+                                              target="_blank"
+                                              rel="noreferrer"
+                                            />
+                                          }
+                                        >
+                                          <Download className="size-3.5" />
+                                        </Button>
+                                      </div>
+                                    </li>
+                                  );
+                                })}
+                              </ul>
+                            </div>
+                          );
+                        })()}
                       </div>
                     </div>
                   </div>
@@ -1137,10 +2280,13 @@ export function VideoFrameExtractPanel({
       ) : null}
 
       <Dialog.Root
-        open={lightbox !== null || lightboxLoading}
+        open={lightbox !== null}
         onOpenChange={(open) => {
           if (!open) {
-            closeLightbox();
+            if (lightbox?.url.startsWith("blob:")) {
+              URL.revokeObjectURL(lightbox.url);
+            }
+            setLightbox(null);
           }
         }}
       >
@@ -1164,7 +2310,7 @@ export function VideoFrameExtractPanel({
               </Dialog.Close>
             </div>
             <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto bg-muted/40 p-4">
-              {lightboxLoading || !lightbox?.url ? (
+              {!lightbox?.url ? (
                 <Loader2 className="size-6 animate-spin text-muted-foreground" />
               ) : (
                 // eslint-disable-next-line @next/next/no-img-element
@@ -1174,6 +2320,122 @@ export function VideoFrameExtractPanel({
                   className="max-h-[min(80vh,44rem)] w-auto max-w-full object-contain"
                 />
               )}
+            </div>
+          </Dialog.Popup>
+        </Dialog.Portal>
+      </Dialog.Root>
+
+      {wanEdit ? (
+        <VideoFrameWanEditDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) {
+              closeWanEdit();
+            }
+          }}
+          time={wanEdit.time}
+          label={wanEdit.label}
+          imageUrl={wanEdit.url}
+          imageBlob={wanEdit.blob}
+          existingEditUrl={editedUrls[previewTimeKey(wanEdit.time)] ?? null}
+          job={wanJobs[previewTimeKey(wanEdit.time)] ?? null}
+          waveSpeedConfigured={waveSpeedConfigured}
+          onJobAccepted={upsertWanJob}
+          onJobSubmitError={onWanJobSubmitError}
+        />
+      ) : null}
+
+      {kreaClip ? (
+        <VideoFrameKreaClipDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) {
+              setKreaClip(null);
+            }
+          }}
+          spanLabel={`Span ${kreaClip.spanIndex + 1}`}
+          candidates={kreaClip.candidates}
+          kreaConfigured={kreaConfigured}
+          videoAspect={videoAspect}
+          captureFrameFile={captureFrameFileForKrea}
+        />
+      ) : null}
+
+      {wanClip ? (
+        <VideoFrameWanClipDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) {
+              setWanClip(null);
+            }
+          }}
+          spanId={wanClip.spanId}
+          spanLabel={`Span ${wanClip.spanIndex + 1}`}
+          candidates={wanClip.candidates}
+          waveSpeedConfigured={waveSpeedConfigured}
+          videoAspect={videoAspect}
+          job={wanClipJobs[wanClip.spanId] ?? null}
+          captureFrameFile={captureFrameFileForKrea}
+          onJobAccepted={upsertWanClipJob}
+          onJobSubmitError={onWanClipJobSubmitError}
+        />
+      ) : null}
+
+      <Dialog.Root
+        open={clipLightbox != null}
+        onOpenChange={(open) => {
+          if (!open) setClipLightbox(null);
+        }}
+      >
+        <Dialog.Portal>
+          <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/60" />
+          <Dialog.Popup className="fixed inset-x-4 top-[8vh] z-50 mx-auto flex max-h-[84vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border bg-background shadow-lg outline-none">
+            <div className="flex items-center justify-between gap-3 border-b px-4 py-3">
+              <div className="min-w-0">
+                <Dialog.Title className="truncate text-sm font-medium">
+                  {clipLightbox?.fileName ?? "Clip"}
+                </Dialog.Title>
+                <Dialog.Description className="text-xs text-muted-foreground">
+                  Generated clip · open or download
+                </Dialog.Description>
+              </div>
+              <Dialog.Close
+                render={<Button type="button" variant="ghost" size="icon-sm" />}
+              >
+                <X className="size-4" />
+                <span className="sr-only">Close</span>
+              </Dialog.Close>
+            </div>
+            <div className="flex min-h-0 flex-1 flex-col items-center gap-3 overflow-auto bg-muted/40 p-4">
+              {clipLightbox ? (
+                <>
+                  <video
+                    key={clipLightbox.path}
+                    src={clipLightbox.path}
+                    controls
+                    playsInline
+                    className="max-h-[min(70vh,40rem)] w-full rounded-lg bg-black"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="w-fit"
+                    nativeButton={false}
+                    render={
+                      <a
+                        href={clipLightbox.path}
+                        download={clipLightbox.fileName}
+                        target="_blank"
+                        rel="noreferrer"
+                      />
+                    }
+                  >
+                    <Download className="size-3.5" />
+                    Download
+                  </Button>
+                </>
+              ) : null}
             </div>
           </Dialog.Popup>
         </Dialog.Portal>
@@ -1363,6 +2625,7 @@ function TinyThumb({
   aspect,
   height = EXPORT_THUMB_HEIGHT_PX,
   emphasize = false,
+  titleSuffix = " · click for full resolution",
   onOpenFull,
 }: {
   label: string;
@@ -1372,6 +2635,7 @@ function TinyThumb({
   aspect: number;
   height?: number;
   emphasize?: boolean;
+  titleSuffix?: string;
   onOpenFull: () => void;
 }) {
   const width = Math.round(height * aspect);
@@ -1385,7 +2649,7 @@ function TinyThumb({
         "flex shrink-0 flex-col items-center gap-0.5 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring",
         emphasize && "ring-1 ring-foreground/25",
       )}
-      title={`${label} · ${formatVideoTime(time)} · click for full resolution`}
+      title={`${label} · ${formatVideoTime(time)}${titleSuffix}`}
     >
       <span
         className="flex items-center justify-center overflow-hidden rounded border border-border bg-background"

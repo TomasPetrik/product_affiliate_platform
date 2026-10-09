@@ -1,6 +1,7 @@
 import type { LucideIcon } from "lucide-react";
 import {
   BarChart3,
+  Clapperboard,
   ClipboardList,
   Database,
   DollarSign,
@@ -14,6 +15,7 @@ import {
   Sparkles,
   Store,
   UploadCloud,
+  Video,
 } from "lucide-react";
 import type { ComponentType } from "react";
 
@@ -41,6 +43,8 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
   { href: "/admin/imports", label: "Imports", icon: UploadCloud },
   { href: "/admin/price-sync", label: "Price sync", icon: RefreshCw },
   { href: "/admin/tools/video-frames", label: "Video frames", icon: Film },
+  { href: "/admin/tools/krea-video", label: "Krea video", icon: Clapperboard },
+  { href: "/admin/tools/wan-video", label: "Wan video", icon: Video },
   { href: "/admin/tools/wan-image-edit", label: "Wan image edit", icon: Sparkles },
   {
     href: "/admin/tools/tiktok-comment-demo",

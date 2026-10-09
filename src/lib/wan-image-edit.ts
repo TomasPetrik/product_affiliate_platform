@@ -62,6 +62,65 @@ export function isWanCompleted(status: string): boolean {
   return status === "completed";
 }
 
+/** Typical Wan 2.7 image-edit wall time used for estimated progress. */
+export const WAN_EDIT_EXPECTED_MS = 60_000;
+
+/**
+ * Normalize WaveSpeed progress (0–1 or 0–100) to an integer percent.
+ * Returns null when the API did not report progress.
+ */
+export function normalizeWanProgressPercent(raw: unknown): number | null {
+  if (typeof raw !== "number" || !Number.isFinite(raw)) {
+    return null;
+  }
+  const percent = raw <= 1 ? raw * 100 : raw;
+  if (percent < 0) return 0;
+  if (percent > 100) return 100;
+  return Math.round(percent);
+}
+
+/**
+ * Progress for UI. Prefers API progress when present; otherwise estimates from
+ * status + elapsed time (asymptotic, never 100% until completed).
+ */
+export function estimateWanProgressPercent(input: {
+  status: string | null | undefined;
+  startedAt: number;
+  now?: number;
+  apiProgress?: number | null;
+  phase?: "submitting" | "polling" | "saving" | "completed" | "failed" | string;
+}): number {
+  if (input.phase === "failed" || isWanTerminalFailure(input.status ?? "")) {
+    return 0;
+  }
+  if (input.phase === "completed" || isWanCompleted(input.status ?? "")) {
+    return 100;
+  }
+  if (input.phase === "saving") {
+    return 97;
+  }
+  if (input.phase === "submitting") {
+    return 4;
+  }
+
+  const api = normalizeWanProgressPercent(input.apiProgress);
+  if (api !== null) {
+    return Math.min(99, api);
+  }
+
+  const now = input.now ?? Date.now();
+  const elapsed = Math.max(0, now - input.startedAt);
+  const status = input.status ?? "created";
+
+  if (status === "created") {
+    return Math.min(12, 5 + Math.round(elapsed / 1500));
+  }
+
+  // Asymptotic climb during processing — approaches ~92% until completion.
+  const t = elapsed / WAN_EDIT_EXPECTED_MS;
+  return Math.min(92, Math.round(12 + 80 * (1 - Math.exp(-2.2 * t))));
+}
+
 /**
  * Validates a WaveSpeed `size` string (`width*height`) against documented limits:
  * each side 512–4096, total pixels between 768² and 2048², aspect 1:8–8:1.

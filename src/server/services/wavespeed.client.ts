@@ -7,6 +7,7 @@ import {
   wavespeedResultUrl,
   type WanPredictionStatus,
 } from "@/lib/wan-image-edit";
+import { WAN_REFERENCE_TO_VIDEO_SUBMIT_URL } from "@/lib/wan-video";
 
 export class WaveSpeedError extends Error {
   constructor(
@@ -115,6 +116,8 @@ export interface WanPrediction {
   model?: string;
   created_at?: string;
   timings?: { inference?: number };
+  /** 0–100 when WaveSpeed reports progress; otherwise undefined. */
+  progress?: number;
 }
 
 function normalizePrediction(raw: unknown): WanPrediction {
@@ -126,6 +129,7 @@ function normalizePrediction(raw: unknown): WanPrediction {
     model?: string;
     created_at?: string;
     timings?: { inference?: number };
+    progress?: unknown;
   }>(raw);
 
   if (!data?.id) {
@@ -136,6 +140,12 @@ function normalizePrediction(raw: unknown): WanPrediction {
     ? data.outputs.filter((item): item is string => typeof item === "string")
     : [];
 
+  let progress: number | undefined;
+  if (typeof data.progress === "number" && Number.isFinite(data.progress)) {
+    progress = data.progress <= 1 ? Math.round(data.progress * 100) : Math.round(data.progress);
+    progress = Math.min(100, Math.max(0, progress));
+  }
+
   return {
     id: data.id,
     status: data.status ?? "created",
@@ -144,6 +154,7 @@ function normalizePrediction(raw: unknown): WanPrediction {
     model: data.model,
     created_at: data.created_at,
     timings: data.timings,
+    progress,
   };
 }
 
@@ -184,6 +195,76 @@ export async function getWanImageEditResult(predictionId: string): Promise<WanPr
   const response = await fetch(wavespeedResultUrl(predictionId), {
     headers: { Authorization: `Bearer ${apiKey}` },
     cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new WaveSpeedError(await readErrorMessage(response), response.status);
+  }
+
+  return normalizePrediction(await response.json());
+}
+
+/** Poll any WaveSpeed prediction (image edit, reference-to-video, …). */
+export const getWaveSpeedPrediction = getWanImageEditResult;
+
+export interface WanReferenceToVideoSubmitInput {
+  prompt: string;
+  referenceImageUrls: string[];
+  referenceVideoUrls?: string[];
+  referenceAudioUrls?: string[];
+  resolution?: string;
+  aspectRatio?: string;
+  duration?: number;
+  enablePromptExpansion?: boolean;
+  generateAudio?: boolean;
+  seed?: number;
+}
+
+export async function submitWanReferenceToVideo(
+  input: WanReferenceToVideoSubmitInput,
+): Promise<WanPrediction> {
+  const apiKey = requireApiKey();
+
+  if (
+    input.referenceImageUrls.length === 0 &&
+    !input.referenceVideoUrls?.length &&
+    !input.referenceAudioUrls?.length
+  ) {
+    throw new WaveSpeedError(
+      "At least one reference image, video, or audio is required.",
+    );
+  }
+
+  const body: Record<string, unknown> = {
+    prompt: input.prompt,
+  };
+  if (input.referenceImageUrls.length > 0) {
+    body.reference_images = input.referenceImageUrls;
+  }
+  if (input.referenceVideoUrls?.length) {
+    body.reference_videos = input.referenceVideoUrls;
+  }
+  if (input.referenceAudioUrls?.length) {
+    body.reference_audios = input.referenceAudioUrls;
+  }
+  if (input.resolution) body.resolution = input.resolution;
+  if (input.aspectRatio) body.aspect_ratio = input.aspectRatio;
+  if (input.duration !== undefined) body.duration = input.duration;
+  if (input.enablePromptExpansion !== undefined) {
+    body.enable_prompt_expansion = input.enablePromptExpansion;
+  }
+  if (input.generateAudio !== undefined) {
+    body.generate_audio = input.generateAudio;
+  }
+  if (input.seed !== undefined) body.seed = input.seed;
+
+  const response = await fetch(WAN_REFERENCE_TO_VIDEO_SUBMIT_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
   });
 
   if (!response.ok) {

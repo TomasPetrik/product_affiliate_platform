@@ -7,7 +7,9 @@ import { VideoFrameExtractPanel } from "@/components/admin/video-frame-extract-p
 import { VideoFrameProjectDeleteButton } from "@/components/admin/video-frame-project-delete-button";
 import { VideoFrameProjectSizeCard } from "@/components/admin/video-frame-project-size-card";
 import { Button } from "@/components/ui/button";
+import { isKreaConfigured } from "@/server/services/krea.client";
 import { getVideoFrameProject } from "@/server/services/video-frame-project.service";
+import { isWaveSpeedConfigured } from "@/server/services/wavespeed.client";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +32,8 @@ export default async function AdminVideoFrameProjectPage({ params }: PageProps) 
 
   const frameCount = project.assets.filter((asset) => asset.kind === "FRAME").length;
   const thumbnailCount = project.assets.filter((asset) => asset.kind === "THUMBNAIL").length;
+  const editedCount = project.assets.filter((asset) => asset.kind === "EDITED").length;
+  const clipCount = project.assets.filter((asset) => asset.kind === "CLIP").length;
 
   return (
     <div className="flex flex-col gap-6">
@@ -47,7 +51,8 @@ export default async function AdminVideoFrameProjectPage({ params }: PageProps) 
           </Button>
           <h1 className="truncate text-2xl font-bold tracking-tight">{project.name}</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Spans and project name autosave. Extracted frames are stored with this project.
+            Spans autosave. Tap an export preview frame for Wan edit, or use Krea clip / Wan clip to
+            make a short video from the span&apos;s frames (prefers edited stills).
           </p>
         </div>
         <VideoFrameProjectDeleteButton projectId={project.id} projectName={project.name} />
@@ -57,12 +62,20 @@ export default async function AdminVideoFrameProjectPage({ params }: PageProps) 
         videoBytes={project.videoBytes}
         framesBytes={project.framesBytes}
         thumbnailsBytes={project.thumbnailsBytes}
+        editedBytes={project.editedBytes}
+        clipsBytes={project.clipsBytes}
         totalBytes={project.totalBytes}
         frameCount={frameCount}
         thumbnailCount={thumbnailCount}
+        editedCount={editedCount}
+        clipCount={clipCount}
       />
 
-      <VideoFrameExtractPanel project={project} />
+      <VideoFrameExtractPanel
+        project={project}
+        waveSpeedConfigured={isWaveSpeedConfigured()}
+        kreaConfigured={isKreaConfigured()}
+      />
     </div>
   );
 }

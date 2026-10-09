@@ -1010,6 +1010,10 @@ model SiteSetting {
 enum VideoFrameAssetKind {
   FRAME
   THUMBNAIL
+  /// Wan image-edit output linked to a planned export time.
+  EDITED
+  /// Generated short clip (Krea / Wan) for a span.
+  CLIP
 }
 
 /// Named admin project: source video + span config + extracted stills.
@@ -1030,6 +1034,8 @@ model VideoFrameProject {
 
   framesBytes     BigInt @default(0)
   thumbnailsBytes BigInt @default(0)
+  editedBytes     BigInt @default(0)
+  clipsBytes      BigInt @default(0)
   totalBytes      BigInt @default(0)
 
   assets VideoFrameAsset[]

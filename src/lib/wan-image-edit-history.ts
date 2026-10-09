@@ -11,6 +11,8 @@ export interface WanStoredImage {
   blob: Blob;
 }
 
+export type WanHistorySource = "standalone" | "video-frame";
+
 export interface WanHistoryEntry {
   id: string;
   createdAt: string;
@@ -24,6 +26,10 @@ export interface WanHistoryEntry {
   outputs: string[];
   inferenceMs?: number;
   error?: string;
+  /** Where the run was started. Older entries omit this (treated as standalone). */
+  source?: WanHistorySource;
+  /** Short label for video-frame runs, e.g. "First · 0:12.4". */
+  sourceLabel?: string;
 }
 
 export function createWanHistoryId(): string {

@@ -9,6 +9,8 @@ import {
   deleteVideoFrameProject,
   getVideoFrameProject,
   replaceVideoFrameProjectFrames,
+  saveVideoFrameClip,
+  saveVideoFrameEdit,
   updateVideoFrameProject,
   type VideoFrameProjectDetail,
 } from "@/server/services/video-frame-project.service";
@@ -152,6 +154,89 @@ export async function saveVideoFrameProjectFramesAction(
       frameCount: result.assets.filter((asset) => asset.kind === "FRAME").length,
       framesBytes: result.framesBytes,
       thumbnailsBytes: result.thumbnailsBytes,
+      totalBytes: result.totalBytes,
+    },
+  });
+
+  revalidateVideoFrameProjects(result.id);
+  return { ok: true, project: result };
+}
+
+export async function saveVideoFrameEditAction(input: {
+  projectId: string;
+  timeSec: number;
+  spanId?: string | null;
+  frameIndex?: number | null;
+  sourceUrl: string;
+  prompt?: string;
+}): Promise<VideoFrameProjectActionState> {
+  const session = await requireAdminSession();
+  if (!input.projectId || !input.sourceUrl?.trim()) {
+    return { error: "Missing project or edited image URL." };
+  }
+
+  const result = await saveVideoFrameEdit({
+    projectId: input.projectId,
+    timeSec: input.timeSec,
+    spanId: input.spanId,
+    frameIndex: input.frameIndex,
+    sourceUrl: input.sourceUrl.trim(),
+    prompt: input.prompt,
+  });
+  if ("error" in result) {
+    return { error: result.error };
+  }
+
+  await writeAuditLog({
+    actor: session,
+    action: "video_frame_project.save_edit",
+    entityType: "VideoFrameProject",
+    entityId: result.id,
+    after: {
+      timeSec: input.timeSec,
+      editedBytes: result.editedBytes,
+      totalBytes: result.totalBytes,
+    },
+  });
+
+  revalidateVideoFrameProjects(result.id);
+  return { ok: true, project: result };
+}
+
+export async function saveVideoFrameClipAction(input: {
+  projectId: string;
+  spanId: string;
+  timeSec: number;
+  sourceUrl: string;
+  provider: "wan" | "krea";
+  prompt?: string;
+}): Promise<VideoFrameProjectActionState> {
+  const session = await requireAdminSession();
+  if (!input.projectId || !input.sourceUrl?.trim() || !input.spanId?.trim()) {
+    return { error: "Missing project, span, or clip URL." };
+  }
+
+  const result = await saveVideoFrameClip({
+    projectId: input.projectId,
+    spanId: input.spanId.trim(),
+    timeSec: input.timeSec,
+    sourceUrl: input.sourceUrl.trim(),
+    provider: input.provider,
+    prompt: input.prompt,
+  });
+  if ("error" in result) {
+    return { error: result.error };
+  }
+
+  await writeAuditLog({
+    actor: session,
+    action: "video_frame_project.save_clip",
+    entityType: "VideoFrameProject",
+    entityId: result.id,
+    after: {
+      spanId: input.spanId,
+      provider: input.provider,
+      clipsBytes: result.clipsBytes,
       totalBytes: result.totalBytes,
     },
   });

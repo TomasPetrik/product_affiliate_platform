@@ -64,6 +64,8 @@ export interface VideoFrameProjectDetail {
   spans: FrameSpan[];
   framesBytes: number;
   thumbnailsBytes: number;
+  editedBytes: number;
+  clipsBytes: number;
   totalBytes: number;
   assets: VideoFrameProjectAssetDto[];
   updatedAt: Date;
@@ -137,19 +139,26 @@ async function recalculateProjectSizes(projectId: string) {
 
   let framesBytes = BigInt(0);
   let thumbnailsBytes = BigInt(0);
+  let editedBytes = BigInt(0);
+  let clipsBytes = BigInt(0);
   for (const row of assets) {
     const sum = BigInt(row._sum.bytes ?? 0);
     if (row.kind === "FRAME") {
       framesBytes = sum;
     } else if (row.kind === "THUMBNAIL") {
       thumbnailsBytes = sum;
+    } else if (row.kind === "EDITED") {
+      editedBytes = sum;
+    } else if (row.kind === "CLIP") {
+      clipsBytes = sum;
     }
   }
 
-  const totalBytes = project.videoBytes + framesBytes + thumbnailsBytes;
+  const totalBytes =
+    project.videoBytes + framesBytes + thumbnailsBytes + editedBytes + clipsBytes;
   return prisma.videoFrameProject.update({
     where: { id: projectId },
-    data: { framesBytes, thumbnailsBytes, totalBytes },
+    data: { framesBytes, thumbnailsBytes, editedBytes, clipsBytes, totalBytes },
   });
 }
 
@@ -167,6 +176,8 @@ function mapDetail(
     spansJson: Prisma.JsonValue;
     framesBytes: bigint;
     thumbnailsBytes: bigint;
+    editedBytes: bigint;
+    clipsBytes: bigint;
     totalBytes: bigint;
     updatedAt: Date;
     createdAt: Date;
@@ -197,6 +208,8 @@ function mapDetail(
     spans: parseSpans(project.spansJson),
     framesBytes: toNumber(project.framesBytes),
     thumbnailsBytes: toNumber(project.thumbnailsBytes),
+    editedBytes: toNumber(project.editedBytes),
+    clipsBytes: toNumber(project.clipsBytes),
     totalBytes: toNumber(project.totalBytes),
     assets: project.assets.map((asset) => ({
       id: asset.id,
@@ -363,7 +376,10 @@ export async function replaceVideoFrameProjectFrames(input: {
   await mkdir(framesDir, { recursive: true });
   await mkdir(thumbsDir, { recursive: true });
 
-  await prisma.videoFrameAsset.deleteMany({ where: { projectId: input.projectId } });
+  // Keep Wan EDITED assets when re-extracting stills from the same video.
+  await prisma.videoFrameAsset.deleteMany({
+    where: { projectId: input.projectId, kind: { in: ["FRAME", "THUMBNAIL"] } },
+  });
 
   const assetRows: Prisma.VideoFrameAssetCreateManyInput[] = [];
 
@@ -434,6 +450,195 @@ export async function replaceVideoFrameProjectFrames(input: {
   await recalculateProjectSizes(input.projectId);
   const detail = await getVideoFrameProject(input.projectId);
   return detail ?? { error: "Project not found after saving frames." };
+}
+
+/**
+ * Persist a Wan edit result for a planned export time. Replaces any prior EDITED
+ * asset at the same timeSec (rounded to 0.1s).
+ */
+export async function saveVideoFrameEdit(input: {
+  projectId: string;
+  timeSec: number;
+  spanId?: string | null;
+  frameIndex?: number | null;
+  sourceUrl: string;
+  prompt?: string;
+}): Promise<VideoFrameProjectDetail | { error: string }> {
+  const existing = await prisma.videoFrameProject.findUnique({
+    where: { id: input.projectId },
+    select: { id: true },
+  });
+  if (!existing) {
+    return { error: "Project not found." };
+  }
+
+  if (!Number.isFinite(input.timeSec) || input.timeSec < 0) {
+    return { error: "Invalid frame time." };
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(input.sourceUrl);
+  } catch {
+    return { error: "Could not download the edited image." };
+  }
+  if (!response.ok) {
+    return { error: `Could not download the edited image (${response.status}).` };
+  }
+
+  const contentType = response.headers.get("content-type") ?? "image/jpeg";
+  const buffer = Buffer.from(await response.arrayBuffer());
+  if (buffer.byteLength <= 0) {
+    return { error: "Edited image is empty." };
+  }
+  if (buffer.byteLength > 25 * 1024 * 1024) {
+    return { error: "Edited image is too large to store." };
+  }
+
+  const editsDir = path.join(videoFrameProjectDir(input.projectId), "edits");
+  await mkdir(editsDir, { recursive: true });
+
+  const timeKey = input.timeSec.toFixed(1).replace(".", "s");
+  const ext = contentType.includes("png")
+    ? "png"
+    : contentType.includes("webp")
+      ? "webp"
+      : "jpg";
+  const fileName = `edit-${timeKey}-${randomBytes(4).toString("hex")}.${ext}`;
+  const absolute = path.join(editsDir, fileName);
+  await writeFile(absolute, buffer);
+
+  let width: number | null = null;
+  let height: number | null = null;
+  try {
+    const meta = await sharp(buffer, { animated: false }).metadata();
+    width = meta.width ?? null;
+    height = meta.height ?? null;
+  } catch {
+    // Optional metadata.
+  }
+
+  const rounded = Math.round(input.timeSec * 10) / 10;
+  const prior = await prisma.videoFrameAsset.findMany({
+    where: {
+      projectId: input.projectId,
+      kind: "EDITED",
+    },
+  });
+  const toRemove = prior.filter(
+    (asset) => Math.round(asset.timeSec * 10) / 10 === rounded,
+  );
+  for (const asset of toRemove) {
+    const relative = asset.path.replace(`/uploads/video-frames/${input.projectId}/`, "");
+    if (relative && !relative.includes("..")) {
+      await rm(path.join(videoFrameProjectDir(input.projectId), relative), {
+        force: true,
+      });
+    }
+  }
+  if (toRemove.length > 0) {
+    await prisma.videoFrameAsset.deleteMany({
+      where: { id: { in: toRemove.map((asset) => asset.id) } },
+    });
+  }
+
+  await prisma.videoFrameAsset.create({
+    data: {
+      projectId: input.projectId,
+      kind: "EDITED",
+      spanId: input.spanId ?? null,
+      frameIndex: input.frameIndex ?? null,
+      timeSec: input.timeSec,
+      fileName,
+      path: publicVideoFramePath(input.projectId, `edits/${fileName}`),
+      bytes: buffer.byteLength,
+      width,
+      height,
+    },
+  });
+
+  await recalculateProjectSizes(input.projectId);
+  const detail = await getVideoFrameProject(input.projectId);
+  return detail ?? { error: "Project not found after saving edit." };
+}
+
+/**
+ * Persist a generated clip (Wan / Krea) for a span. Keeps prior clips.
+ */
+export async function saveVideoFrameClip(input: {
+  projectId: string;
+  spanId: string;
+  timeSec: number;
+  sourceUrl: string;
+  provider: "wan" | "krea";
+  prompt?: string;
+}): Promise<VideoFrameProjectDetail | { error: string }> {
+  const existing = await prisma.videoFrameProject.findUnique({
+    where: { id: input.projectId },
+    select: { id: true },
+  });
+  if (!existing) {
+    return { error: "Project not found." };
+  }
+
+  const spanId = input.spanId.trim();
+  if (!spanId) {
+    return { error: "Missing span id." };
+  }
+
+  if (!Number.isFinite(input.timeSec) || input.timeSec < 0) {
+    return { error: "Invalid clip time." };
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(input.sourceUrl);
+  } catch {
+    return { error: "Could not download the generated clip." };
+  }
+  if (!response.ok) {
+    return { error: `Could not download the generated clip (${response.status}).` };
+  }
+
+  const contentType = response.headers.get("content-type") ?? "video/mp4";
+  const buffer = Buffer.from(await response.arrayBuffer());
+  if (buffer.byteLength <= 0) {
+    return { error: "Generated clip is empty." };
+  }
+  if (buffer.byteLength > 200 * 1024 * 1024) {
+    return { error: "Generated clip is too large to store." };
+  }
+
+  const clipsDir = path.join(videoFrameProjectDir(input.projectId), "clips");
+  await mkdir(clipsDir, { recursive: true });
+
+  const ext = contentType.includes("webm")
+    ? "webm"
+    : contentType.includes("quicktime")
+      ? "mov"
+      : "mp4";
+  const fileName = `clip-${input.provider}-${spanId.slice(0, 8)}-${randomBytes(4).toString("hex")}.${ext}`;
+  const absolute = path.join(clipsDir, fileName);
+  await writeFile(absolute, buffer);
+
+  await prisma.videoFrameAsset.create({
+    data: {
+      projectId: input.projectId,
+      kind: "CLIP",
+      spanId,
+      frameIndex: null,
+      timeSec: input.timeSec,
+      fileName,
+      path: publicVideoFramePath(input.projectId, `clips/${fileName}`),
+      bytes: buffer.byteLength,
+      width: null,
+      height: null,
+    },
+  });
+
+  await recalculateProjectSizes(input.projectId);
+  const detail = await getVideoFrameProject(input.projectId);
+  return detail ?? { error: "Project not found after saving clip." };
 }
 
 export async function deleteVideoFrameProject(

@@ -28,13 +28,14 @@ export const commentAutoReplyRuleSchema = z
     enablePrivateDm: z.boolean(),
     enableInstagram: z.boolean(),
     enableFacebook: z.boolean(),
+    enableTikTok: z.boolean(),
     isActive: z.boolean(),
   })
   .superRefine((value, ctx) => {
-    if (!value.enableInstagram && !value.enableFacebook) {
+    if (!value.enableInstagram && !value.enableFacebook && !value.enableTikTok) {
       ctx.addIssue({
         code: "custom",
-        message: "Enable at least Instagram or Facebook.",
+        message: "Enable at least Instagram, Facebook, or TikTok.",
         path: ["enableInstagram"],
       });
     }

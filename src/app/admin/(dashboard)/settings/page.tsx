@@ -3,6 +3,8 @@ import Link from "next/link";
 
 import { AmazonOfferSettingsCard } from "@/components/admin/amazon-offer-settings-card";
 import { MetaConnectionCard } from "@/components/admin/meta-connection-card";
+import { TikTokAccountConnectionCard } from "@/components/admin/tiktok-account-connection-card";
+import { TikTokAdsConnectionCard } from "@/components/admin/tiktok-ads-connection-card";
 import { TikTokConnectionCard } from "@/components/admin/tiktok-connection-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,10 +13,14 @@ import { getAdminSession } from "@/lib/auth";
 import { env } from "@/lib/env";
 import { getMetaRedirectUri } from "@/lib/meta";
 import { prisma } from "@/lib/prisma";
+import { getTikTokAccountRedirectUri } from "@/lib/tiktok-account";
+import { getTikTokAdsRedirectUri } from "@/lib/tiktok-ads";
 import { getTikTokRedirectUri } from "@/lib/tiktok";
 import { getMetaConnectionPublic } from "@/server/services/meta-oauth.service";
 import { listCachedMetaMedia } from "@/server/services/meta-media.service";
 import { getSiteSettings } from "@/server/services/site-settings.service";
+import { getTikTokAccountConnectionPublic } from "@/server/services/tiktok-account-oauth.service";
+import { getTikTokAdsConnectionPublic } from "@/server/services/tiktok-ads-oauth.service";
 import { getTikTokConnectionPublic } from "@/server/services/tiktok-oauth.service";
 import { listCachedTikTokVideos } from "@/server/services/tiktok-video.service";
 import {
@@ -27,7 +33,12 @@ export const metadata: Metadata = { title: "Settings" };
 export default async function AdminSettingsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ tiktok?: string; meta?: string }>;
+  searchParams: Promise<{
+    tiktok?: string;
+    tiktok_ads?: string;
+    tiktok_account?: string;
+    meta?: string;
+  }>;
 }) {
   const session = await getAdminSession();
   const params = await searchParams;
@@ -38,6 +49,8 @@ export default async function AdminSettingsPage({
     revenueCount,
     tiktok,
     cachedVideos,
+    tiktokAds,
+    tiktokAccount,
     meta,
     cachedMetaMedia,
     siteSettings,
@@ -50,6 +63,8 @@ export default async function AdminSettingsPage({
     prisma.revenueEntry.count(),
     getTikTokConnectionPublic(),
     listCachedTikTokVideos(40),
+    getTikTokAdsConnectionPublic(),
+    getTikTokAccountConnectionPublic(),
     getMetaConnectionPublic(),
     listCachedMetaMedia(40),
     getSiteSettings(),
@@ -178,6 +193,28 @@ export default async function AdminSettingsPage({
             viewCount: video.viewCount.toString(),
             createTime: video.createTime?.toISOString() ?? null,
           }))}
+        />
+
+        <TikTokAdsConnectionCard
+          oauthConfigured={tiktokAds.oauthConfigured}
+          connected={tiktokAds.connected}
+          status={tiktokAds.status}
+          connectedLabel={tiktokAds.connectedLabel}
+          advertiserIds={tiktokAds.advertiserIds}
+          lastError={tiktokAds.lastError}
+          redirectUri={getTikTokAdsRedirectUri()}
+          flash={params.tiktok_ads ?? null}
+        />
+
+        <TikTokAccountConnectionCard
+          oauthConfigured={tiktokAccount.oauthConfigured}
+          connected={tiktokAccount.connected}
+          status={tiktokAccount.status}
+          connectedLabel={tiktokAccount.connectedLabel}
+          openId={tiktokAccount.openId}
+          lastError={tiktokAccount.lastError}
+          redirectUri={getTikTokAccountRedirectUri()}
+          flash={params.tiktok_account ?? null}
         />
 
         <Card>

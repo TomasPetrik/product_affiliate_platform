@@ -154,6 +154,23 @@ const envSchema = z.object({
    * Kept as an emergency fallback for video.query when no OAuth connection exists.
    */
   TIKTOK_ACCESS_TOKEN: z.string().min(1).optional(),
+
+  /**
+   * TikTok Marketing API (Ads) app credentials from TikTok API for Business portal.
+   * Used for advertiser OAuth at /api/tiktok/oauth/callback/ and for TikTok
+   * account holder OAuth at /api/tiktok/account/callback/. Optional so the
+   * site boots without Ads connected; Connect TikTok Ads / Account in Admin →
+   * Settings requires both.
+   */
+  TIKTOK_ADS_APP_ID: z.string().min(1).optional(),
+  TIKTOK_ADS_APP_SECRET: z.string().min(1).optional(),
+
+  /**
+   * Optional portal-generated "TikTok account holder authorization URL".
+   * When set, Admin → Connect TikTok Account uses this URL (with our state).
+   * When unset, we fall back to the Business portal auth page + redirect_uri.
+   */
+  TIKTOK_ACCOUNT_AUTHORIZATION_URL: z.string().url().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;
@@ -201,6 +218,11 @@ function loadEnv(): Env {
     TIKTOK_CLIENT_KEY: blankToUndefined(process.env.TIKTOK_CLIENT_KEY),
     TIKTOK_CLIENT_SECRET: blankToUndefined(process.env.TIKTOK_CLIENT_SECRET),
     TIKTOK_ACCESS_TOKEN: blankToUndefined(process.env.TIKTOK_ACCESS_TOKEN),
+    TIKTOK_ADS_APP_ID: blankToUndefined(process.env.TIKTOK_ADS_APP_ID),
+    TIKTOK_ADS_APP_SECRET: blankToUndefined(process.env.TIKTOK_ADS_APP_SECRET),
+    TIKTOK_ACCOUNT_AUTHORIZATION_URL: blankToUndefined(
+      process.env.TIKTOK_ACCOUNT_AUTHORIZATION_URL,
+    ),
   });
 
   if (!parsed.success) {

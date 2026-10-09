@@ -721,7 +721,7 @@ model ProductMarketingVideoPostSnapshot {
 }
 
 // ---------------------------------------------------------------------------
-// Comment keyword auto-replies (Instagram / Facebook marketing-video posts)
+// Comment keyword auto-replies (Instagram / Facebook / TikTok marketing posts)
 // ---------------------------------------------------------------------------
 
 enum CommentAutoReplyStatus {
@@ -747,6 +747,8 @@ model CommentAutoReplyRule {
   enablePrivateDm    Boolean @default(true)
   enableInstagram    Boolean @default(true)
   enableFacebook     Boolean @default(true)
+  /// TikTok organic / Business Account comments (Accounts API + Messaging).
+  enableTikTok       Boolean @default(false)
   isActive           Boolean @default(true)
 
   createdAt DateTime @default(now())
@@ -835,6 +837,72 @@ model TikTokCachedVideo {
 
   @@index([viewCount])
   @@map("tiktok_cached_videos")
+}
+
+// ---------------------------------------------------------------------------
+// TikTok Marketing API (Ads) — advertiser authorization
+// ---------------------------------------------------------------------------
+
+enum TikTokAdsConnectionStatus {
+  CONNECTED
+  NEEDS_REAUTH
+  DISCONNECTED
+}
+
+/// Long-lived Marketing API access token for RadarCut's TikTok Ads advertiser(s).
+/// Distinct from Login Kit (TikTokOAuthConnection). Tokens encrypted at rest.
+model TikTokAdsOAuthConnection {
+  id               String                    @id @default(cuid())
+  /// Singleton key — only one Marketing API connection for the site.
+  key              String                    @unique @default("default")
+  /// Advertiser account IDs granted to this token (JSON string array).
+  advertiserIds    String
+  accessTokenEnc   String
+  /// Marketing API long-term tokens typically do not expire; null = no expiry known.
+  accessTokenExpiresAt DateTime?
+  scopes           String?
+  status           TikTokAdsConnectionStatus @default(CONNECTED)
+  lastError        String?
+  lastSyncedAt     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("tiktok_ads_oauth_connections")
+}
+
+// ---------------------------------------------------------------------------
+// TikTok Business Account (account holder) — comments / messaging
+// ---------------------------------------------------------------------------
+
+enum TikTokAccountConnectionStatus {
+  CONNECTED
+  NEEDS_REAUTH
+  DISCONNECTED
+}
+
+/// Short-lived Business Account tokens from TikTok account holder OAuth
+/// (/tt_user/oauth2/token/). Distinct from Login Kit and advertiser Ads OAuth.
+/// Required for organic comment webhooks/replies and Business Messaging.
+model TikTokAccountOAuthConnection {
+  id                    String                       @id @default(cuid())
+  key                   String                       @unique @default("default")
+  /// Application-specific TikTok account id (open_id / business_id).
+  openId                String
+  displayName           String?
+  accessTokenEnc        String
+  refreshTokenEnc       String
+  accessTokenExpiresAt  DateTime
+  refreshTokenExpiresAt DateTime?
+  scopes                String?
+  status                TikTokAccountConnectionStatus @default(CONNECTED)
+  lastError             String?
+  lastSyncedAt          DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("tiktok_account_oauth_connections")
 }
 
 // ---------------------------------------------------------------------------

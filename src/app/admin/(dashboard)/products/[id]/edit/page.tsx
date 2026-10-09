@@ -102,6 +102,7 @@ export default async function EditProductPage({ params, searchParams }: EditProd
     enablePrivateDm: rule.enablePrivateDm,
     enableInstagram: rule.enableInstagram,
     enableFacebook: rule.enableFacebook,
+    enableTikTok: rule.enableTikTok,
     isActive: rule.isActive,
   }));
 

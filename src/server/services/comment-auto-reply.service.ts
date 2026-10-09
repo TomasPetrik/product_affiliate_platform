@@ -28,6 +28,7 @@ export async function createCommentAutoReplyRule(input: CommentAutoReplyRuleInpu
       enablePrivateDm: input.enablePrivateDm,
       enableInstagram: input.enableInstagram,
       enableFacebook: input.enableFacebook,
+      enableTikTok: input.enableTikTok,
       isActive: input.isActive,
     },
   });
@@ -57,6 +58,7 @@ export async function updateCommentAutoReplyRule(
       enablePrivateDm: input.enablePrivateDm,
       enableInstagram: input.enableInstagram,
       enableFacebook: input.enableFacebook,
+      enableTikTok: input.enableTikTok,
       isActive: input.isActive,
     },
   });

@@ -29,6 +29,7 @@ function readRuleFlags(formData: FormData) {
     enablePrivateDm: formData.get("enablePrivateDm") === "on",
     enableInstagram: formData.get("enableInstagram") === "on",
     enableFacebook: formData.get("enableFacebook") === "on",
+    enableTikTok: formData.get("enableTikTok") === "on",
     isActive: formData.get("isActive") === "on",
   };
 }
@@ -70,6 +71,7 @@ export async function createCommentAutoReplyRuleAction(
         enablePrivateDm: rule.enablePrivateDm,
         enableInstagram: rule.enableInstagram,
         enableFacebook: rule.enableFacebook,
+        enableTikTok: rule.enableTikTok,
       },
     });
     revalidateProduct(productId);
@@ -110,6 +112,7 @@ export async function updateCommentAutoReplyRuleAction(
         enablePrivateDm: rule.enablePrivateDm,
         enableInstagram: rule.enableInstagram,
         enableFacebook: rule.enableFacebook,
+        enableTikTok: rule.enableTikTok,
         isActive: rule.isActive,
       },
     });

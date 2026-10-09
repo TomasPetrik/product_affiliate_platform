@@ -32,6 +32,7 @@ export interface CommentAutoReplyRuleView {
   enablePrivateDm: boolean;
   enableInstagram: boolean;
   enableFacebook: boolean;
+  enableTikTok: boolean;
   isActive: boolean;
 }
 
@@ -66,11 +67,13 @@ function ChannelChecks({
   enablePrivateDm,
   enableInstagram,
   enableFacebook,
+  enableTikTok,
 }: {
   enablePublicReply: boolean;
   enablePrivateDm: boolean;
   enableInstagram: boolean;
   enableFacebook: boolean;
+  enableTikTok: boolean;
 }) {
   return (
     <div className="grid gap-2 text-sm">
@@ -116,6 +119,16 @@ function ChannelChecks({
             className="size-4 rounded border"
           />
           Facebook
+        </label>
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            name="enableTikTok"
+            value="on"
+            defaultChecked={enableTikTok}
+            className="size-4 rounded border"
+          />
+          TikTok
         </label>
       </div>
     </div>
@@ -206,6 +219,7 @@ function EditRuleForm({
           {rule.enablePrivateDm ? <Badge variant="outline">DM</Badge> : null}
           {rule.enableInstagram ? <Badge variant="outline">IG</Badge> : null}
           {rule.enableFacebook ? <Badge variant="outline">FB</Badge> : null}
+          {rule.enableTikTok ? <Badge variant="outline">TT</Badge> : null}
         </div>
         <DeleteEntityButton
           action={deleteCommentAutoReplyRuleAction}
@@ -249,6 +263,7 @@ function EditRuleForm({
           enablePrivateDm={rule.enablePrivateDm}
           enableInstagram={rule.enableInstagram}
           enableFacebook={rule.enableFacebook}
+          enableTikTok={rule.enableTikTok}
         />
         <AdvancedMessageFields
           idPrefix={`edit-${rule.id}`}
@@ -282,9 +297,9 @@ export function CommentAutoReplyPanel({
         <p className="mt-1 text-xs text-muted-foreground">
           Set the keyword people comment (e.g. <span className="font-mono">LINK</span>). Public
           comment and DM copy are prefilled; the DM includes your tracked affiliate hop link.
-          Matching is case-insensitive contains. For Facebook, Meta Webhooks must subscribe{" "}
-          <strong>Page → feed</strong> (Instagram comments alone is not enough). Reconnect Meta after
-          adding <code className="text-[10px]">pages_messaging</code> under the Messenger use case.
+          Matching is case-insensitive contains. Platforms: Instagram, Facebook, TikTok. Meta needs{" "}
+          <strong>Page → feed</strong> webhooks; TikTok uses Business Accounts comment webhooks +
+          Messaging (see Admin → Tools → TikTok comment demo for the review prototype).
         </p>
       </CardHeader>
       <CardContent className="grid gap-6">
@@ -317,6 +332,7 @@ export function CommentAutoReplyPanel({
             enablePrivateDm
             enableInstagram
             enableFacebook
+            enableTikTok
           />
           <AdvancedMessageFields
             idPrefix="new"

@@ -6,6 +6,7 @@ import { requireAdminSession } from "@/lib/auth";
 import { writeAuditLog } from "@/server/services/audit.service";
 import {
   createVideoFrameProject,
+  deleteVideoFrameEdit,
   deleteVideoFrameProject,
   getVideoFrameProject,
   replaceVideoFrameProjectFrames,
@@ -203,12 +204,45 @@ export async function saveVideoFrameEditAction(input: {
   return { ok: true, project: result };
 }
 
+export async function deleteVideoFrameEditAction(input: {
+  projectId: string;
+  timeSec: number;
+}): Promise<VideoFrameProjectActionState> {
+  const session = await requireAdminSession();
+  if (!input.projectId || !Number.isFinite(input.timeSec)) {
+    return { error: "Missing project or frame time." };
+  }
+
+  const result = await deleteVideoFrameEdit({
+    projectId: input.projectId,
+    timeSec: input.timeSec,
+  });
+  if ("error" in result) {
+    return { error: result.error };
+  }
+
+  await writeAuditLog({
+    actor: session,
+    action: "video_frame_project.delete_edit",
+    entityType: "VideoFrameProject",
+    entityId: result.id,
+    after: {
+      timeSec: input.timeSec,
+      editedBytes: result.editedBytes,
+      totalBytes: result.totalBytes,
+    },
+  });
+
+  revalidateVideoFrameProjects(result.id);
+  return { ok: true, project: result };
+}
+
 export async function saveVideoFrameClipAction(input: {
   projectId: string;
   spanId: string;
   timeSec: number;
   sourceUrl: string;
-  provider: "wan" | "krea";
+  provider: "wan" | "krea" | "wan-edit";
   prompt?: string;
 }): Promise<VideoFrameProjectActionState> {
   const session = await requireAdminSession();

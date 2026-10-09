@@ -563,6 +563,58 @@ export async function saveVideoFrameEdit(input: {
 }
 
 /**
+ * Remove the Wan EDITED asset(s) at a planned export time (rounded to 0.1s).
+ */
+export async function deleteVideoFrameEdit(input: {
+  projectId: string;
+  timeSec: number;
+}): Promise<VideoFrameProjectDetail | { error: string }> {
+  const existing = await prisma.videoFrameProject.findUnique({
+    where: { id: input.projectId },
+    select: { id: true },
+  });
+  if (!existing) {
+    return { error: "Project not found." };
+  }
+  if (!Number.isFinite(input.timeSec) || input.timeSec < 0) {
+    return { error: "Invalid frame time." };
+  }
+
+  const rounded = Math.round(input.timeSec * 10) / 10;
+  const prior = await prisma.videoFrameAsset.findMany({
+    where: {
+      projectId: input.projectId,
+      kind: "EDITED",
+    },
+  });
+  const toRemove = prior.filter(
+    (asset) => Math.round(asset.timeSec * 10) / 10 === rounded,
+  );
+  if (toRemove.length === 0) {
+    return { error: "No edited frame at that time." };
+  }
+
+  for (const asset of toRemove) {
+    const relative = asset.path.replace(
+      `/uploads/video-frames/${input.projectId}/`,
+      "",
+    );
+    if (relative && !relative.includes("..")) {
+      await rm(path.join(videoFrameProjectDir(input.projectId), relative), {
+        force: true,
+      });
+    }
+  }
+  await prisma.videoFrameAsset.deleteMany({
+    where: { id: { in: toRemove.map((asset) => asset.id) } },
+  });
+
+  await recalculateProjectSizes(input.projectId);
+  const detail = await getVideoFrameProject(input.projectId);
+  return detail ?? { error: "Project not found after deleting edit." };
+}
+
+/**
  * Persist a generated clip (Wan / Krea) for a span. Keeps prior clips.
  */
 export async function saveVideoFrameClip(input: {
@@ -570,7 +622,7 @@ export async function saveVideoFrameClip(input: {
   spanId: string;
   timeSec: number;
   sourceUrl: string;
-  provider: "wan" | "krea";
+  provider: "wan" | "krea" | "wan-edit";
   prompt?: string;
 }): Promise<VideoFrameProjectDetail | { error: string }> {
   const existing = await prisma.videoFrameProject.findUnique({

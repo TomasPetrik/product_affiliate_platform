@@ -8,6 +8,7 @@ import {
   type WanPredictionStatus,
 } from "@/lib/wan-image-edit";
 import { WAN_REFERENCE_TO_VIDEO_SUBMIT_URL } from "@/lib/wan-video";
+import { WAN_VIDEO_EDIT_SUBMIT_URL } from "@/lib/wan-video-edit";
 
 export class WaveSpeedError extends Error {
   constructor(
@@ -259,6 +260,67 @@ export async function submitWanReferenceToVideo(
   if (input.seed !== undefined) body.seed = input.seed;
 
   const response = await fetch(WAN_REFERENCE_TO_VIDEO_SUBMIT_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    throw new WaveSpeedError(await readErrorMessage(response), response.status);
+  }
+
+  return normalizePrediction(await response.json());
+}
+
+export interface WanVideoEditSubmitInput {
+  prompt: string;
+  videoUrl: string;
+  referenceImageUrls?: string[];
+  referenceAudioUrls?: string[];
+  resolution?: string;
+  /** Omit to let WaveSpeed follow the normalized input duration. */
+  duration?: number;
+  enablePromptExpansion?: boolean;
+  generateAudio?: boolean;
+  seed?: number;
+}
+
+export async function submitWanVideoEdit(
+  input: WanVideoEditSubmitInput,
+): Promise<WanPrediction> {
+  const apiKey = requireApiKey();
+
+  if (!input.videoUrl.trim()) {
+    throw new WaveSpeedError("A source video URL is required.");
+  }
+  if (!input.prompt.trim()) {
+    throw new WaveSpeedError("Prompt is required.");
+  }
+
+  const body: Record<string, unknown> = {
+    prompt: input.prompt,
+    video: input.videoUrl,
+  };
+  if (input.referenceImageUrls?.length) {
+    body.reference_images = input.referenceImageUrls;
+  }
+  if (input.referenceAudioUrls?.length) {
+    body.reference_audios = input.referenceAudioUrls;
+  }
+  if (input.resolution) body.resolution = input.resolution;
+  if (input.duration !== undefined) body.duration = input.duration;
+  if (input.enablePromptExpansion !== undefined) {
+    body.enable_prompt_expansion = input.enablePromptExpansion;
+  }
+  if (input.generateAudio !== undefined) {
+    body.generate_audio = input.generateAudio;
+  }
+  if (input.seed !== undefined) body.seed = input.seed;
+
+  const response = await fetch(WAN_VIDEO_EDIT_SUBMIT_URL, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,

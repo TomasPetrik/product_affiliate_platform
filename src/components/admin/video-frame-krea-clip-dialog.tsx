@@ -42,7 +42,10 @@ const POLL_INTERVAL_MS = 5000;
 export interface SpanClipFrameCandidate {
   time: number;
   label: string;
+  /** Display thumb (edited if present, else original preview). */
   thumbUrl: string | null;
+  /** Live/export preview of the original frame (not Wan-edited). */
+  originalThumbUrl: string | null;
   /** Prefer this when selected (Wan-edited still). */
   editedUrl: string | null;
   editedAssetId: string | null;

@@ -89,12 +89,34 @@ async function urlToFile(url: string, filename: string): Promise<File> {
   });
 }
 
+type FrameSourceKind = "edited" | "original";
+
 function defaultSelectedKeys(candidates: SpanClipFrameCandidate[]): string[] {
-  const edited = candidates.filter((c) => c.editedUrl || c.editedAssetId);
-  const source = edited.length > 0 ? edited : candidates;
-  return source
+  return candidates
     .slice(0, MAX_WAN_VIDEO_REFERENCE_IMAGES)
     .map((c) => String(c.time));
+}
+
+function defaultFrameSources(
+  candidates: SpanClipFrameCandidate[],
+): Record<string, FrameSourceKind> {
+  const next: Record<string, FrameSourceKind> = {};
+  for (const candidate of candidates) {
+    const key = String(candidate.time);
+    next[key] =
+      candidate.editedUrl || candidate.editedAssetId ? "edited" : "original";
+  }
+  return next;
+}
+
+function candidateDisplayUrl(
+  candidate: SpanClipFrameCandidate,
+  source: FrameSourceKind,
+): string | null {
+  if (source === "edited") {
+    return candidate.editedUrl ?? candidate.originalThumbUrl ?? candidate.thumbUrl;
+  }
+  return candidate.originalThumbUrl ?? candidate.thumbUrl;
 }
 
 function WanClipProgressBar({
@@ -157,6 +179,9 @@ export function VideoFrameWanClipDialog({
 }: VideoFrameWanClipDialogProps) {
   const [selectedKeys, setSelectedKeys] = useState<string[]>(() =>
     defaultSelectedKeys(candidates),
+  );
+  const [frameSources, setFrameSources] = useState<Record<string, FrameSourceKind>>(
+    () => defaultFrameSources(candidates),
   );
   const [prompt, setPrompt] = useState(DEFAULT_WAN_VIDEO_PROMPT);
   const [duration, setDuration] = useState(DEFAULT_WAN_VIDEO_DURATION);
@@ -245,6 +270,7 @@ export function VideoFrameWanClipDialog({
       .sort((a, b) => a - b);
 
     setSelectedKeys(nextSelected);
+    setFrameSources(defaultFrameSources(candidates));
     setPrompt(DEFAULT_WAN_VIDEO_PROMPT);
     setDuration(suggestedWanVideoDurationFromTimes(nextTimes));
     setResolution(DEFAULT_WAN_VIDEO_RESOLUTION);
@@ -279,10 +305,6 @@ export function VideoFrameWanClipDialog({
     });
   }
 
-  function selectEditedOnly() {
-    setSelectedKeys(defaultSelectedKeys(candidates));
-  }
-
   function selectAll() {
     setSelectedKeys(
       candidates
@@ -291,24 +313,106 @@ export function VideoFrameWanClipDialog({
     );
   }
 
+  function selectEditedOnly() {
+    const edited = candidates.filter((c) => c.editedUrl || c.editedAssetId);
+    setSelectedKeys(
+      edited.slice(0, MAX_WAN_VIDEO_REFERENCE_IMAGES).map((c) => String(c.time)),
+    );
+    setFrameSources((prev) => {
+      const next = { ...prev };
+      for (const candidate of edited) {
+        next[String(candidate.time)] = "edited";
+      }
+      return next;
+    });
+  }
+
+  function selectOriginalsOnly() {
+    setSelectedKeys(
+      candidates
+        .slice(0, MAX_WAN_VIDEO_REFERENCE_IMAGES)
+        .map((c) => String(c.time)),
+    );
+    setFrameSources((prev) => {
+      const next = { ...prev };
+      for (const candidate of candidates) {
+        next[String(candidate.time)] = "original";
+      }
+      return next;
+    });
+  }
+
+  function setAllSources(kind: FrameSourceKind) {
+    setFrameSources((prev) => {
+      const next = { ...prev };
+      for (const key of selectedKeys) {
+        const candidate = candidates.find((c) => String(c.time) === key);
+        if (kind === "edited" && !(candidate?.editedUrl || candidate?.editedAssetId)) {
+          next[key] = "original";
+          continue;
+        }
+        next[key] = kind;
+      }
+      return next;
+    });
+  }
+
+  function toggleFrameSource(time: number) {
+    const key = String(time);
+    const candidate = candidates.find((c) => String(c.time) === key);
+    if (!(candidate?.editedUrl || candidate?.editedAssetId)) return;
+    setFrameSources((prev) => ({
+      ...prev,
+      [key]: prev[key] === "edited" ? "original" : "edited",
+    }));
+  }
+
   async function resolveCandidate(
     candidate: SpanClipFrameCandidate,
-  ): Promise<{ assetId?: string; file?: File }> {
-    if (candidate.editedAssetId) {
-      return { assetId: candidate.editedAssetId };
+  ): Promise<{ assetId?: string; file?: File; previewUrl?: string | null }> {
+    const key = String(candidate.time);
+    const source = frameSources[key] ?? "original";
+    const useEdited =
+      source === "edited" &&
+      Boolean(candidate.editedAssetId || candidate.editedUrl);
+
+    if (useEdited) {
+      if (candidate.editedAssetId) {
+        return {
+          assetId: candidate.editedAssetId,
+          previewUrl: candidate.editedUrl,
+        };
+      }
+      if (candidate.editedUrl) {
+        return {
+          file: await urlToFile(
+            candidate.editedUrl,
+            `edited-${formatVideoTime(candidate.time)}.jpg`,
+          ),
+          previewUrl: candidate.editedUrl,
+        };
+      }
     }
-    if (candidate.editedUrl) {
+
+    if (candidate.frameAssetId) {
       return {
-        file: await urlToFile(
-          candidate.editedUrl,
-          `edited-${formatVideoTime(candidate.time)}.jpg`,
-        ),
+        assetId: candidate.frameAssetId,
+        previewUrl: candidate.originalThumbUrl,
       };
     }
-    if (candidate.frameAssetId) {
-      return { assetId: candidate.frameAssetId };
+    if (candidate.originalThumbUrl) {
+      return {
+        file: await urlToFile(
+          candidate.originalThumbUrl,
+          `frame-${formatVideoTime(candidate.time)}.jpg`,
+        ),
+        previewUrl: candidate.originalThumbUrl,
+      };
     }
-    return { file: await captureFrameFile(candidate.time) };
+    return {
+      file: await captureFrameFile(candidate.time),
+      previewUrl: null,
+    };
   }
 
   async function onSubmit(event: FormEvent) {
@@ -344,7 +448,12 @@ export function VideoFrameWanClipDialog({
         const source = await resolveCandidate(candidate);
         if (source.assetId) {
           formData.append("referenceFrameAssetIds", source.assetId);
-          const preview = candidate.editedUrl ?? candidate.thumbUrl;
+          const preview =
+            source.previewUrl ??
+            candidateDisplayUrl(
+              candidate,
+              frameSources[String(candidate.time)] ?? "original",
+            );
           if (preview) {
             try {
               historyFiles.push(
@@ -472,6 +581,15 @@ export function VideoFrameWanClipDialog({
                       variant="outline"
                       size="sm"
                       disabled={busy}
+                      onClick={selectAll}
+                    >
+                      All
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={busy || editedCount === 0}
                       onClick={selectEditedOnly}
                     >
                       Edited only ({editedCount})
@@ -481,21 +599,48 @@ export function VideoFrameWanClipDialog({
                       variant="outline"
                       size="sm"
                       disabled={busy}
-                      onClick={selectAll}
+                      onClick={selectOriginalsOnly}
                     >
-                      All (max {MAX_WAN_VIDEO_REFERENCE_IMAGES})
+                      Originals
                     </Button>
                   </div>
                 </div>
+                <div className="flex flex-wrap gap-1.5">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={busy || selectedKeys.length === 0 || editedCount === 0}
+                    onClick={() => setAllSources("edited")}
+                  >
+                    Selected → edited
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={busy || selectedKeys.length === 0}
+                    onClick={() => setAllSources("original")}
+                  >
+                    Selected → original
+                  </Button>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  Click a frame to include it. When an edit exists, use the badge to
+                  switch between edited and original for that frame.
+                </p>
                 <ul className="grid grid-cols-3 gap-2 sm:grid-cols-4">
                   {candidates.map((candidate) => {
                     const key = String(candidate.time);
                     const checked = selectedKeys.includes(key);
-                    const isEdited = Boolean(
+                    const hasEdited = Boolean(
                       candidate.editedUrl || candidate.editedAssetId,
                     );
+                    const source =
+                      frameSources[key] ?? (hasEdited ? "edited" : "original");
+                    const displayUrl = candidateDisplayUrl(candidate, source);
                     return (
-                      <li key={key}>
+                      <li key={key} className="flex flex-col gap-1">
                         <button
                           type="button"
                           disabled={busy}
@@ -508,10 +653,10 @@ export function VideoFrameWanClipDialog({
                             busy && "opacity-60",
                           )}
                         >
-                          {candidate.thumbUrl ? (
+                          {displayUrl ? (
                             // eslint-disable-next-line @next/next/no-img-element
                             <img
-                              src={candidate.thumbUrl}
+                              src={displayUrl}
                               alt=""
                               className="aspect-[9/16] w-full bg-muted object-cover"
                             />
@@ -526,14 +671,6 @@ export function VideoFrameWanClipDialog({
                               {formatVideoTime(candidate.time)}
                             </span>
                           </span>
-                          {isEdited ? (
-                            <Badge
-                              variant="secondary"
-                              className="absolute top-1 left-1 px-1 py-0 text-[9px]"
-                            >
-                              Edited
-                            </Badge>
-                          ) : null}
                           <span
                             className={cn(
                               "absolute top-1 right-1 flex size-4 items-center justify-center rounded border text-[10px]",
@@ -545,6 +682,26 @@ export function VideoFrameWanClipDialog({
                             {checked ? "✓" : ""}
                           </span>
                         </button>
+                        {hasEdited ? (
+                          <button
+                            type="button"
+                            disabled={busy || !checked}
+                            onClick={() => toggleFrameSource(candidate.time)}
+                            className={cn(
+                              "rounded-md px-1.5 py-0.5 text-[10px] ring-1 transition",
+                              source === "edited"
+                                ? "bg-foreground text-background ring-foreground"
+                                : "bg-background text-muted-foreground ring-border",
+                              (!checked || busy) && "opacity-50",
+                            )}
+                          >
+                            {source === "edited" ? "Using edited" : "Using original"}
+                          </button>
+                        ) : (
+                          <span className="px-1 text-[10px] text-muted-foreground">
+                            Original
+                          </span>
+                        )}
                       </li>
                     );
                   })}

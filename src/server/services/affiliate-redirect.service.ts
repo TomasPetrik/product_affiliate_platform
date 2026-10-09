@@ -81,10 +81,15 @@ async function lookupPublishedAffiliateTarget(
     flags,
   );
 
+  // Prefer an explicit link / marketplace, but fall back to primary/first visible
+  // offer when `?m=` points at a retailer that is missing or filtered out
+  // (e.g. primary eBay while Amazon-only mode is on).
   const selected = linkId
     ? visibleLinks.find((link) => link.id === linkId)
     : marketplaceCode
-      ? visibleLinks.find((link) => link.marketplace === marketplaceCode)
+      ? (visibleLinks.find((link) => link.marketplace === marketplaceCode) ??
+        visibleLinks.find((link) => link.isPrimary) ??
+        visibleLinks[0])
       : (visibleLinks.find((link) => link.isPrimary) ?? visibleLinks[0]);
 
   if (!selected) {

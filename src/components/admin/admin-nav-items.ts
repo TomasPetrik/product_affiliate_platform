@@ -11,6 +11,7 @@ import {
   Package,
   RefreshCw,
   Settings,
+  Sparkles,
   Store,
   UploadCloud,
 } from "lucide-react";
@@ -40,6 +41,7 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
   { href: "/admin/imports", label: "Imports", icon: UploadCloud },
   { href: "/admin/price-sync", label: "Price sync", icon: RefreshCw },
   { href: "/admin/tools/video-frames", label: "Video frames", icon: Film },
+  { href: "/admin/tools/wan-image-edit", label: "Wan image edit", icon: Sparkles },
   {
     href: "/admin/tools/tiktok-comment-demo",
     label: "TikTok comment demo",

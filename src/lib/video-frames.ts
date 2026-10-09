@@ -156,3 +156,28 @@ export function clampSpan(span: FrameSpan, duration: number): FrameSpan {
     frameCount: Math.max(1, Math.min(120, Math.floor(span.frameCount) || 1)),
   };
 }
+
+/** Round to slider step so preview cache keys stay stable while dragging. */
+export function previewTimeKey(time: number, step = 0.1): string {
+  if (!Number.isFinite(time)) {
+    return "0.0";
+  }
+  const rounded = Math.round(time / step) * step;
+  return rounded.toFixed(1);
+}
+
+export function uniquePreviewTimes(spans: FrameSpan[], step = 0.1): number[] {
+  const seen = new Set<string>();
+  const times: number[] = [];
+  for (const span of spans) {
+    for (const time of timestampsForSpan(span.start, span.end, span.frameCount)) {
+      const key = previewTimeKey(time, step);
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      times.push(Number(key));
+    }
+  }
+  return times.sort((a, b) => a - b);
+}

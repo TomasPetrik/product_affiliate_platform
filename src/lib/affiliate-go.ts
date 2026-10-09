@@ -7,6 +7,11 @@
  *   /go/magnetic-car-phone-holder?m=ebay
  */
 
+import {
+  filterOffersByAmazonPreference,
+  type AmazonOfferPreferenceFlags,
+} from "@/lib/amazon-offer-preference";
+
 export const PRODUCT_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 const MARKETPLACE_PARAM_PATTERN = /^[a-z][a-z0-9_]{0,31}$/;
@@ -29,6 +34,47 @@ export function parseLinkIdParam(raw: string | null | undefined): string | null 
   if (!value || value.length > 64) return null;
   if (!/^[a-z0-9_-]+$/i.test(value)) return null;
   return value;
+}
+
+export interface AffiliateHopLinkCandidate {
+  marketplace: string;
+  isPrimary: boolean;
+  isActive?: boolean;
+  affiliateUrl?: string | null;
+  price?: number | null;
+}
+
+/**
+ * Marketplace code that a public `/go/{slug}?m=` hop should use.
+ * Skips inactive / empty URLs and respects Amazon-only storefront flags so we
+ * never emit `m=ebay` when eBay is not actually reachable.
+ */
+export function pickAffiliateHopMarketplaceCode(
+  links: AffiliateHopLinkCandidate[],
+  flags?: AmazonOfferPreferenceFlags,
+): string | undefined {
+  const usable = links.filter(
+    (link) =>
+      link.isActive !== false &&
+      Boolean(link.marketplace?.trim()) &&
+      (link.affiliateUrl == null || link.affiliateUrl.trim().length > 0),
+  );
+
+  const visible = flags
+    ? filterOffersByAmazonPreference(
+        usable.map((link) => ({
+          ...link,
+          marketplace: link.marketplace.trim().toUpperCase(),
+          price: link.price ?? null,
+        })),
+        flags,
+      )
+    : usable.map((link) => ({
+        ...link,
+        marketplace: link.marketplace.trim().toUpperCase(),
+      }));
+
+  return (visible.find((link) => link.isPrimary) ?? visible[0])?.marketplace;
 }
 
 /** Public hop that records an offer click without exposing a raw retailer URL. */

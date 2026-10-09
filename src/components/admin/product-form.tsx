@@ -1,8 +1,16 @@
 "use client";
 
-import { useActionState, useEffect, useRef, useState, type ChangeEvent } from "react";
+import {
+  useActionState,
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type ReactNode,
+} from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { ChevronsDownUp, ChevronsUpDown } from "lucide-react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -20,6 +28,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { ProductImagesField, type ProductImageFieldValue } from "@/components/admin/product-images-field";
 import { saveProductAction, type ProductActionState } from "@/server/actions/product.actions";
+import { cn } from "@/lib/utils";
 
 import { generateAmazonTrackedAffiliate } from "@/lib/amazon-url";
 import { slugify } from "@/lib/slug";
@@ -99,12 +108,20 @@ export const emptyProductFormValues: ProductFormValues = {
   primaryMarketplaceId: "",
 };
 
+/** Stable id so Basics fields can sit outside the <form> (edit-page two-column layout). */
+export const ADMIN_PRODUCT_FORM_ID = "admin-product-form";
+
 interface ProductFormProps {
   defaultValues?: ProductFormValues;
   categories: Array<{ id: string; name: string; parent: { name: string } | null }>;
   marketplaces: Array<{ id: string; code: string; name: string }>;
   /** Associates account tag from AMAZON_ASSOCIATES_TAG; enables Generate tracking ID. */
   amazonAssociatesTag?: string | null;
+  /**
+   * Custom layout. Use `basics` beside other panels and `fields` for the rest of the form.
+   * Basics inputs associate via `form={ADMIN_PRODUCT_FORM_ID}` so they still submit.
+   */
+  children?: (parts: { basics: ReactNode; fields: ReactNode }) => ReactNode;
 }
 
 const initialState: ProductActionState = {};
@@ -121,6 +138,7 @@ export function ProductForm({
   categories,
   marketplaces,
   amazonAssociatesTag = null,
+  children,
 }: ProductFormProps) {
   const [state, formAction, pending] = useActionState(saveProductAction, initialState);
   const [slug, setSlug] = useState(defaultValues.slug);
@@ -142,8 +160,11 @@ export function ProductForm({
     return drafts;
   });
   const [amazonTagError, setAmazonTagError] = useState<string | null>(null);
+  const [longDescriptionExpanded, setLongDescriptionExpanded] = useState(false);
   const errorAlertRef = useRef<HTMLDivElement | null>(null);
   const router = useRouter();
+  const splitLayout = typeof children === "function";
+  const basicsFormId = splitLayout ? ADMIN_PRODUCT_FORM_ID : undefined;
 
   useEffect(() => {
     if (!state.error) {
@@ -199,20 +220,7 @@ export function ProductForm({
     }
   }
 
-  return (
-    <form action={formAction} className="flex flex-col gap-6">
-      {defaultValues.id ? <input type="hidden" name="productId" value={defaultValues.id} /> : null}
-      <input type="hidden" name="status" value={status} />
-      <input type="hidden" name="categoryId" value={categoryId} />
-
-      {state.error ? (
-        <div ref={errorAlertRef}>
-          <Alert variant="destructive">
-            <AlertDescription>{state.error}</AlertDescription>
-          </Alert>
-        </div>
-      ) : null}
-
+  const basics = (
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Basics</CardTitle>
@@ -223,6 +231,7 @@ export function ProductForm({
             <Input
               id="title"
               name="title"
+              form={basicsFormId}
               required
               defaultValue={defaultValues.title}
               onChange={(event) => {
@@ -236,6 +245,7 @@ export function ProductForm({
             <Input
               id="slug"
               name="slug"
+              form={basicsFormId}
               required
               value={slug}
               onChange={(event) => {
@@ -254,23 +264,34 @@ export function ProductForm({
           <div className="grid gap-5 sm:grid-cols-2">
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="brand">Brand</Label>
-              <Input id="brand" name="brand" required defaultValue={defaultValues.brand} />
+              <Input
+                id="brand"
+                name="brand"
+                form={basicsFormId}
+                required
+                defaultValue={defaultValues.brand}
+              />
             </div>
 
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="modelNumber">Model</Label>
-              <Input id="modelNumber" name="modelNumber" defaultValue={defaultValues.modelNumber} />
+              <Input
+                id="modelNumber"
+                name="modelNumber"
+                form={basicsFormId}
+                defaultValue={defaultValues.modelNumber}
+              />
             </div>
           </div>
 
           <div className="grid gap-5 sm:grid-cols-2">
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="gtin">GTIN / UPC / EAN</Label>
-              <Input id="gtin" name="gtin" defaultValue={defaultValues.gtin} />
+              <Input id="gtin" name="gtin" form={basicsFormId} defaultValue={defaultValues.gtin} />
             </div>
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="mpn">MPN</Label>
-              <Input id="mpn" name="mpn" defaultValue={defaultValues.mpn} />
+              <Input id="mpn" name="mpn" form={basicsFormId} defaultValue={defaultValues.mpn} />
             </div>
           </div>
 
@@ -297,16 +318,77 @@ export function ProductForm({
 
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="shortDescription">Short description</Label>
-            <Textarea id="shortDescription" name="shortDescription" rows={2} required defaultValue={defaultValues.shortDescription} />
+            <Textarea
+              id="shortDescription"
+              name="shortDescription"
+              form={basicsFormId}
+              rows={2}
+              required
+              defaultValue={defaultValues.shortDescription}
+            />
             <p className="text-xs text-muted-foreground">Shown on product cards and search results.</p>
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="longDescription">Long description</Label>
-            <Textarea id="longDescription" name="longDescription" rows={6} required defaultValue={defaultValues.longDescription} />
+            <div className="flex items-center justify-between gap-2">
+              <Label htmlFor="longDescription">Long description</Label>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 gap-1 px-2 text-xs text-muted-foreground"
+                aria-expanded={longDescriptionExpanded}
+                onClick={() => setLongDescriptionExpanded((value) => !value)}
+              >
+                {longDescriptionExpanded ? (
+                  <>
+                    <ChevronsDownUp className="h-3.5 w-3.5" />
+                    Collapse
+                  </>
+                ) : (
+                  <>
+                    <ChevronsUpDown className="h-3.5 w-3.5" />
+                    Expand
+                  </>
+                )}
+              </Button>
+            </div>
+            <Textarea
+              id="longDescription"
+              name="longDescription"
+              form={basicsFormId}
+              rows={6}
+              required
+              defaultValue={defaultValues.longDescription}
+              className={cn(
+                "field-sizing-fixed resize-y overflow-y-auto",
+                longDescriptionExpanded ? "min-h-64 max-h-[32rem]" : "h-36 max-h-36",
+              )}
+            />
           </div>
         </CardContent>
       </Card>
+  );
+
+  const fields = (
+    <form
+      id={splitLayout ? ADMIN_PRODUCT_FORM_ID : undefined}
+      action={formAction}
+      className="flex flex-col gap-6"
+    >
+      {defaultValues.id ? <input type="hidden" name="productId" value={defaultValues.id} /> : null}
+      <input type="hidden" name="status" value={status} />
+      <input type="hidden" name="categoryId" value={categoryId} />
+
+      {state.error ? (
+        <div ref={errorAlertRef}>
+          <Alert variant="destructive">
+            <AlertDescription>{state.error}</AlertDescription>
+          </Alert>
+        </div>
+      ) : null}
+
+      {splitLayout ? null : basics}
 
       <Card>
         <CardHeader>
@@ -621,4 +703,10 @@ export function ProductForm({
       </div>
     </form>
   );
+
+  if (children) {
+    return <>{children({ basics, fields })}</>;
+  }
+
+  return fields;
 }

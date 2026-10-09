@@ -16,7 +16,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SOCIAL_PLATFORM_LABELS, SOCIAL_PLATFORMS } from "@/lib/social-external-id";
 import {
-  addMarketingVideoPostAction,
   deleteMarketingVideoAction,
   deleteMarketingVideoPostAction,
   saveMarketingVideoAction,
@@ -46,6 +45,7 @@ export interface MarketingVideoView {
 interface MarketingVideosPanelProps {
   productId: string;
   videos: MarketingVideoView[];
+  className?: string;
 }
 
 const initialState: MarketingVideoActionState = {};
@@ -107,61 +107,13 @@ function EditLabelForm({
   );
 }
 
-function AddPlatformForm({
-  productId,
-  videoId,
-  usedPlatforms,
-}: {
-  productId: string;
-  videoId: string;
-  usedPlatforms: Array<keyof typeof SOCIAL_PLATFORM_LABELS>;
-}) {
-  const [state, action, pending] = useActionState(addMarketingVideoPostAction, initialState);
-  const available = SOCIAL_PLATFORMS.filter((platform) => !usedPlatforms.includes(platform));
-
-  if (available.length === 0) {
-    return null;
-  }
-
-  return (
-    <form action={action} className="mt-3 grid gap-2 rounded border border-dashed p-2">
-      <input type="hidden" name="productId" value={productId} />
-      <input type="hidden" name="videoId" value={videoId} />
-      <p className="text-xs font-medium">Add another platform</p>
-      <div className="grid gap-2 sm:grid-cols-[10rem_1fr_auto]">
-        <select
-          name="platform"
-          defaultValue={available[0]}
-          className="h-8 rounded-md border border-input bg-transparent px-2 text-sm"
-        >
-          {available.map((platform) => (
-            <option key={platform} value={platform}>
-              {SOCIAL_PLATFORM_LABELS[platform]}
-            </option>
-          ))}
-        </select>
-        <Input
-          name="externalIdOrUrl"
-          required
-          placeholder="URL or ID"
-          className="h-8"
-        />
-        <Button type="submit" size="sm" disabled={pending}>
-          {pending ? "Adding…" : "Add"}
-        </Button>
-      </div>
-      <ActionAlerts state={state} />
-    </form>
-  );
-}
-
-export function MarketingVideosPanel({ productId, videos }: MarketingVideosPanelProps) {
+export function MarketingVideosPanel({ productId, videos, className }: MarketingVideosPanelProps) {
   const [saveState, saveAction, savePending] = useActionState(saveMarketingVideoAction, initialState);
   const [syncState, syncAction, syncPending] = useActionState(syncMarketingVideoViewsAction, initialState);
   const syncDialog = useMarketingVideoSyncResultsDialog(syncState.syncSummary, syncState.ok);
 
   return (
-    <Card>
+    <Card className={className}>
       <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
         <div>
           <CardTitle className="text-sm">Marketing video funnel</CardTitle>
@@ -251,11 +203,6 @@ export function MarketingVideosPanel({ productId, videos }: MarketingVideosPanel
                     </li>
                   ))}
                 </ul>
-                <AddPlatformForm
-                  productId={productId}
-                  videoId={video.id}
-                  usedPlatforms={video.posts.map((post) => post.platform)}
-                />
               </li>
             ))}
           </ul>

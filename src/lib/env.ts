@@ -171,6 +171,12 @@ const envSchema = z.object({
    * When unset, we fall back to the Business portal auth page + redirect_uri.
    */
   TIKTOK_ACCOUNT_AUTHORIZATION_URL: z.string().url().optional(),
+
+  /**
+   * WaveSpeedAI API key for Wan image edit (Admin → Tools → Wan image edit).
+   * Optional so the site boots without it; the tool shows a clear message when missing.
+   */
+  WAVESPEED_API_KEY: z.string().min(1).optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;
@@ -223,6 +229,7 @@ function loadEnv(): Env {
     TIKTOK_ACCOUNT_AUTHORIZATION_URL: blankToUndefined(
       process.env.TIKTOK_ACCOUNT_AUTHORIZATION_URL,
     ),
+    WAVESPEED_API_KEY: blankToUndefined(process.env.WAVESPEED_API_KEY),
   });
 
   if (!parsed.success) {

@@ -1,8 +1,9 @@
 import { prisma } from "@/lib/prisma";
-import { affiliateGoHref } from "@/lib/affiliate-go";
+import { affiliateGoHref, pickAffiliateHopMarketplaceCode } from "@/lib/affiliate-go";
 import { env } from "@/lib/env";
 import { productShortPath } from "@/lib/product-short-url";
 import type { TikTokCommentDemoProduct } from "@/lib/tiktok-comment-demo";
+import { getSiteSettings } from "@/server/services/site-settings.service";
 
 export type { TikTokCommentDemoProduct } from "@/lib/tiktok-comment-demo";
 export {
@@ -16,6 +17,7 @@ export {
  */
 export async function listTikTokCommentDemoProducts(limit = 40): Promise<TikTokCommentDemoProduct[]> {
   const siteBase = env.NEXT_PUBLIC_SITE_URL.replace(/\/$/, "");
+  const siteSettings = await getSiteSettings();
 
   const products = await prisma.product.findMany({
     where: {
@@ -36,9 +38,13 @@ export async function listTikTokCommentDemoProducts(limit = 40): Promise<TikTokC
       slug: true,
       publicId: true,
       affiliateLinks: {
-        where: { isPrimary: true },
-        take: 1,
-        select: { marketplace: { select: { code: true } } },
+        where: { isActive: true },
+        select: {
+          isPrimary: true,
+          affiliateUrl: true,
+          lastKnownPrice: true,
+          marketplace: { select: { code: true } },
+        },
       },
       commentAutoReplyRules: {
         where: { enableTikTok: true },
@@ -67,7 +73,16 @@ export async function listTikTokCommentDemoProducts(limit = 40): Promise<TikTokC
   });
 
   return products.map((product) => {
-    const marketplaceCode = product.affiliateLinks[0]?.marketplace?.code;
+    const marketplaceCode = pickAffiliateHopMarketplaceCode(
+      product.affiliateLinks.map((link) => ({
+        marketplace: link.marketplace.code,
+        isPrimary: link.isPrimary,
+        isActive: true,
+        affiliateUrl: link.affiliateUrl,
+        price: link.lastKnownPrice != null ? Number(link.lastKnownPrice) : null,
+      })),
+      siteSettings,
+    );
     const hopPath = affiliateGoHref(product.slug, marketplaceCode);
     return {
       id: product.id,

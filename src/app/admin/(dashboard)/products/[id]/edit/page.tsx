@@ -2,13 +2,11 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
 import { AdminFlash } from "@/components/admin/admin-flash";
-import { CommentAutoReplyPanel } from "@/components/admin/comment-auto-reply-panel";
-import { MarketingVideosPanel } from "@/components/admin/marketing-videos-panel";
-import { ProductForm, type ProductFormLinkValues } from "@/components/admin/product-form";
-import { ReplaceHeroImagePanel } from "@/components/admin/replace-hero-image-panel";
+import { EditProductPanels } from "@/components/admin/edit-product-panels";
 import { RetailerOffersPanel } from "@/components/admin/retailer-offers-panel";
+import { type ProductFormLinkValues } from "@/components/admin/product-form";
 import { adminNoticeMessage } from "@/lib/admin-notice";
-import { affiliateGoHref } from "@/lib/affiliate-go";
+import { affiliateGoHref, pickAffiliateHopMarketplaceCode } from "@/lib/affiliate-go";
 import { env } from "@/lib/env";
 import { listCommentAutoReplyRulesForProduct } from "@/server/services/comment-auto-reply.service";
 import { listMarketingVideosForProduct } from "@/server/services/marketing-video.service";
@@ -18,6 +16,7 @@ import {
   listMarketplaces,
 } from "@/server/services/product.service";
 import { listRetailerOffersForProduct } from "@/server/services/retailer-offer.service";
+import { getSiteSettings } from "@/server/services/site-settings.service";
 
 export const metadata: Metadata = {
   title: "Edit product",
@@ -31,7 +30,7 @@ interface EditProductPageProps {
 export default async function EditProductPage({ params, searchParams }: EditProductPageProps) {
   const { id } = await params;
   const query = await searchParams;
-  const [product, categories, marketplaces, offers, marketingVideos, autoReplyRules] =
+  const [product, categories, marketplaces, offers, marketingVideos, autoReplyRules, siteSettings] =
     await Promise.all([
       getProductByIdAdmin(id),
       listCategoriesForSelect(),
@@ -39,6 +38,7 @@ export default async function EditProductPage({ params, searchParams }: EditProd
       listRetailerOffersForProduct(id),
       listMarketingVideosForProduct(id),
       listCommentAutoReplyRulesForProduct(id),
+      getSiteSettings(),
     ]);
 
   if (!product) {
@@ -47,7 +47,6 @@ export default async function EditProductPage({ params, searchParams }: EditProd
 
   const links: Record<string, ProductFormLinkValues> = {};
   let primaryMarketplaceId = "";
-  let primaryMarketplaceCode: string | undefined;
   for (const link of product.affiliateLinks) {
     links[link.marketplaceId] = {
       affiliateUrl: link.affiliateUrl,
@@ -63,7 +62,6 @@ export default async function EditProductPage({ params, searchParams }: EditProd
     };
     if (link.isPrimary) {
       primaryMarketplaceId = link.marketplaceId;
-      primaryMarketplaceCode = link.marketplace?.code;
     }
   }
 
@@ -74,7 +72,17 @@ export default async function EditProductPage({ params, searchParams }: EditProd
     product.ogImageUrl ??
     null;
   const siteBase = env.NEXT_PUBLIC_SITE_URL.replace(/\/$/, "");
-  const defaultReplyUrl = `${siteBase}${affiliateGoHref(product.slug, primaryMarketplaceCode)}`;
+  const hopMarketplaceCode = pickAffiliateHopMarketplaceCode(
+    product.affiliateLinks.map((link) => ({
+      marketplace: link.marketplace.code,
+      isPrimary: link.isPrimary,
+      isActive: link.isActive,
+      affiliateUrl: link.affiliateUrl,
+      price: link.lastKnownPrice != null ? Number(link.lastKnownPrice) : null,
+    })),
+    siteSettings,
+  );
+  const defaultReplyUrl = `${siteBase}${affiliateGoHref(product.slug, hopMarketplaceCode)}`;
 
   const marketingVideosView = marketingVideos.map((video) => ({
     id: video.id,
@@ -117,23 +125,16 @@ export default async function EditProductPage({ params, searchParams }: EditProd
         <p className="mt-1 text-sm text-muted-foreground">{product.title}</p>
       </div>
 
-      {/* Social / comment automation first — most frequent setup while promoting. */}
-      <MarketingVideosPanel productId={product.id} videos={marketingVideosView} />
-      <CommentAutoReplyPanel
-        productId={product.id}
-        defaultReplyUrl={defaultReplyUrl}
-        rules={autoReplyRulesView}
-      />
-
-      <ReplaceHeroImagePanel
+      <EditProductPanels
         productId={product.id}
         title={product.title}
         brand={product.brand}
         shortDescription={product.shortDescription}
         currentHeroUrl={currentHeroUrl}
-        highlight={noticeKey === "imported"}
-      />
-      <ProductForm
+        highlightHero={noticeKey === "imported"}
+        marketingVideos={marketingVideosView}
+        defaultReplyUrl={defaultReplyUrl}
+        autoReplyRules={autoReplyRulesView}
         categories={categories}
         marketplaces={marketplaces}
         amazonAssociatesTag={env.AMAZON_ASSOCIATES_TAG ?? null}

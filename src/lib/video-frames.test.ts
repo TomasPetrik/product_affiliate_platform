@@ -5,8 +5,10 @@ import {
   clampSpan,
   createZipBlob,
   formatVideoTime,
+  previewTimeKey,
   timestampsForSpan,
   totalFrameCount,
+  uniquePreviewTimes,
 } from "./video-frames";
 
 describe("timestampsForSpan", () => {
@@ -51,5 +53,22 @@ describe("createZipBlob", () => {
     assert.equal(bytes[1], 0x4b);
     assert.equal(bytes[2], 0x03);
     assert.equal(bytes[3], 0x04);
+  });
+});
+
+describe("preview helpers", () => {
+  it("rounds preview cache keys to slider step", () => {
+    assert.equal(previewTimeKey(1.24), "1.2");
+    assert.equal(previewTimeKey(1.26), "1.3");
+  });
+
+  it("dedupes planned preview times across spans", () => {
+    assert.deepEqual(
+      uniquePreviewTimes([
+        { id: "a", start: 0, end: 2, frameCount: 2 },
+        { id: "b", start: 2, end: 4, frameCount: 3 },
+      ]),
+      [0, 2, 3, 4],
+    );
   });
 });

@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/table";
 import { formatByteSize } from "@/lib/video-frame-project-paths";
 import { formatVideoTime } from "@/lib/video-frames";
+import { formatWanCostUsd } from "@/lib/wan-cost";
 import { listVideoFrameProjects } from "@/server/services/video-frame-project.service";
 
 export const metadata: Metadata = { title: "Video creator" };
@@ -58,6 +59,7 @@ export default async function AdminVideoFramesPage() {
                   <TableHead>Spans</TableHead>
                   <TableHead>Frames</TableHead>
                   <TableHead>Size</TableHead>
+                  <TableHead>Gen. cost</TableHead>
                   <TableHead>Updated</TableHead>
                   <TableHead className="text-right">Open</TableHead>
                 </TableRow>
@@ -82,6 +84,11 @@ export default async function AdminVideoFramesPage() {
                     <TableCell className="tabular-nums">{project.frameCount}</TableCell>
                     <TableCell className="tabular-nums text-muted-foreground">
                       {formatByteSize(project.totalBytes)}
+                    </TableCell>
+                    <TableCell className="tabular-nums text-muted-foreground">
+                      {project.wanCostUsd > 0
+                        ? formatWanCostUsd(project.wanCostUsd)
+                        : "—"}
                     </TableCell>
                     <TableCell className="text-muted-foreground">
                       {project.updatedAt.toLocaleString()}

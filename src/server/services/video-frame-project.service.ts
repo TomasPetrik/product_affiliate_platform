@@ -67,6 +67,8 @@ export interface VideoFrameProjectListItem {
   framesBytes: number;
   thumbnailsBytes: number;
   totalBytes: number;
+  /** Sum of WaveSpeed costs on EDITED + CLIP assets (USD). */
+  wanCostUsd: number;
   updatedAt: Date;
   createdAt: Date;
 }
@@ -350,26 +352,45 @@ export async function listVideoFrameProjects(): Promise<VideoFrameProjectListIte
     orderBy: { updatedAt: "desc" },
     include: {
       assets: {
-        where: { kind: "FRAME" },
-        select: { id: true },
+        where: { kind: { in: ["FRAME", "EDITED", "CLIP"] } },
+        select: { id: true, kind: true, costUsd: true },
       },
     },
   });
 
-  return projects.map((project) => ({
-    id: project.id,
-    name: project.name,
-    videoFileName: project.videoFileName,
-    durationSec: project.durationSec,
-    spanCount: parseSpans(project.spansJson).length,
-    frameCount: project.assets.length,
-    videoBytes: toNumber(project.videoBytes),
-    framesBytes: toNumber(project.framesBytes),
-    thumbnailsBytes: toNumber(project.thumbnailsBytes),
-    totalBytes: toNumber(project.totalBytes),
-    updatedAt: project.updatedAt,
-    createdAt: project.createdAt,
-  }));
+  return projects.map((project) => {
+    let frameCount = 0;
+    let wanCostUsd = 0;
+    for (const asset of project.assets) {
+      if (asset.kind === "FRAME") {
+        frameCount += 1;
+        continue;
+      }
+      if (asset.kind !== "EDITED" && asset.kind !== "CLIP") continue;
+      const raw = asset.costUsd;
+      if (raw == null) continue;
+      const cost = typeof raw === "number" ? raw : raw.toNumber();
+      if (Number.isFinite(cost) && cost > 0) {
+        wanCostUsd += cost;
+      }
+    }
+
+    return {
+      id: project.id,
+      name: project.name,
+      videoFileName: project.videoFileName,
+      durationSec: project.durationSec,
+      spanCount: parseSpans(project.spansJson).length,
+      frameCount,
+      videoBytes: toNumber(project.videoBytes),
+      framesBytes: toNumber(project.framesBytes),
+      thumbnailsBytes: toNumber(project.thumbnailsBytes),
+      totalBytes: toNumber(project.totalBytes),
+      wanCostUsd,
+      updatedAt: project.updatedAt,
+      createdAt: project.createdAt,
+    };
+  });
 }
 
 export async function getVideoFrameProject(id: string): Promise<VideoFrameProjectDetail | null> {

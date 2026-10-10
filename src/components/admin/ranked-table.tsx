@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ChevronsDownUp, ChevronsUpDown } from "lucide-react";
 
@@ -26,10 +26,36 @@ const PRODUCT_SORT_OPTIONS = [
   { value: "videoViews", label: "Video views" },
   { value: "siteViews", label: "Site views" },
   { value: "clicks", label: "Clicks" },
+  { value: "lastAdded", label: "Last added" },
 ] as const;
 
 type ProductSort = (typeof PRODUCT_SORT_OPTIONS)[number]["value"];
 
+const TOP_PRODUCTS_SORT_STORAGE_KEY = "admin.analytics.topProductsSort";
+const DEFAULT_PRODUCT_SORT: ProductSort = "videoViews";
+
+function isProductSort(value: string | null | undefined): value is ProductSort {
+  return PRODUCT_SORT_OPTIONS.some((option) => option.value === value);
+}
+
+function readStoredProductSort(): ProductSort {
+  if (typeof window === "undefined") return DEFAULT_PRODUCT_SORT;
+  try {
+    const raw = window.localStorage.getItem(TOP_PRODUCTS_SORT_STORAGE_KEY);
+    if (isProductSort(raw)) return raw;
+  } catch {
+    // ignore quota / privacy mode
+  }
+  return DEFAULT_PRODUCT_SORT;
+}
+
+function writeStoredProductSort(value: ProductSort) {
+  try {
+    window.localStorage.setItem(TOP_PRODUCTS_SORT_STORAGE_KEY, value);
+  } catch {
+    // ignore quota / privacy mode
+  }
+}
 interface RankedTableProps {
   rows: RankedRow[];
   emptyLabel: string;
@@ -55,6 +81,11 @@ function sortProductRows(rows: RankedRow[], sortBy: ProductSort): RankedRow[] {
     if (sortBy === "clicks") {
       return b.clicks - a.clicks || b.views - a.views || videoB - videoA;
     }
+    if (sortBy === "lastAdded") {
+      const addedA = a.addedAt ? Date.parse(a.addedAt) : 0;
+      const addedB = b.addedAt ? Date.parse(b.addedAt) : 0;
+      return addedB - addedA || videoB - videoA || b.views - a.views || b.clicks - a.clicks;
+    }
     return b.views - a.views || b.clicks - a.clicks || videoB - videoA;
   });
 }
@@ -68,7 +99,12 @@ export function RankedTable({
   previewLimit,
 }: RankedTableProps) {
   const [expanded, setExpanded] = useState(false);
-  const [sortBy, setSortBy] = useState<ProductSort>("videoViews");
+  const [sortBy, setSortBy] = useState<ProductSort>(DEFAULT_PRODUCT_SORT);
+
+  useEffect(() => {
+    if (!showMarketingFunnel) return;
+    setSortBy(readStoredProductSort());
+  }, [showMarketingFunnel]);
 
   const sortedRows = showMarketingFunnel ? sortProductRows(rows, sortBy) : rows;
   const canExpand = previewLimit !== undefined && sortedRows.length > previewLimit;
@@ -90,13 +126,13 @@ export function RankedTable({
           <Select
             value={sortBy}
             onValueChange={(value) => {
-              if (value === "videoViews" || value === "siteViews" || value === "clicks") {
-                setSortBy(value);
-                setExpanded(false);
-              }
+              if (!isProductSort(value)) return;
+              setSortBy(value);
+              writeStoredProductSort(value);
+              setExpanded(false);
             }}
           >
-            <SelectTrigger id="top-products-sort" size="sm" className="w-36">
+            <SelectTrigger id="top-products-sort" size="sm" className="w-40">
               <SelectValue />
             </SelectTrigger>
             <SelectContent align="end">

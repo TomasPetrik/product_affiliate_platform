@@ -45,6 +45,15 @@ const EMPTY_PLATFORM_VIEWS: ProductMarketingViewTotals = {
   TIKTOK: 0,
 };
 
+/** Product IDs that have at least one marketing video (any posts). */
+export async function listProductIdsWithMarketingVideos(): Promise<string[]> {
+  const rows = await prisma.productMarketingVideo.findMany({
+    distinct: ["productId"],
+    select: { productId: true },
+  });
+  return rows.map((row) => row.productId);
+}
+
 /** Lifetime synced view counts from linked marketing posts, keyed by product id. */
 export async function getMarketingViewsByProductIds(
   productIds: string[],

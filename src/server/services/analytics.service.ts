@@ -8,7 +8,10 @@ import {
   getSearchAnalytics,
   getTimeSeriesAnalytics,
 } from "@/server/services/analytics-reports.service";
-import { getMarketingViewsByProductIds } from "@/server/services/marketing-video.service";
+import {
+  getMarketingViewsByProductIds,
+  listProductIdsWithMarketingVideos,
+} from "@/server/services/marketing-video.service";
 import type {
   AnalyticsKpis,
   DashboardAnalytics,
@@ -234,14 +237,35 @@ export async function getDashboardAnalytics(
   const affiliateCtr = ctr(affiliateClicks, productViews);
   const viewsByCategory = categoryViewRows.length > 0 ? categoryViewRows : viewsByCategoryFallback;
 
-  const productIds = [...new Set([...viewsByProduct.map((row) => row.productId), ...clicksByProduct.map((row) => row.productId)])];
+  const activityProductIds = [
+    ...viewsByProduct.map((row) => row.productId),
+    ...clicksByProduct.map((row) => row.productId),
+  ];
   const categoryIds = [...new Set([...viewsByCategory.map((row) => row.categoryId), ...clicksByCategory.map((row) => row.categoryId)])];
+
+  // Include marketing-video products and recently created ones so “last added”
+  // (and video-only products) appear even with no site views/clicks in-range.
+  const [marketingProductIds, recentProducts] = await Promise.all([
+    listProductIdsWithMarketingVideos(),
+    prisma.product.findMany({
+      orderBy: { createdAt: "desc" },
+      take: 50,
+      select: { id: true },
+    }),
+  ]);
+  const productIds = [
+    ...new Set([
+      ...activityProductIds,
+      ...marketingProductIds,
+      ...recentProducts.map((product) => product.id),
+    ]),
+  ];
 
   const [products, categories, marketingViewsByProduct] = await Promise.all([
     productIds.length
       ? prisma.product.findMany({
           where: { id: { in: productIds } },
-          select: { id: true, title: true, slug: true },
+          select: { id: true, title: true, slug: true, createdAt: true },
         })
       : Promise.resolve([]),
     categoryIds.length
@@ -276,6 +300,7 @@ export async function getDashboardAnalytics(
           YOUTUBE: marketing?.YOUTUBE ?? 0,
           TIKTOK: marketing?.TIKTOK ?? 0,
         },
+        addedAt: product?.createdAt.toISOString(),
       };
     })
     .sort(

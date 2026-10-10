@@ -30,6 +30,8 @@ export interface RankedRow {
     YOUTUBE: number;
     TIKTOK: number;
   };
+  /** ISO timestamp when the product was created (for “last added” ordering). */
+  addedAt?: string;
 }
 
 export interface SeriesPoint {

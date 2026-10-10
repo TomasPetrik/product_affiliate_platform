@@ -129,7 +129,8 @@ export function AnalyticsOverview({ data, basePath }: AnalyticsOverviewProps) {
                   <p className="mt-1 text-xs text-muted-foreground">
                     Video views are the latest synced lifetime totals from linked Instagram,
                     Facebook, YouTube, and TikTok posts. Site Views / Clicks are first-party
-                    analytics for the selected date range.
+                    analytics for the selected date range. Last added includes recent products
+                    even with no site traffic yet.
                   </p>
                 </div>
                 <RefreshMarketingViewsButton />

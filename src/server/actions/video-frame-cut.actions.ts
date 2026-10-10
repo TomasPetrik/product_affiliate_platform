@@ -34,7 +34,7 @@ function absoluteFromPublicUpload(publicPath: string): string | null {
 }
 
 /**
- * Cut first→last frame range from a Video frames project and store a preview MP4
+ * Cut first→last frame range from a Video creator project and store a preview MP4
  * under `cuts/` so the admin UI can play the exact input that Wan video edit uses.
  */
 export async function previewSpanCutAction(input: {

@@ -16,6 +16,7 @@ import {
   Film,
   Loader2,
   Plus,
+  ScrollText,
   Sparkles,
   Trash2,
   X,
@@ -45,7 +46,6 @@ import {
 import {
   clampSpan,
   createDefaultSpans,
-  createZipBlob,
   formatVideoTime,
   newSpanId,
   previewTimeKey,
@@ -82,6 +82,9 @@ import { estimateWanVideoProgressPercent } from "@/lib/wan-video";
 import {
   createWanVideoHistoryId,
   fileToWanVideoStoredImage,
+  findWanVideoHistoryForClip,
+  getWanVideoHistoryEntry,
+  listWanVideoHistory,
   saveWanVideoHistoryEntry,
   type WanVideoHistoryEntry,
 } from "@/lib/wan-video-history";
@@ -89,9 +92,17 @@ import { estimateWanVideoEditProgressPercent } from "@/lib/wan-video-edit";
 import {
   createWanVideoEditHistoryId,
   fileToWanVideoEditStoredBlob,
+  findWanVideoEditHistoryForClip,
+  getWanVideoEditHistoryEntry,
+  listWanVideoEditHistory,
   saveWanVideoEditHistoryEntry,
   type WanVideoEditHistoryEntry,
 } from "@/lib/wan-video-edit-history";
+import {
+  VideoFrameClipPromptDialog,
+  type ClipPromptDetails,
+} from "@/components/admin/video-frame-clip-prompt-dialog";
+import { VideoFrameMergerPanel } from "@/components/admin/video-frame-merger-panel";
 import {
   deleteVideoFrameEditAction,
   saveVideoFrameClipAction,
@@ -177,15 +188,6 @@ function isSeekableVideo(video: HTMLVideoElement | null): video is HTMLVideoElem
     Number.isFinite(video.duration) &&
     video.duration > 0
   );
-}
-
-function downloadBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.click();
-  URL.revokeObjectURL(url);
 }
 
 async function captureFrameBlob(
@@ -349,6 +351,107 @@ function clipsFromProject(project: VideoFrameProjectDetail): VideoFrameProjectAs
     .sort((a, b) => b.timeSec - a.timeSec || a.fileName.localeCompare(b.fileName));
 }
 
+function mergesFromProject(
+  project: VideoFrameProjectDetail | { assets: VideoFrameProjectAssetDto[] },
+): VideoFrameProjectAssetDto[] {
+  return project.assets.filter((asset) => asset.kind === "MERGED");
+}
+
+function newestClipForSpan(
+  project: VideoFrameProjectDetail,
+  spanId: string,
+  previousIds: Set<string>,
+): VideoFrameProjectAssetDto | null {
+  const clips = project.assets.filter(
+    (asset) => asset.kind === "CLIP" && asset.spanId === spanId,
+  );
+  return clips.find((clip) => !previousIds.has(clip.id)) ?? clips[clips.length - 1] ?? null;
+}
+
+function clipPromptFromWanEdit(
+  entry: WanVideoEditHistoryEntry,
+): ClipPromptDetails {
+  return {
+    kind: "wan-edit",
+    prompt: entry.prompt,
+    createdAt: entry.createdAt,
+    duration: entry.duration,
+    resolution: entry.resolution,
+    seed: entry.seed,
+    generateAudio: entry.generateAudio,
+    enablePromptExpansion: entry.enablePromptExpansion,
+    cutStartSec: entry.cutStartSec,
+    cutEndSec: entry.cutEndSec,
+    referenceImageCount: entry.referenceImages.length,
+    referenceAudioCount: entry.referenceAudios.length,
+    predictionId: entry.predictionId,
+    status: entry.status,
+    sourceLabel: entry.sourceLabel,
+    inferenceMs: entry.inferenceMs,
+  };
+}
+
+function clipPromptFromWanClip(entry: WanVideoHistoryEntry): ClipPromptDetails {
+  return {
+    kind: "wan-clip",
+    prompt: entry.prompt,
+    createdAt: entry.createdAt,
+    duration: entry.duration,
+    resolution: entry.resolution,
+    seed: entry.seed,
+    generateAudio: entry.generateAudio,
+    enablePromptExpansion: entry.enablePromptExpansion,
+    aspectRatio: entry.aspectRatio,
+    referenceImageCount: entry.referenceImages.length,
+    predictionId: entry.predictionId,
+    status: entry.status,
+    sourceLabel: entry.sourceLabel,
+    inferenceMs: entry.inferenceMs,
+  };
+}
+
+function buildClipPromptDetailsByFileName(input: {
+  clips: VideoFrameProjectAssetDto[];
+  projectId: string;
+  editHistory: WanVideoEditHistoryEntry[];
+  clipHistory: WanVideoHistoryEntry[];
+}): Map<string, ClipPromptDetails> {
+  const map = new Map<string, ClipPromptDetails>();
+  const claimedEditIds = new Set<string>();
+  const claimedClipIds = new Set<string>();
+
+  for (const clip of input.clips) {
+    if (clip.fileName.includes("-wan-edit-")) {
+      const entry = findWanVideoEditHistoryForClip({
+        entries: input.editHistory,
+        fileName: clip.fileName,
+        projectId: input.projectId,
+        spanId: clip.spanId,
+        claimedEntryIds: claimedEditIds,
+      });
+      if (entry) {
+        map.set(clip.fileName, clipPromptFromWanEdit(entry));
+        claimedEditIds.add(entry.id);
+      }
+      continue;
+    }
+    if (clip.fileName.includes("-wan-") && !clip.fileName.includes("-wan-edit-")) {
+      const entry = findWanVideoHistoryForClip({
+        entries: input.clipHistory,
+        fileName: clip.fileName,
+        projectId: input.projectId,
+        spanId: clip.spanId,
+        claimedEntryIds: claimedClipIds,
+      });
+      if (entry) {
+        map.set(clip.fileName, clipPromptFromWanClip(entry));
+        claimedClipIds.add(entry.id);
+      }
+    }
+  }
+  return map;
+}
+
 function findAssetNearTime(
   assets: VideoFrameProjectDetail["assets"],
   time: number,
@@ -440,7 +543,7 @@ export function VideoFrameExtractPanel({
   const [spans, setSpans] = useState<FrameSpan[]>(initialSpans);
   /** Committed on pointer release — drives Export preview strip. */
   const [committedSpans, setCommittedSpans] = useState<FrameSpan[]>(initialSpans);
-  const [frames, setFrames] = useState<ExtractedFrame[]>(() => framesFromProject(project));
+  const [, setFrames] = useState<ExtractedFrame[]>(() => framesFromProject(project));
   const [previewUrls, setPreviewUrls] = useState<Record<string, string>>({});
   const [previewReady, setPreviewReady] = useState(false);
   const [liveFrameLoading, setLiveFrameLoading] = useState(false);
@@ -489,13 +592,50 @@ export function VideoFrameExtractPanel({
   const [spanClips, setSpanClips] = useState<VideoFrameProjectAssetDto[]>(() =>
     clipsFromProject(project),
   );
+  const [mergedClips, setMergedClips] = useState<VideoFrameProjectAssetDto[]>(() =>
+    mergesFromProject(project),
+  );
   const [clipLightbox, setClipLightbox] = useState<VideoFrameProjectAssetDto | null>(
     null,
   );
+  const [clipPromptByFileName, setClipPromptByFileName] = useState<
+    Map<string, ClipPromptDetails>
+  >(() => new Map());
+  const [clipPromptView, setClipPromptView] = useState<{
+    fileName: string;
+    details: ClipPromptDetails | null;
+  } | null>(null);
 
   useEffect(() => {
     setSpanClips(clipsFromProject(project));
+    setMergedClips(mergesFromProject(project));
   }, [project]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const [editHistory, clipHistory] = await Promise.all([
+          listWanVideoEditHistory(),
+          listWanVideoHistory(),
+        ]);
+        if (cancelled) return;
+        setClipPromptByFileName(
+          buildClipPromptDetailsByFileName({
+            clips: spanClips,
+            projectId: project.id,
+            editHistory,
+            clipHistory,
+          }),
+        );
+      } catch {
+        if (!cancelled) setClipPromptByFileName(new Map());
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [project.id, spanClips]);
   const [lightbox, setLightbox] = useState<{
     label: string;
     time: number;
@@ -508,6 +648,7 @@ export function VideoFrameExtractPanel({
   const wanClipSavingRef = useRef<Set<string>>(new Set());
   const wanVideoEditJobsRef = useRef(wanVideoEditJobs);
   const wanVideoEditSavingRef = useRef<Set<string>>(new Set());
+  const spanClipsRef = useRef(spanClips);
 
   useEffect(() => {
     return () => {
@@ -549,6 +690,10 @@ export function VideoFrameExtractPanel({
   useEffect(() => {
     wanVideoEditJobsRef.current = wanVideoEditJobs;
   }, [wanVideoEditJobs]);
+
+  useEffect(() => {
+    spanClipsRef.current = spanClips;
+  }, [spanClips]);
 
   // Restore in-flight Wan jobs after leaving/returning to this project.
   useEffect(() => {
@@ -1018,9 +1163,10 @@ export function VideoFrameExtractPanel({
         return;
       }
       try {
+        const existing = await getWanVideoHistoryEntry(job.historyId);
         const entry: WanVideoHistoryEntry = {
           id: job.historyId,
-          createdAt: new Date().toISOString(),
+          createdAt: existing?.createdAt ?? new Date().toISOString(),
           prompt: job.prompt,
           duration: job.duration,
           resolution: job.resolution,
@@ -1038,6 +1184,9 @@ export function VideoFrameExtractPanel({
           error: update.error,
           source: "video-frame",
           sourceLabel: `${project.name} · ${job.spanLabel}`,
+          projectId: project.id,
+          spanId: job.spanId,
+          savedClipFileName: existing?.savedClipFileName,
         };
         await saveWanVideoHistoryEntry(entry);
       } catch {
@@ -1104,11 +1253,32 @@ export function VideoFrameExtractPanel({
           });
           return;
         }
-        setSpanClips(clipsFromProject(saved.project));
-        const spanClipAssets = saved.project.assets.filter(
-          (asset) => asset.kind === "CLIP" && asset.spanId === job.spanId,
+        const previousIds = new Set(
+          spanClipsRef.current
+            .filter((clip) => clip.spanId === job.spanId)
+            .map((clip) => clip.id),
         );
-        const clipUrl = spanClipAssets[spanClipAssets.length - 1]?.path ?? outputUrl;
+        const savedClip = newestClipForSpan(saved.project, job.spanId, previousIds);
+        setSpanClips(clipsFromProject(saved.project));
+        const clipUrl = savedClip?.path ?? outputUrl;
+        if (savedClip && job.historyId) {
+          try {
+            const existing = await getWanVideoHistoryEntry(job.historyId);
+            if (existing) {
+              await saveWanVideoHistoryEntry({
+                ...existing,
+                projectId: project.id,
+                spanId: job.spanId,
+                savedClipFileName: savedClip.fileName,
+                status: "completed",
+                outputs: [outputUrl],
+                inferenceMs,
+              });
+            }
+          } catch {
+            // History link is best-effort.
+          }
+        }
         setWanClipJobs((prev) => ({
           ...prev,
           [key]: {
@@ -1296,9 +1466,10 @@ export function VideoFrameExtractPanel({
     ) {
       if (!job.historyId) return;
       try {
+        const existing = await getWanVideoEditHistoryEntry(job.historyId);
         const entry: WanVideoEditHistoryEntry = {
           id: job.historyId,
-          createdAt: new Date().toISOString(),
+          createdAt: existing?.createdAt ?? new Date().toISOString(),
           prompt: job.prompt,
           duration: job.duration,
           resolution: job.resolution,
@@ -1320,6 +1491,9 @@ export function VideoFrameExtractPanel({
           error: update.error,
           source: "video-frame",
           sourceLabel: `${project.name} · ${job.spanLabel}`,
+          projectId: project.id,
+          spanId: job.spanId,
+          savedClipFileName: existing?.savedClipFileName,
         };
         await saveWanVideoEditHistoryEntry(entry);
       } catch {
@@ -1384,12 +1558,32 @@ export function VideoFrameExtractPanel({
           });
           return;
         }
-        setSpanClips(clipsFromProject(saved.project));
-        const spanClipAssets = saved.project.assets.filter(
-          (asset) => asset.kind === "CLIP" && asset.spanId === job.spanId,
+        const previousIds = new Set(
+          spanClipsRef.current
+            .filter((clip) => clip.spanId === job.spanId)
+            .map((clip) => clip.id),
         );
-        const clipUrl =
-          spanClipAssets[spanClipAssets.length - 1]?.path ?? outputUrl;
+        const savedClip = newestClipForSpan(saved.project, job.spanId, previousIds);
+        setSpanClips(clipsFromProject(saved.project));
+        const clipUrl = savedClip?.path ?? outputUrl;
+        if (savedClip && job.historyId) {
+          try {
+            const existing = await getWanVideoEditHistoryEntry(job.historyId);
+            if (existing) {
+              await saveWanVideoEditHistoryEntry({
+                ...existing,
+                projectId: project.id,
+                spanId: job.spanId,
+                savedClipFileName: savedClip.fileName,
+                status: "completed",
+                outputs: [outputUrl],
+                inferenceMs,
+              });
+            }
+          } catch {
+            // History link is best-effort.
+          }
+        }
         setWanVideoEditJobs((prev) => ({
           ...prev,
           [key]: {
@@ -2267,40 +2461,6 @@ export function VideoFrameExtractPanel({
     }
   }, [duration, committedSpans, project.id, router]);
 
-  async function downloadAllZip() {
-    if (frames.length === 0) {
-      return;
-    }
-    const files = await Promise.all(
-      frames.map(async (frame) => {
-        if (frame.blob.size > 0) {
-          return {
-            name: frame.filename,
-            data: new Uint8Array(await frame.blob.arrayBuffer()),
-          };
-        }
-        const response = await fetch(frame.url);
-        const buffer = await response.arrayBuffer();
-        return {
-          name: frame.filename,
-          data: new Uint8Array(buffer),
-        };
-      }),
-    );
-    const base = project.videoFileName?.replace(/\.[^.]+$/, "") || project.name || "frames";
-    downloadBlob(createZipBlob(files), `${base}-frames.zip`);
-  }
-
-  async function downloadFrame(frame: ExtractedFrame) {
-    if (frame.blob.size > 0) {
-      downloadBlob(frame.blob, frame.filename);
-      return;
-    }
-    const response = await fetch(frame.url);
-    const blob = await response.blob();
-    downloadBlob(blob, frame.filename);
-  }
-
   const plannedTotal = totalFrameCount(committedSpans);
 
   return (
@@ -2877,6 +3037,10 @@ export function VideoFrameExtractPanel({
                                       : clip.fileName.includes("-krea-")
                                         ? "Krea"
                                         : "Clip";
+                                  const promptDetails =
+                                    clipPromptByFileName.get(clip.fileName) ?? null;
+                                  const canShowPrompt =
+                                    provider === "Wan edit" || provider === "Wan clip";
                                   return (
                                     <li
                                       key={clip.id}
@@ -2895,9 +3059,37 @@ export function VideoFrameExtractPanel({
                                         </p>
                                         <p className="text-xs text-muted-foreground">
                                           {(clip.bytes / (1024 * 1024)).toFixed(2)}MB
+                                          {promptDetails
+                                            ? ` · ${promptDetails.resolution}${
+                                                promptDetails.duration == null
+                                                  ? ""
+                                                  : ` · ${promptDetails.duration}s`
+                                              }`
+                                            : ""}
                                         </p>
                                       </div>
                                       <div className="flex gap-1.5">
+                                        {canShowPrompt ? (
+                                          <Button
+                                            type="button"
+                                            variant="outline"
+                                            size="sm"
+                                            title={
+                                              promptDetails
+                                                ? "View prompt and parameters from Wan history"
+                                                : "No Wan history found in this browser"
+                                            }
+                                            onClick={() =>
+                                              setClipPromptView({
+                                                fileName: clip.fileName,
+                                                details: promptDetails,
+                                              })
+                                            }
+                                          >
+                                            <ScrollText className="size-3.5" />
+                                            Prompt
+                                          </Button>
+                                        ) : null}
                                         <Button
                                           type="button"
                                           variant="outline"
@@ -2961,59 +3153,24 @@ export function VideoFrameExtractPanel({
         </Card>
       ) : null}
 
-      {frames.length > 0 ? (
-        <Card>
-          <CardHeader className="flex flex-row items-start justify-between gap-3">
-            <div>
-              <CardTitle className="text-base">Output frames</CardTitle>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {frames.length} JPG frames ready. Download individually or as a ZIP.
-              </p>
-            </div>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="gap-1.5"
-              onClick={() => void downloadAllZip()}
-            >
-              <Download className="h-3.5 w-3.5" />
-              Download ZIP
-            </Button>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-wrap items-end gap-2">
-              {frames.map((frame) => (
-                <div key={frame.id} className="flex flex-col items-center gap-1">
-                  <TinyThumb
-                    label={formatVideoTime(frame.time)}
-                    time={frame.time}
-                    url={frame.url}
-                    loading={false}
-                    aspect={videoAspect}
-                    onOpenFull={() => {
-                      setLightbox({
-                        label: frame.filename,
-                        time: frame.time,
-                        url: frame.url,
-                      });
-                    }}
-                  />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-xs"
-                    aria-label={`Download ${frame.filename}`}
-                      onClick={() => void downloadFrame(frame)}
-                    >
-                      <Download className="size-3.5" />
-                    </Button>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      ) : null}
+      <VideoFrameMergerPanel
+        projectId={project.id}
+        clips={spanClips}
+        merged={mergedClips}
+        initialMergerState={project.merger}
+        onAssetsUpdated={(assets) => {
+          setSpanClips(
+            assets
+              .filter((asset) => asset.kind === "CLIP")
+              .sort(
+                (a, b) =>
+                  b.timeSec - a.timeSec || a.fileName.localeCompare(b.fileName),
+              ),
+          );
+          setMergedClips(mergesFromProject({ assets }));
+        }}
+        onOpenClip={setClipLightbox}
+      />
 
       <Dialog.Root
         open={lightbox !== null}
@@ -3139,6 +3296,15 @@ export function VideoFrameExtractPanel({
         />
       ) : null}
 
+      <VideoFrameClipPromptDialog
+        open={clipPromptView != null}
+        onOpenChange={(open) => {
+          if (!open) setClipPromptView(null);
+        }}
+        clipFileName={clipPromptView?.fileName ?? null}
+        details={clipPromptView?.details ?? null}
+      />
+
       <Dialog.Root
         open={clipLightbox != null}
         onOpenChange={(open) => {
@@ -3151,10 +3317,14 @@ export function VideoFrameExtractPanel({
             <div className="flex items-center justify-between gap-3 border-b px-4 py-3">
               <div className="min-w-0">
                 <Dialog.Title className="truncate text-sm font-medium">
-                  {clipLightbox?.fileName ?? "Clip"}
+                  {clipLightbox?.kind === "MERGED" && clipLightbox.label
+                    ? `Version ${clipLightbox.label} · ${clipLightbox.fileName}`
+                    : (clipLightbox?.fileName ?? "Clip")}
                 </Dialog.Title>
                 <Dialog.Description className="text-xs text-muted-foreground">
-                  Generated clip · open or download
+                  {clipLightbox?.kind === "MERGED"
+                    ? "Merged video · open or download"
+                    : "Generated clip · open or download"}
                 </Dialog.Description>
               </div>
               <Dialog.Close

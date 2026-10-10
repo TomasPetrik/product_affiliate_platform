@@ -1,5 +1,5 @@
 /**
- * Persist in-flight Video frames Wan jobs across navigation (localStorage).
+ * Persist in-flight Video creator Wan jobs across navigation (localStorage).
  * File/Blob fields are omitted — polling only needs predictionId + metadata.
  */
 

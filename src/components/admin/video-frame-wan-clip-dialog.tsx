@@ -520,7 +520,7 @@ export function VideoFrameWanClipDialog({
       });
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : "Failed to prepare frames for Wan video.";
+        err instanceof Error ? err.message : "Failed to prepare frames for Wan video reference.";
       setLocalError(message);
       onJobSubmitError(spanId, message);
     } finally {

@@ -9,13 +9,18 @@ import {
   deleteVideoFrameEdit,
   deleteVideoFrameProject,
   getVideoFrameProject,
+  mergeVideoFrameClips,
   replaceVideoFrameProjectFrames,
   saveVideoFrameClip,
   saveVideoFrameEdit,
+  saveVideoFrameMergerState,
   updateVideoFrameProject,
+  uploadVideoFrameLocalClip,
   type VideoFrameProjectDetail,
 } from "@/server/services/video-frame-project.service";
 import {
+  mergeVideoFrameClipsSchema,
+  saveVideoFrameMergerStateSchema,
   saveVideoFrameProjectSchema,
   savedFrameMetaSchema,
   videoFrameProjectNameSchema,
@@ -270,6 +275,138 @@ export async function saveVideoFrameClipAction(input: {
     after: {
       spanId: input.spanId,
       provider: input.provider,
+      clipsBytes: result.clipsBytes,
+      totalBytes: result.totalBytes,
+    },
+  });
+
+  revalidateVideoFrameProjects(result.id);
+  return { ok: true, project: result };
+}
+
+export async function uploadVideoFrameLocalClipAction(
+  formData: FormData,
+): Promise<VideoFrameProjectActionState> {
+  const session = await requireAdminSession();
+  const projectId = String(formData.get("projectId") ?? "").trim();
+  if (!projectId) {
+    return { error: "Missing project." };
+  }
+
+  const video = formData.get("video");
+  if (!(video instanceof File) || video.size <= 0) {
+    return { error: "Choose a video file." };
+  }
+
+  const result = await uploadVideoFrameLocalClip({ projectId, video });
+  if ("error" in result) {
+    return { error: result.error };
+  }
+
+  await writeAuditLog({
+    actor: session,
+    action: "video_frame_project.upload_local_clip",
+    entityType: "VideoFrameProject",
+    entityId: result.id,
+    after: {
+      fileName: video.name,
+      bytes: video.size,
+      clipsBytes: result.clipsBytes,
+      totalBytes: result.totalBytes,
+    },
+  });
+
+  revalidateVideoFrameProjects(result.id);
+  return { ok: true, project: result };
+}
+
+export async function saveVideoFrameMergerStateAction(input: {
+  projectId: string;
+  state: {
+    segments: Array<{
+      instanceId: string;
+      assetId: string;
+      trimStartSec: number;
+      trimEndSec: number;
+      durationSec: number;
+    }>;
+    selectedId: string | null;
+    playheadSec: number;
+    previewSegIndex: number;
+    zoom: number;
+    stripAudio?: boolean;
+    exportQuality?: "720p" | "1080p" | "2K";
+  };
+}): Promise<VideoFrameProjectActionState> {
+  await requireAdminSession();
+  const parsed = saveVideoFrameMergerStateSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      error: parsed.error.issues[0]?.message ?? "Invalid merger state.",
+    };
+  }
+
+  const result = await saveVideoFrameMergerState({
+    projectId: parsed.data.projectId,
+    state: {
+      ...parsed.data.state,
+      stripAudio: parsed.data.state.stripAudio === true,
+      exportQuality: parsed.data.state.exportQuality ?? "1080p",
+    },
+  });
+  if ("error" in result) {
+    return { error: result.error };
+  }
+
+  revalidateVideoFrameProjects(result.id);
+  return { ok: true, project: result };
+}
+
+export async function mergeVideoFrameClipsAction(input: {
+  projectId: string;
+  assetIds?: string[];
+  segments?: Array<{
+    assetId: string;
+    trimStartSec: number;
+    trimEndSec?: number;
+  }>;
+  stripAudio?: boolean;
+  exportQuality?: "720p" | "1080p" | "2K";
+}): Promise<VideoFrameProjectActionState> {
+  const session = await requireAdminSession();
+  const parsed = mergeVideoFrameClipsSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      error: parsed.error.issues[0]?.message ?? "Invalid merge request.",
+    };
+  }
+
+  const result = await mergeVideoFrameClips({
+    ...parsed.data,
+    exportQuality: parsed.data.exportQuality ?? "1080p",
+    stripAudio: parsed.data.stripAudio === true,
+  });
+  if ("error" in result) {
+    return { error: result.error };
+  }
+
+  const newestMerged = result.assets
+    .filter((asset) => asset.kind === "MERGED")
+    .sort((a, b) => b.fileName.localeCompare(a.fileName))[0];
+
+  await writeAuditLog({
+    actor: session,
+    action: "video_frame_project.merge_clips",
+    entityType: "VideoFrameProject",
+    entityId: result.id,
+    after: {
+      assetIds:
+        parsed.data.segments?.map((segment) => segment.assetId) ??
+        parsed.data.assetIds,
+      segments: parsed.data.segments,
+      stripAudio: parsed.data.stripAudio === true,
+      exportQuality: parsed.data.exportQuality ?? "1080p",
+      label: newestMerged?.label ?? null,
       clipsBytes: result.clipsBytes,
       totalBytes: result.totalBytes,
     },

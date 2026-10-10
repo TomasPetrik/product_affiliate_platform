@@ -37,6 +37,10 @@ export interface WanVideoEditHistoryEntry {
   error?: string;
   source?: WanVideoEditHistorySource;
   sourceLabel?: string;
+  /** Set when a video-frame project clip is saved from this run. */
+  projectId?: string;
+  spanId?: string;
+  savedClipFileName?: string;
 }
 
 export function createWanVideoEditHistoryId(): string {
@@ -136,6 +140,54 @@ export async function listWanVideoEditHistory(): Promise<
   } finally {
     db.close();
   }
+}
+
+export async function getWanVideoEditHistoryEntry(
+  id: string,
+): Promise<WanVideoEditHistoryEntry | null> {
+  if (typeof indexedDB === "undefined" || !id) return null;
+  const db = await openDb();
+  try {
+    const tx = db.transaction(WAN_VIDEO_EDIT_HISTORY_STORE, "readonly");
+    const store = tx.objectStore(WAN_VIDEO_EDIT_HISTORY_STORE);
+    const row = await idbRequest(
+      store.get(id) as IDBRequest<WanVideoEditHistoryEntry | undefined>,
+    );
+    return row ?? null;
+  } finally {
+    db.close();
+  }
+}
+
+/** Prefer exact saved filename; else best unused completed run for this project/span. */
+export function findWanVideoEditHistoryForClip(input: {
+  entries: WanVideoEditHistoryEntry[];
+  fileName: string;
+  projectId: string;
+  spanId: string | null;
+  claimedEntryIds?: Set<string>;
+}): WanVideoEditHistoryEntry | null {
+  const claimedIds = input.claimedEntryIds ?? new Set<string>();
+  const exact = input.entries.find(
+    (entry) =>
+      entry.savedClipFileName === input.fileName && !claimedIds.has(entry.id),
+  );
+  if (exact) return exact;
+
+  if (!input.spanId) return null;
+  const spanKey = input.spanId.slice(0, 8);
+  const candidates = input.entries.filter((entry) => {
+    if (claimedIds.has(entry.id)) return false;
+    if (entry.status !== "completed") return false;
+    if (entry.source && entry.source !== "video-frame") return false;
+    if (entry.savedClipFileName && entry.savedClipFileName !== input.fileName) {
+      return false;
+    }
+    if (entry.projectId && entry.projectId !== input.projectId) return false;
+    if (entry.spanId) return entry.spanId === input.spanId;
+    return input.fileName.includes(spanKey);
+  });
+  return candidates[0] ?? null;
 }
 
 export async function saveWanVideoEditHistoryEntry(

@@ -331,7 +331,7 @@ export const KREA_VIDEO_MODELS: readonly KreaVideoModelDef[] = [
 
 export const DEFAULT_KREA_VIDEO_MODEL_ID = "seedance-2-5";
 
-/** Default model when generating a clip from a Video frames span. */
+/** Default model when generating a clip from a Video creator span. */
 export const DEFAULT_SPAN_CLIP_MODEL_ID = "seedance-1.0-pro";
 
 export const DEFAULT_SPAN_CLIP_PROMPT =

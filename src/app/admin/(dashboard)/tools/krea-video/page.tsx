@@ -15,7 +15,7 @@ export default function AdminKreaVideoPage() {
           Generate videos with Krea (Seedance, Kling, Hailuo, Veo) from a prompt and optional
           start/end/reference stills. Pull frames from{" "}
           <Link href="/admin/tools/video-frames" className="underline underline-offset-2">
-            Video frames
+            Video creator
           </Link>{" "}
           or upload images directly.
         </p>

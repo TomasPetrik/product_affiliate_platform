@@ -1,4 +1,4 @@
-/** Browser-local history for Wan video (IndexedDB). */
+/** Browser-local history for Wan video reference (IndexedDB). */
 
 export const WAN_VIDEO_HISTORY_DB_NAME = "radarcut-wan-video";
 export const WAN_VIDEO_HISTORY_STORE = "history";
@@ -31,6 +31,10 @@ export interface WanVideoHistoryEntry {
   error?: string;
   source?: WanVideoHistorySource;
   sourceLabel?: string;
+  /** Set when a video-frame project clip is saved from this run. */
+  projectId?: string;
+  spanId?: string;
+  savedClipFileName?: string;
 }
 
 export function createWanVideoHistoryId(): string {
@@ -126,6 +130,54 @@ export async function listWanVideoHistory(): Promise<WanVideoHistoryEntry[]> {
   } finally {
     db.close();
   }
+}
+
+export async function getWanVideoHistoryEntry(
+  id: string,
+): Promise<WanVideoHistoryEntry | null> {
+  if (typeof indexedDB === "undefined" || !id) return null;
+  const db = await openDb();
+  try {
+    const tx = db.transaction(WAN_VIDEO_HISTORY_STORE, "readonly");
+    const store = tx.objectStore(WAN_VIDEO_HISTORY_STORE);
+    const row = await idbRequest(
+      store.get(id) as IDBRequest<WanVideoHistoryEntry | undefined>,
+    );
+    return row ?? null;
+  } finally {
+    db.close();
+  }
+}
+
+/** Prefer exact saved filename; else best unused completed run for this project/span. */
+export function findWanVideoHistoryForClip(input: {
+  entries: WanVideoHistoryEntry[];
+  fileName: string;
+  projectId: string;
+  spanId: string | null;
+  claimedEntryIds?: Set<string>;
+}): WanVideoHistoryEntry | null {
+  const claimedIds = input.claimedEntryIds ?? new Set<string>();
+  const exact = input.entries.find(
+    (entry) =>
+      entry.savedClipFileName === input.fileName && !claimedIds.has(entry.id),
+  );
+  if (exact) return exact;
+
+  if (!input.spanId) return null;
+  const spanKey = input.spanId.slice(0, 8);
+  const candidates = input.entries.filter((entry) => {
+    if (claimedIds.has(entry.id)) return false;
+    if (entry.status !== "completed") return false;
+    if (entry.source && entry.source !== "video-frame") return false;
+    if (entry.savedClipFileName && entry.savedClipFileName !== input.fileName) {
+      return false;
+    }
+    if (entry.projectId && entry.projectId !== input.projectId) return false;
+    if (entry.spanId) return entry.spanId === input.spanId;
+    return input.fileName.includes(spanKey);
+  });
+  return candidates[0] ?? null;
 }
 
 export async function saveWanVideoHistoryEntry(

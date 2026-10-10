@@ -193,7 +193,7 @@ export async function submitWanVideoAction(
     const totalRefs = referenceFiles.length + referenceAssetIds.length;
     if (totalRefs === 0) {
       return {
-        error: "Add at least one reference image (upload or Video frames).",
+        error: "Add at least one reference image (upload or Video creator).",
       };
     }
     if (totalRefs > MAX_WAN_VIDEO_REFERENCE_IMAGES) {
@@ -231,7 +231,7 @@ export async function submitWanVideoAction(
     if (error instanceof WaveSpeedError || error instanceof Error) {
       return { error: error.message };
     }
-    return { error: "Failed to submit Wan video generation." };
+    return { error: "Failed to submit Wan video reference generation." };
   }
 }
 

@@ -11,7 +11,7 @@ export default function AdminWanImageEditPage() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Wan image edit</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Edit a still (e.g. from Video frames) with Alibaba Wan 2.7 Image Edit Pro via
+          Edit a still (e.g. from Video creator) with Alibaba Wan 2.7 Image Edit Pro via
           WaveSpeed. Upload the main image, optional reference, set a prompt and 9:16 size,
           then poll until outputs are ready.
         </p>

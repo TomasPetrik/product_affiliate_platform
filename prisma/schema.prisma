@@ -1014,6 +1014,8 @@ enum VideoFrameAssetKind {
   EDITED
   /// Generated short clip (Krea / Wan) for a span.
   CLIP
+  /// Concatenated multi-clip export (versioned via label, e.g. "1.0").
+  MERGED
 }
 
 /// Named admin project: source video + span config + extracted stills.
@@ -1031,6 +1033,8 @@ model VideoFrameProject {
 
   /// FrameSpan[] JSON: { id, start, end, frameCount }
   spansJson Json @default("[]")
+  /// Video merger timeline state JSON (segments, trims, playhead, zoom).
+  mergerJson Json @default("{}")
 
   framesBytes     BigInt @default(0)
   thumbnailsBytes BigInt @default(0)
@@ -1056,6 +1060,8 @@ model VideoFrameAsset {
   frameIndex Int?
   timeSec    Float
   fileName   String
+  /// Display label for MERGED assets (e.g. "1.0", "1.1").
+  label      String?
   /// Public path under /uploads/video-frames/{projectId}/…
   path       String
   bytes      Int

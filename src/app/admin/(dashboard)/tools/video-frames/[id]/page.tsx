@@ -20,7 +20,7 @@ interface PageProps {
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { id } = await params;
   const project = await getVideoFrameProject(id);
-  return { title: project ? `${project.name} · Video frames` : "Video frames" };
+  return { title: project ? `${project.name} · Video creator` : "Video creator" };
 }
 
 export default async function AdminVideoFrameProjectPage({ params }: PageProps) {
@@ -51,8 +51,9 @@ export default async function AdminVideoFrameProjectPage({ params }: PageProps) 
           </Button>
           <h1 className="truncate text-2xl font-bold tracking-tight">{project.name}</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Spans autosave. Tap an export preview frame for Wan edit, or use Krea clip / Wan clip to
-            make a short video from the span&apos;s frames (prefers edited stills).
+            Spans and the Video merger timeline autosave. Tap an export preview frame for Wan edit,
+            or use Krea clip / Wan clip to make a short video from the span&apos;s frames (prefers
+            edited stills).
           </p>
         </div>
         <VideoFrameProjectDeleteButton projectId={project.id} projectName={project.name} />

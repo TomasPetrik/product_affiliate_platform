@@ -844,13 +844,13 @@ export function WanImageEditPanel({ configured }: WanImageEditPanelProps) {
                 <History className="size-4 text-muted-foreground" />
                 <p className="text-sm font-medium">Generation history</p>
                 <span className="text-xs text-muted-foreground">
-                  This browser · includes video-frame edits · tap to prefill
+                  This browser · includes Video creator edits · tap to prefill
                 </span>
               </div>
 
               {history.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
-                  Completed runs from this tool and video-frame Wan edits appear here with
+                  Completed runs from this tool and Video creator Wan edits appear here with
                   prompt, refs, and outputs.
                 </p>
               ) : (
@@ -890,7 +890,7 @@ export function WanImageEditPanel({ configured }: WanImageEditPanelProps) {
                                 ) : null}
                                 {entry.source === "video-frame" ? (
                                   <span className="text-foreground/80">
-                                    Video frame
+                                    Video creator
                                     {entry.sourceLabel ? ` · ${entry.sourceLabel}` : ""}
                                   </span>
                                 ) : null}

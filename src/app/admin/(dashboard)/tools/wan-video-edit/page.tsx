@@ -15,11 +15,11 @@ export default function AdminWanVideoEditPage() {
           Edit an existing clip with Alibaba Wan 3.0 video-edit via WaveSpeed (same{" "}
           <code className="text-xs">WAVESPEED_API_KEY</code> as{" "}
           <Link href="/admin/tools/wan-video" className="underline underline-offset-2">
-            Wan video
+            Wan video reference
           </Link>
           ). From{" "}
           <Link href="/admin/tools/video-frames" className="underline underline-offset-2">
-            Video frames
+            Video creator
           </Link>
           , each span can cut first→last frame and run this model.
         </p>

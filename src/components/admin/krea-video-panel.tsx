@@ -160,7 +160,7 @@ function ImageSlot({
               {file
                 ? `${(file.size / (1024 * 1024)).toFixed(2)}MB upload`
                 : frame
-                  ? "From Video frames"
+                  ? "From Video creator"
                   : null}
             </p>
           </div>
@@ -228,7 +228,7 @@ function ImageSlot({
       )}
 
       <KreaVideoFramePicker
-        label={`Or pick ${label.toLowerCase()} from Video frames`}
+        label={`Or pick ${label.toLowerCase()} from Video creator`}
         value={frame}
         onChange={(next) => {
           if (next) onFileChange(null);
@@ -540,7 +540,7 @@ export function KreaVideoPanel({ configured }: KreaVideoPanelProps) {
 
             <ImageSlot
               label="Start frame"
-              hint="Image-to-video start still — upload or pick from Video frames."
+              hint="Image-to-video start still — upload or pick from Video creator."
               file={startFile}
               onFileChange={setStartFile}
               frame={startFrame}
@@ -584,7 +584,7 @@ export function KreaVideoPanel({ configured }: KreaVideoPanelProps) {
                         />
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-medium">{frame.fileName}</p>
-                          <p className="text-xs text-muted-foreground">Video frames</p>
+                          <p className="text-xs text-muted-foreground">Video creator</p>
                         </div>
                         <Button
                           type="button"
@@ -665,7 +665,7 @@ export function KreaVideoPanel({ configured }: KreaVideoPanelProps) {
                       Upload references ({refCount}/{maxRefs})
                     </label>
                     <KreaVideoFramePicker
-                      label="Add reference from Video frames"
+                      label="Add reference from Video creator"
                       value={null}
                       onChange={() => undefined}
                       multi
@@ -956,7 +956,7 @@ export function KreaVideoPanel({ configured }: KreaVideoPanelProps) {
               </>
             ) : (
               <p className="text-sm text-muted-foreground">
-                Generated video will appear here. Use a start frame from Video frames
+                Generated video will appear here. Use a start frame from Video creator
                 for image-to-video, or prompt-only for text-to-video.
               </p>
             )}

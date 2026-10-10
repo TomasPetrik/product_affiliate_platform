@@ -36,8 +36,8 @@ export function AdminSidebar({ className, onNavigate }: AdminSidebarProps) {
           <div
             key={group.label ?? group.items[0]?.href}
             className={cn(
-              "flex flex-col gap-1",
-              index > 0 && "mt-3 border-t border-border/60 pt-3",
+              "flex flex-col gap-1 border-l border-border/60 pl-2",
+              index > 0 && "mt-3 border-t pt-3",
             )}
           >
             {group.label ? (

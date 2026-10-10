@@ -18,7 +18,7 @@ import { formatByteSize } from "@/lib/video-frame-project-paths";
 import { formatVideoTime } from "@/lib/video-frames";
 import { listVideoFrameProjects } from "@/server/services/video-frame-project.service";
 
-export const metadata: Metadata = { title: "Video frames" };
+export const metadata: Metadata = { title: "Video creator" };
 export const dynamic = "force-dynamic";
 
 export default async function AdminVideoFramesPage() {
@@ -27,7 +27,7 @@ export default async function AdminVideoFramesPage() {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Video frames</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Video creator</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Each uploaded video becomes a named project with saved spans, extracted JPGs, and storage
           usage. Open a project anytime to continue editing — changes autosave.

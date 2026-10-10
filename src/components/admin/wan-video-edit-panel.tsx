@@ -577,7 +577,7 @@ export function WanVideoEditPanel({ configured }: WanVideoEditPanelProps) {
 
       <form
         onSubmit={onSubmit}
-        className="grid gap-6 lg:grid-cols-[1fr_minmax(260px,380px)]"
+        className="grid gap-6"
         onDragOver={(event) => {
           event.preventDefault();
           if (!busy) setDragging(true);
@@ -695,7 +695,7 @@ export function WanVideoEditPanel({ configured }: WanVideoEditPanelProps) {
                         <p className="truncate text-sm font-medium">
                           Image {index + 1} · {frame.fileName}
                         </p>
-                        <p className="text-xs text-muted-foreground">Video frames</p>
+                        <p className="text-xs text-muted-foreground">Video creator</p>
                       </div>
                       <Button
                         type="button"
@@ -762,7 +762,7 @@ export function WanVideoEditPanel({ configured }: WanVideoEditPanelProps) {
                   Upload images
                 </Button>
                 <KreaVideoFramePicker
-                  label="Add from Video frames"
+                  label="Add from Video creator"
                   value={null}
                   onChange={() => undefined}
                   multi

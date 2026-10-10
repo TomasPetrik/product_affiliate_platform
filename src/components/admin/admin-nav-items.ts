@@ -64,9 +64,9 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
   {
     label: "Creative tools",
     items: [
-      { href: "/admin/tools/video-frames", label: "Video frames", icon: Film },
+      { href: "/admin/tools/video-frames", label: "Video creator", icon: Film },
       { href: "/admin/tools/krea-video", label: "Krea video", icon: Clapperboard },
-      { href: "/admin/tools/wan-video", label: "Wan video", icon: Video },
+      { href: "/admin/tools/wan-video", label: "Wan video reference", icon: Video },
       { href: "/admin/tools/wan-video-edit", label: "Wan video edit", icon: Scissors },
       { href: "/admin/tools/wan-image-edit", label: "Wan image edit", icon: Sparkles },
       {

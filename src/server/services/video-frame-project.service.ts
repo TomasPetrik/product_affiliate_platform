@@ -7,12 +7,30 @@ import sharp from "sharp";
 import type { Prisma } from "@/generated/prisma/client";
 import type { VideoFrameAssetKind } from "@/generated/prisma/enums";
 import {
+  isLocalVideoFrameUpload,
+  LOCAL_VIDEO_FRAME_UPLOAD_PREFIX,
   MAX_VIDEO_FRAME_PROJECT_VIDEO_BYTES,
   publicVideoFramePath,
   videoFrameProjectDir,
+  videoFrameProjectsUploadsDir,
 } from "@/lib/video-frame-project-paths";
 import type { FrameSpan } from "@/lib/video-frames";
+import {
+  emptyVideoFrameMergerState,
+  parseVideoFrameMergerState,
+  sanitizeVideoFrameMergerState,
+  type VideoFrameMergerState,
+} from "@/lib/video-frame-merger-state";
+import {
+  DEFAULT_MERGE_EXPORT_QUALITY,
+  parseMergeExportQuality,
+  type MergeExportQuality,
+} from "@/lib/video-frame-merge-quality";
 import { prisma } from "@/lib/prisma";
+import {
+  concatVideoSegments,
+  VideoCutError,
+} from "@/server/services/video-cut.service";
 
 const ALLOWED_VIDEO_TYPES = new Set([
   "video/mp4",
@@ -45,6 +63,7 @@ export interface VideoFrameProjectAssetDto {
   frameIndex: number | null;
   timeSec: number;
   fileName: string;
+  label: string | null;
   path: string;
   bytes: number;
   width: number | null;
@@ -62,6 +81,7 @@ export interface VideoFrameProjectDetail {
   videoWidth: number | null;
   videoHeight: number | null;
   spans: FrameSpan[];
+  merger: VideoFrameMergerState;
   framesBytes: number;
   thumbnailsBytes: number;
   editedBytes: number;
@@ -149,8 +169,8 @@ async function recalculateProjectSizes(projectId: string) {
       thumbnailsBytes = sum;
     } else if (row.kind === "EDITED") {
       editedBytes = sum;
-    } else if (row.kind === "CLIP") {
-      clipsBytes = sum;
+    } else if (row.kind === "CLIP" || row.kind === "MERGED") {
+      clipsBytes += sum;
     }
   }
 
@@ -174,6 +194,7 @@ function mapDetail(
     videoWidth: number | null;
     videoHeight: number | null;
     spansJson: Prisma.JsonValue;
+    mergerJson: Prisma.JsonValue;
     framesBytes: bigint;
     thumbnailsBytes: bigint;
     editedBytes: bigint;
@@ -188,6 +209,7 @@ function mapDetail(
       frameIndex: number | null;
       timeSec: number;
       fileName: string;
+      label: string | null;
       path: string;
       bytes: number;
       width: number | null;
@@ -195,6 +217,18 @@ function mapDetail(
     }>;
   },
 ): VideoFrameProjectDetail {
+  const clipIds = new Set(
+    project.assets
+      .filter((asset) => asset.kind === "CLIP")
+      .map((asset) => asset.id),
+  );
+  const merger =
+    sanitizeVideoFrameMergerState(
+      parseVideoFrameMergerState(project.mergerJson) ??
+        emptyVideoFrameMergerState(),
+      clipIds,
+    );
+
   return {
     id: project.id,
     name: project.name,
@@ -206,6 +240,7 @@ function mapDetail(
     videoWidth: project.videoWidth,
     videoHeight: project.videoHeight,
     spans: parseSpans(project.spansJson),
+    merger,
     framesBytes: toNumber(project.framesBytes),
     thumbnailsBytes: toNumber(project.thumbnailsBytes),
     editedBytes: toNumber(project.editedBytes),
@@ -217,6 +252,7 @@ function mapDetail(
       spanId: asset.spanId,
       frameIndex: asset.frameIndex,
       timeSec: asset.timeSec,
+      label: asset.label,
       fileName: asset.fileName,
       path: asset.path,
       bytes: asset.bytes,
@@ -339,6 +375,49 @@ export async function updateVideoFrameProject(input: {
       ...(input.durationSec !== undefined ? { durationSec: input.durationSec } : {}),
       ...(input.videoWidth !== undefined ? { videoWidth: input.videoWidth } : {}),
       ...(input.videoHeight !== undefined ? { videoHeight: input.videoHeight } : {}),
+    },
+    include: {
+      assets: { orderBy: [{ kind: "asc" }, { frameIndex: "asc" }, { timeSec: "asc" }] },
+    },
+  });
+
+  return mapDetail(updated);
+}
+
+/**
+ * Persist Video merger timeline (segments, trims, playhead, zoom) on the project.
+ */
+export async function saveVideoFrameMergerState(input: {
+  projectId: string;
+  state: VideoFrameMergerState;
+}): Promise<VideoFrameProjectDetail | { error: string }> {
+  const projectId = input.projectId.trim();
+  if (!projectId) {
+    return { error: "Missing project." };
+  }
+
+  const existing = await prisma.videoFrameProject.findUnique({
+    where: { id: projectId },
+    include: {
+      assets: {
+        where: { kind: "CLIP" },
+        select: { id: true },
+      },
+    },
+  });
+  if (!existing) {
+    return { error: "Project not found." };
+  }
+
+  const clipIds = new Set(existing.assets.map((asset) => asset.id));
+  const parsed =
+    parseVideoFrameMergerState(input.state) ?? emptyVideoFrameMergerState();
+  const state = sanitizeVideoFrameMergerState(parsed, clipIds);
+
+  const updated = await prisma.videoFrameProject.update({
+    where: { id: projectId },
+    data: {
+      mergerJson: state as unknown as Prisma.InputJsonValue,
     },
     include: {
       assets: { orderBy: [{ kind: "asc" }, { frameIndex: "asc" }, { timeSec: "asc" }] },
@@ -691,6 +770,251 @@ export async function saveVideoFrameClip(input: {
   await recalculateProjectSizes(input.projectId);
   const detail = await getVideoFrameProject(input.projectId);
   return detail ?? { error: "Project not found after saving clip." };
+}
+
+/**
+ * Persist an admin-uploaded local video as a CLIP asset (for the merger).
+ * Not tied to a span (`spanId` null).
+ */
+export async function uploadVideoFrameLocalClip(input: {
+  projectId: string;
+  video: File;
+}): Promise<VideoFrameProjectDetail | { error: string }> {
+  const projectId = input.projectId.trim();
+  if (!projectId) {
+    return { error: "Missing project." };
+  }
+
+  const existing = await prisma.videoFrameProject.findUnique({
+    where: { id: projectId },
+    select: { id: true },
+  });
+  if (!existing) {
+    return { error: "Project not found." };
+  }
+
+  if (input.video.size <= 0) {
+    return { error: "Video file is empty." };
+  }
+  if (input.video.size > MAX_VIDEO_FRAME_PROJECT_VIDEO_BYTES) {
+    return {
+      error: `Video must be ${Math.round(MAX_VIDEO_FRAME_PROJECT_VIDEO_BYTES / (1024 * 1024))}MB or smaller.`,
+    };
+  }
+  if (
+    !ALLOWED_VIDEO_TYPES.has(input.video.type) &&
+    !/\.(mp4|webm|mov|m4v)$/i.test(input.video.name)
+  ) {
+    return { error: "Use an MP4, WebM, or MOV video." };
+  }
+
+  const clipsDir = path.join(videoFrameProjectDir(projectId), "clips");
+  await mkdir(clipsDir, { recursive: true });
+
+  const ext = extensionForVideo(input.video).replace(/^\./, "") || "mp4";
+  const fileName = `clip-local-${randomBytes(4).toString("hex")}.${ext}`;
+  const absolute = path.join(clipsDir, fileName);
+  const buffer = Buffer.from(await input.video.arrayBuffer());
+  await writeFile(absolute, buffer);
+
+  await prisma.videoFrameAsset.create({
+    data: {
+      projectId,
+      kind: "CLIP",
+      spanId: null,
+      frameIndex: null,
+      timeSec: 0,
+      fileName,
+      path: publicVideoFramePath(projectId, `clips/${fileName}`),
+      bytes: buffer.byteLength,
+      width: null,
+      height: null,
+    },
+  });
+
+  await recalculateProjectSizes(projectId);
+  const detail = await getVideoFrameProject(projectId);
+  return detail ?? { error: "Project not found after uploading clip." };
+}
+
+function absoluteFromPublicUpload(publicPath: string): string | null {
+  if (!isLocalVideoFrameUpload(publicPath)) return null;
+  const relative = publicPath.slice(LOCAL_VIDEO_FRAME_UPLOAD_PREFIX.length);
+  if (!relative || relative.includes("..")) return null;
+  return path.join(videoFrameProjectsUploadsDir(), relative);
+}
+
+function nextMergeVersionLabel(existingLabels: Array<string | null>): string {
+  let maxMinor = -1;
+  for (const label of existingLabels) {
+    if (!label) continue;
+    const match = /^1\.(\d+)$/.exec(label.trim());
+    if (!match) continue;
+    const minor = Number(match[1]);
+    if (Number.isFinite(minor) && minor > maxMinor) {
+      maxMinor = minor;
+    }
+  }
+  return `1.${maxMinor + 1}`;
+}
+
+export interface MergeVideoFrameSegmentInput {
+  assetId: string;
+  trimStartSec: number;
+  /** When omitted, keep through the end of the source clip. */
+  trimEndSec?: number;
+}
+
+/**
+ * Concatenate ordered CLIP assets into a versioned MERGED asset (1.0, 1.1, …).
+ * Optional per-segment trim ranges are applied during ffmpeg normalize.
+ */
+export async function mergeVideoFrameClips(input: {
+  projectId: string;
+  assetIds?: string[];
+  segments?: MergeVideoFrameSegmentInput[];
+  /** When true, merged output has no audio track. */
+  stripAudio?: boolean;
+  /** 9:16 export size (720p / 1080p / 2K). */
+  exportQuality?: MergeExportQuality;
+}): Promise<VideoFrameProjectDetail | { error: string }> {
+  const projectId = input.projectId.trim();
+  if (!projectId) {
+    return { error: "Missing project." };
+  }
+
+  const segments: MergeVideoFrameSegmentInput[] =
+    input.segments?.map((segment) => ({
+      assetId: segment.assetId.trim(),
+      trimStartSec: segment.trimStartSec,
+      trimEndSec: segment.trimEndSec,
+    })) ??
+    (input.assetIds ?? []).map((assetId) => ({
+      assetId: assetId.trim(),
+      trimStartSec: 0,
+    }));
+
+  const assetIds = segments.map((segment) => segment.assetId).filter(Boolean);
+  if (assetIds.length < 2) {
+    return { error: "Pick at least two clips to merge." };
+  }
+  if (new Set(assetIds).size !== assetIds.length) {
+    return { error: "Duplicate clips are not allowed in a merge." };
+  }
+
+  for (const segment of segments) {
+    if (!Number.isFinite(segment.trimStartSec) || segment.trimStartSec < 0) {
+      return { error: "Invalid trim start on one of the clips." };
+    }
+    if (
+      segment.trimEndSec != null &&
+      (!Number.isFinite(segment.trimEndSec) ||
+        segment.trimEndSec <= segment.trimStartSec + 0.04)
+    ) {
+      return { error: "Invalid trim range on one of the clips." };
+    }
+  }
+
+  const existing = await prisma.videoFrameProject.findUnique({
+    where: { id: projectId },
+    select: { id: true },
+  });
+  if (!existing) {
+    return { error: "Project not found." };
+  }
+
+  const clips = await prisma.videoFrameAsset.findMany({
+    where: {
+      projectId,
+      kind: "CLIP",
+      id: { in: assetIds },
+    },
+    select: { id: true, path: true, fileName: true },
+  });
+  if (clips.length !== assetIds.length) {
+    return { error: "One or more selected clips were not found." };
+  }
+
+  const byId = new Map(clips.map((clip) => [clip.id, clip]));
+  const concatSegments: Array<{
+    absoluteSourcePath: string;
+    trimStartSec?: number;
+    trimEndSec?: number;
+  }> = [];
+  for (const segment of segments) {
+    const clip = byId.get(segment.assetId);
+    if (!clip) {
+      return { error: "One or more selected clips were not found." };
+    }
+    const absolute = absoluteFromPublicUpload(clip.path);
+    if (!absolute) {
+      return { error: `Invalid path for clip ${clip.fileName}.` };
+    }
+    concatSegments.push({
+      absoluteSourcePath: absolute,
+      trimStartSec: segment.trimStartSec,
+      trimEndSec: segment.trimEndSec,
+    });
+  }
+
+  const priorMerged = await prisma.videoFrameAsset.findMany({
+    where: { projectId, kind: "MERGED" },
+    select: { label: true },
+  });
+  const label = nextMergeVersionLabel(priorMerged.map((row) => row.label));
+
+  const exportQuality = parseMergeExportQuality(
+    input.exportQuality ?? DEFAULT_MERGE_EXPORT_QUALITY,
+  );
+
+  let merged: { bytes: Buffer; contentType: string; filename: string };
+  try {
+    merged = await concatVideoSegments({
+      segments: concatSegments,
+      stripAudio: input.stripAudio === true,
+      quality: exportQuality,
+    });
+  } catch (error) {
+    if (error instanceof VideoCutError) {
+      return { error: error.message };
+    }
+    return {
+      error:
+        error instanceof Error ? error.message : "Failed to merge clips.",
+    };
+  }
+
+  if (merged.bytes.byteLength > 400 * 1024 * 1024) {
+    return { error: "Merged video is too large to store." };
+  }
+
+  const mergesDir = path.join(videoFrameProjectDir(projectId), "merges");
+  await mkdir(mergesDir, { recursive: true });
+
+  const safeLabel = label.replace(/[^0-9.]/g, "");
+  const fileName = `merge-v${safeLabel}-${randomBytes(4).toString("hex")}.mp4`;
+  const absolute = path.join(mergesDir, fileName);
+  await writeFile(absolute, merged.bytes);
+
+  await prisma.videoFrameAsset.create({
+    data: {
+      projectId,
+      kind: "MERGED",
+      spanId: null,
+      frameIndex: null,
+      timeSec: 0,
+      fileName,
+      label,
+      path: publicVideoFramePath(projectId, `merges/${fileName}`),
+      bytes: merged.bytes.byteLength,
+      width: null,
+      height: null,
+    },
+  });
+
+  await recalculateProjectSizes(projectId);
+  const detail = await getVideoFrameProject(projectId);
+  return detail ?? { error: "Project not found after merging clips." };
 }
 
 export async function deleteVideoFrameProject(

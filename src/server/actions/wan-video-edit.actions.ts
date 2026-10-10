@@ -283,7 +283,7 @@ export async function submitWanVideoEditAction(
     } else {
       return {
         error:
-          "Provide a source video upload, or a Video frames project cut range.",
+          "Provide a source video upload, or a Video creator project cut range.",
       };
     }
 

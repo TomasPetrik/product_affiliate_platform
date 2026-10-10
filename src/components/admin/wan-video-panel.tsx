@@ -497,7 +497,7 @@ export function WanVideoPanel({ configured }: WanVideoPanelProps) {
                         <p className="truncate text-sm font-medium">
                           Image {index + 1} · {frame.fileName}
                         </p>
-                        <p className="text-xs text-muted-foreground">Video frames</p>
+                        <p className="text-xs text-muted-foreground">Video creator</p>
                       </div>
                       <Button
                         type="button"
@@ -612,7 +612,7 @@ export function WanVideoPanel({ configured }: WanVideoPanelProps) {
                     </div>
                   </label>
                   <KreaVideoFramePicker
-                    label="Add from Video frames"
+                    label="Add from Video creator"
                     value={null}
                     onChange={() => undefined}
                     multi
@@ -754,7 +754,7 @@ export function WanVideoPanel({ configured }: WanVideoPanelProps) {
                 ) : (
                   <>
                     <Clapperboard className="size-4" />
-                    Generate Wan video
+                    Generate Wan video reference
                   </>
                 )}
               </Button>
@@ -804,13 +804,13 @@ export function WanVideoPanel({ configured }: WanVideoPanelProps) {
                 <History className="size-4 text-muted-foreground" />
                 <p className="text-sm font-medium">Generation history</p>
                 <span className="text-xs text-muted-foreground">
-                  This browser · includes video-frame Wan clips · tap to prefill
+                  This browser · includes Video creator Wan clips · tap to prefill
                 </span>
               </div>
 
               {history.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
-                  Completed runs from this tool and Video frames Wan clips appear here.
+                  Completed runs from this tool and Video creator Wan clips appear here.
                 </p>
               ) : (
                 <ul className="grid max-h-80 gap-2 overflow-y-auto pr-1">
@@ -844,7 +844,7 @@ export function WanVideoPanel({ configured }: WanVideoPanelProps) {
                                 <span>{entry.aspectRatio}</span>
                                 {entry.source === "video-frame" ? (
                                   <span className="text-foreground/80">
-                                    Video frame
+                                    Video creator
                                     {entry.sourceLabel ? ` · ${entry.sourceLabel}` : ""}
                                   </span>
                                 ) : null}

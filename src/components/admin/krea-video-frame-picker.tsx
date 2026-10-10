@@ -159,7 +159,7 @@ export function KreaVideoFramePicker({
         className="w-fit"
       >
         <Film className="size-3.5" />
-        {multi ? "Add from Video frames" : value ? "Change from Video frames" : "Pick from Video frames"}
+        {multi ? "Add from Video creator" : value ? "Change from Video creator" : "Pick from Video creator"}
       </Button>
 
       <Dialog.Root open={open} onOpenChange={setOpen}>
@@ -172,7 +172,7 @@ export function KreaVideoFramePicker({
                   {label}
                 </Dialog.Title>
                 <Dialog.Description className="mt-0.5 text-sm text-muted-foreground">
-                  Choose a still from a Video frames project.
+                  Choose a still from a Video creator project.
                 </Dialog.Description>
               </div>
               <Button
@@ -196,7 +196,7 @@ export function KreaVideoFramePicker({
                   </p>
                 ) : projects.length === 0 ? (
                   <p className="text-sm text-muted-foreground">
-                    No Video frames projects yet. Extract frames first under Tools → Video frames.
+                    No Video creator projects yet. Extract frames first under Tools → Video creator.
                   </p>
                 ) : (
                   <select

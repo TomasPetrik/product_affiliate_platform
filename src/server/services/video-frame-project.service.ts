@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, rm, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import sharp from "sharp";
@@ -15,7 +15,7 @@ import {
   videoFrameProjectDir,
   videoFrameProjectsUploadsDir,
 } from "@/lib/video-frame-project-paths";
-import type { FrameSpan } from "@/lib/video-frames";
+import { isCustomSpan, type FrameSpan } from "@/lib/video-frames";
 import {
   emptyVideoFrameMergerState,
   parseVideoFrameMergerState,
@@ -132,11 +132,19 @@ function parseSpans(value: Prisma.JsonValue): FrameSpan[] {
     ) {
       continue;
     }
+    const kind =
+      row.kind === "custom" || row.kind === "source" ? row.kind : undefined;
+    const label =
+      typeof row.label === "string" && row.label.trim()
+        ? row.label.trim().slice(0, 80)
+        : undefined;
     spans.push({
       id: row.id,
       start: row.start,
       end: row.end,
       frameCount: Math.floor(row.frameCount),
+      ...(kind ? { kind } : {}),
+      ...(label ? { label } : {}),
     });
   }
   return spans;
@@ -509,7 +517,19 @@ export async function saveVideoFrameMergerState(input: {
   return mapDetail(updated);
 }
 
-export async function replaceVideoFrameProjectFrames(input: {
+/** Formats Wan / browsers may not accept as reference stills — convert to JPEG. */
+function shouldNormalizeFrameToJpeg(fileName: string, mimeType: string): boolean {
+  if (
+    mimeType === "image/avif" ||
+    mimeType === "image/heic" ||
+    mimeType === "image/heif"
+  ) {
+    return true;
+  }
+  return /\.(avif|heic|heif)$/i.test(fileName);
+}
+
+async function writeFrameAndThumbAssets(input: {
   projectId: string;
   frames: Array<{
     file: File;
@@ -520,27 +540,12 @@ export async function replaceVideoFrameProjectFrames(input: {
     width?: number;
     height?: number;
   }>;
-}): Promise<VideoFrameProjectDetail | { error: string }> {
-  const existing = await prisma.videoFrameProject.findUnique({
-    where: { id: input.projectId },
-  });
-  if (!existing) {
-    return { error: "Project not found." };
-  }
-
+}): Promise<Prisma.VideoFrameAssetCreateManyInput[] | { error: string }> {
   const projectDir = videoFrameProjectDir(input.projectId);
   const framesDir = path.join(projectDir, "frames");
   const thumbsDir = path.join(projectDir, "thumbs");
-
-  await rm(framesDir, { recursive: true, force: true });
-  await rm(thumbsDir, { recursive: true, force: true });
   await mkdir(framesDir, { recursive: true });
   await mkdir(thumbsDir, { recursive: true });
-
-  // Keep Wan EDITED assets when re-extracting stills from the same video.
-  await prisma.videoFrameAsset.deleteMany({
-    where: { projectId: input.projectId, kind: { in: ["FRAME", "THUMBNAIL"] } },
-  });
 
   const assetRows: Prisma.VideoFrameAssetCreateManyInput[] = [];
 
@@ -552,12 +557,31 @@ export async function replaceVideoFrameProjectFrames(input: {
       return { error: `Frame "${frame.fileName}" is too large.` };
     }
 
+    let buffer = Buffer.from(await frame.file.arrayBuffer());
+    let storedFileName = frame.fileName;
+    let width = frame.width ?? null;
+    let height = frame.height ?? null;
+
+    if (shouldNormalizeFrameToJpeg(frame.fileName, frame.file.type)) {
+      try {
+        const normalized = sharp(buffer, { animated: false }).rotate();
+        const meta = await normalized.metadata();
+        buffer = await normalized.jpeg({ quality: 92 }).toBuffer();
+        storedFileName = frame.fileName.replace(/\.[^.]+$/i, "") + ".jpg";
+        width = meta.width ?? width;
+        height = meta.height ?? height;
+      } catch {
+        return {
+          error: `Could not decode "${frame.fileName}". Use JPG, PNG, WebP, GIF, or AVIF.`,
+        };
+      }
+    }
+
     const safeBase =
-      frame.fileName.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^\.+/, "") ||
+      storedFileName.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^\.+/, "") ||
       `frame-${frame.frameIndex}.jpg`;
     const unique = `${String(frame.frameIndex).padStart(3, "0")}-${randomBytes(4).toString("hex")}-${safeBase}`;
     const frameAbsolute = path.join(framesDir, unique);
-    const buffer = Buffer.from(await frame.file.arrayBuffer());
     await writeFile(frameAbsolute, buffer);
 
     const framePath = publicVideoFramePath(input.projectId, `frames/${unique}`);
@@ -567,11 +591,11 @@ export async function replaceVideoFrameProjectFrames(input: {
       spanId: frame.spanId,
       frameIndex: frame.frameIndex,
       timeSec: frame.timeSec,
-      fileName: frame.fileName,
+      fileName: storedFileName,
       path: framePath,
       bytes: buffer.byteLength,
-      width: frame.width ?? null,
-      height: frame.height ?? null,
+      width,
+      height,
     });
 
     try {
@@ -604,6 +628,82 @@ export async function replaceVideoFrameProjectFrames(input: {
     }
   }
 
+  return assetRows;
+}
+
+async function deleteFrameAssetsByFilter(
+  projectId: string,
+  where: Prisma.VideoFrameAssetWhereInput,
+): Promise<void> {
+  const toRemove = await prisma.videoFrameAsset.findMany({
+    where: {
+      projectId,
+      kind: { in: ["FRAME", "THUMBNAIL"] },
+      ...where,
+    },
+    select: { id: true, path: true },
+  });
+  for (const asset of toRemove) {
+    const absolute = absoluteFromPublicUpload(asset.path);
+    if (absolute) {
+      await unlink(absolute).catch(() => undefined);
+    }
+  }
+  if (toRemove.length > 0) {
+    await prisma.videoFrameAsset.deleteMany({
+      where: { id: { in: toRemove.map((row) => row.id) } },
+    });
+  }
+}
+
+export async function replaceVideoFrameProjectFrames(input: {
+  projectId: string;
+  frames: Array<{
+    file: File;
+    spanId: string;
+    frameIndex: number;
+    timeSec: number;
+    fileName: string;
+    width?: number;
+    height?: number;
+  }>;
+}): Promise<VideoFrameProjectDetail | { error: string }> {
+  const existing = await prisma.videoFrameProject.findUnique({
+    where: { id: input.projectId },
+  });
+  if (!existing) {
+    return { error: "Project not found." };
+  }
+
+  const customSpanIds = parseSpans(existing.spansJson)
+    .filter((span) => isCustomSpan(span))
+    .map((span) => span.id);
+
+  // Keep custom-span stills + Wan EDITED when re-extracting source-video frames.
+  if (customSpanIds.length === 0) {
+    const projectDir = videoFrameProjectDir(input.projectId);
+    await rm(path.join(projectDir, "frames"), { recursive: true, force: true });
+    await rm(path.join(projectDir, "thumbs"), { recursive: true, force: true });
+    await prisma.videoFrameAsset.deleteMany({
+      where: {
+        projectId: input.projectId,
+        kind: { in: ["FRAME", "THUMBNAIL"] },
+      },
+    });
+  } else {
+    await deleteFrameAssetsByFilter(input.projectId, {
+      OR: [{ spanId: null }, { spanId: { notIn: customSpanIds } }],
+    });
+  }
+
+  const assetRows = await writeFrameAndThumbAssets({
+    projectId: input.projectId,
+    frames: input.frames,
+  });
+  if ("error" in assetRows) {
+    return { error: assetRows.error };
+  }
+
   if (assetRows.length > 0) {
     await prisma.videoFrameAsset.createMany({ data: assetRows });
   }
@@ -611,6 +711,227 @@ export async function replaceVideoFrameProjectFrames(input: {
   await recalculateProjectSizes(input.projectId);
   const detail = await getVideoFrameProject(input.projectId);
   return detail ?? { error: "Project not found after saving frames." };
+}
+
+/**
+ * Replace FRAME/THUMBNAIL assets for one custom span (imported images / sampled video).
+ * Updates that span's frameCount in spansJson.
+ */
+export async function replaceCustomSpanFrames(input: {
+  projectId: string;
+  spanId: string;
+  frames: Array<{
+    file: File;
+    frameIndex: number;
+    timeSec: number;
+    fileName: string;
+    width?: number;
+    height?: number;
+  }>;
+}): Promise<VideoFrameProjectDetail | { error: string }> {
+  const projectId = input.projectId.trim();
+  const spanId = input.spanId.trim();
+  if (!projectId || !spanId) {
+    return { error: "Missing project or span." };
+  }
+  if (input.frames.length === 0) {
+    return { error: "Add at least one image." };
+  }
+  if (input.frames.length > 20) {
+    return { error: "At most 20 images per custom span." };
+  }
+
+  const existing = await prisma.videoFrameProject.findUnique({
+    where: { id: projectId },
+  });
+  if (!existing) {
+    return { error: "Project not found." };
+  }
+
+  const spans = parseSpans(existing.spansJson);
+  const span = spans.find((item) => item.id === spanId);
+  if (!span || !isCustomSpan(span)) {
+    return { error: "Custom span not found." };
+  }
+
+  await deleteFrameAssetsByFilter(projectId, { spanId });
+
+  const assetRows = await writeFrameAndThumbAssets({
+    projectId,
+    frames: input.frames.map((frame) => ({
+      ...frame,
+      spanId,
+    })),
+  });
+  if ("error" in assetRows) {
+    return { error: assetRows.error };
+  }
+
+  if (assetRows.length > 0) {
+    await prisma.videoFrameAsset.createMany({ data: assetRows });
+  }
+
+  const nextSpans = spans.map((item) =>
+    item.id === spanId
+      ? {
+          ...item,
+          kind: "custom" as const,
+          frameCount: input.frames.length,
+          start: 0,
+          end: Math.max(0, input.frames.length - 1),
+        }
+      : item,
+  );
+
+  await prisma.videoFrameProject.update({
+    where: { id: projectId },
+    data: { spansJson: nextSpans as unknown as Prisma.InputJsonValue },
+  });
+
+  await recalculateProjectSizes(projectId);
+  const detail = await getVideoFrameProject(projectId);
+  return detail ?? { error: "Project not found after saving custom frames." };
+}
+
+async function syncCustomSpanFrameCount(
+  projectId: string,
+  spanId: string,
+  spans: FrameSpan[],
+): Promise<void> {
+  const remaining = await prisma.videoFrameAsset.count({
+    where: { projectId, spanId, kind: "FRAME" },
+  });
+  const nextSpans = spans.map((item) =>
+    item.id === spanId
+      ? {
+          ...item,
+          kind: "custom" as const,
+          frameCount: Math.max(1, remaining),
+          start: 0,
+          end: Math.max(0, remaining - 1),
+        }
+      : item,
+  );
+  await prisma.videoFrameProject.update({
+    where: { id: projectId },
+    data: { spansJson: nextSpans as unknown as Prisma.InputJsonValue },
+  });
+}
+
+/**
+ * Delete imported media from a custom span (individual frames and/or source video).
+ */
+export async function deleteCustomSpanMedia(input: {
+  projectId: string;
+  spanId: string;
+  /** Specific FRAME asset ids to remove (thumbnails at same frameIndex go too). */
+  frameAssetIds?: string[];
+  /** Remove the imported short video (clip-local) for this span. */
+  deleteSourceVideo?: boolean;
+  /** Remove every FRAME/THUMBNAIL for this custom span. */
+  clearFrames?: boolean;
+}): Promise<VideoFrameProjectDetail | { error: string }> {
+  const projectId = input.projectId.trim();
+  const spanId = input.spanId.trim();
+  if (!projectId || !spanId) {
+    return { error: "Missing project or span." };
+  }
+
+  const existing = await prisma.videoFrameProject.findUnique({
+    where: { id: projectId },
+  });
+  if (!existing) {
+    return { error: "Project not found." };
+  }
+
+  const spans = parseSpans(existing.spansJson);
+  const span = spans.find((item) => item.id === spanId);
+  if (!span || !isCustomSpan(span)) {
+    return { error: "Custom span not found." };
+  }
+
+  const frameAssetIds = (input.frameAssetIds ?? [])
+    .map((id) => id.trim())
+    .filter(Boolean);
+  const clearFrames = input.clearFrames === true;
+  const deleteSourceVideo = input.deleteSourceVideo === true;
+
+  if (!clearFrames && frameAssetIds.length === 0 && !deleteSourceVideo) {
+    return { error: "Nothing to delete." };
+  }
+
+  if (clearFrames) {
+    await deleteFrameAssetsByFilter(projectId, { spanId });
+  } else if (frameAssetIds.length > 0) {
+    const frames = await prisma.videoFrameAsset.findMany({
+      where: {
+        projectId,
+        spanId,
+        kind: "FRAME",
+        id: { in: frameAssetIds },
+      },
+      select: { id: true, path: true, frameIndex: true },
+    });
+    if (frames.length === 0) {
+      return { error: "Frame not found on this custom span." };
+    }
+
+    const frameIndexes = frames
+      .map((frame) => frame.frameIndex)
+      .filter((value): value is number => value != null);
+
+    const thumbs =
+      frameIndexes.length > 0
+        ? await prisma.videoFrameAsset.findMany({
+            where: {
+              projectId,
+              spanId,
+              kind: "THUMBNAIL",
+              frameIndex: { in: frameIndexes },
+            },
+            select: { id: true, path: true },
+          })
+        : [];
+
+    for (const asset of [...frames, ...thumbs]) {
+      const absolute = absoluteFromPublicUpload(asset.path);
+      if (absolute) await unlink(absolute).catch(() => undefined);
+    }
+    await prisma.videoFrameAsset.deleteMany({
+      where: {
+        id: { in: [...frames, ...thumbs].map((row) => row.id) },
+      },
+    });
+  }
+
+  if (deleteSourceVideo) {
+    const prior = await prisma.videoFrameAsset.findMany({
+      where: {
+        projectId,
+        kind: "CLIP",
+        spanId,
+        fileName: { startsWith: "clip-local-" },
+      },
+      select: { id: true, path: true },
+    });
+    for (const asset of prior) {
+      const absolute = absoluteFromPublicUpload(asset.path);
+      if (absolute) await unlink(absolute).catch(() => undefined);
+    }
+    if (prior.length > 0) {
+      await prisma.videoFrameAsset.deleteMany({
+        where: { id: { in: prior.map((row) => row.id) } },
+      });
+    }
+  }
+
+  if (clearFrames || frameAssetIds.length > 0) {
+    await syncCustomSpanFrameCount(projectId, spanId, spans);
+  }
+
+  await recalculateProjectSizes(projectId);
+  const detail = await getVideoFrameProject(projectId);
+  return detail ?? { error: "Project not found after deleting media." };
 }
 
 /**
@@ -873,24 +1194,37 @@ export async function saveVideoFrameClip(input: {
 }
 
 /**
- * Persist an admin-uploaded local video as a CLIP asset (for the merger).
- * Not tied to a span (`spanId` null).
+ * Persist an admin-uploaded local video as a CLIP asset (merger or custom span).
  */
 export async function uploadVideoFrameLocalClip(input: {
   projectId: string;
   video: File;
+  /** When set, ties the clip to a custom span (source for Wan / reference). */
+  spanId?: string | null;
 }): Promise<VideoFrameProjectDetail | { error: string }> {
   const projectId = input.projectId.trim();
   if (!projectId) {
     return { error: "Missing project." };
   }
 
+  const spanId =
+    typeof input.spanId === "string" && input.spanId.trim()
+      ? input.spanId.trim()
+      : null;
+
   const existing = await prisma.videoFrameProject.findUnique({
     where: { id: projectId },
-    select: { id: true },
+    select: { id: true, spansJson: true },
   });
   if (!existing) {
     return { error: "Project not found." };
+  }
+
+  if (spanId) {
+    const span = parseSpans(existing.spansJson).find((item) => item.id === spanId);
+    if (!span || !isCustomSpan(span)) {
+      return { error: "Custom span not found." };
+    }
   }
 
   if (input.video.size <= 0) {
@@ -917,11 +1251,33 @@ export async function uploadVideoFrameLocalClip(input: {
   const buffer = Buffer.from(await input.video.arrayBuffer());
   await writeFile(absolute, buffer);
 
+  if (spanId) {
+    // One source video per custom span — replace prior span-linked local clips.
+    const prior = await prisma.videoFrameAsset.findMany({
+      where: {
+        projectId,
+        kind: "CLIP",
+        spanId,
+        fileName: { startsWith: "clip-local-" },
+      },
+      select: { id: true, path: true },
+    });
+    for (const asset of prior) {
+      const priorAbs = absoluteFromPublicUpload(asset.path);
+      if (priorAbs) await unlink(priorAbs).catch(() => undefined);
+    }
+    if (prior.length > 0) {
+      await prisma.videoFrameAsset.deleteMany({
+        where: { id: { in: prior.map((row) => row.id) } },
+      });
+    }
+  }
+
   await prisma.videoFrameAsset.create({
     data: {
       projectId,
       kind: "CLIP",
-      spanId: null,
+      spanId,
       frameIndex: null,
       timeSec: 0,
       fileName,
@@ -1028,6 +1384,8 @@ export interface MergeVideoFrameSegmentInput {
   trimStartSec: number;
   /** When omitted, keep through the end of the source clip. */
   trimEndSec?: number;
+  /** Silence this clip's audio; soundtrack may still overlay. */
+  muted?: boolean;
 }
 
 export interface MergeVideoFrameAudioTrackInput {
@@ -1063,6 +1421,7 @@ export async function mergeVideoFrameClips(input: {
       assetId: segment.assetId.trim(),
       trimStartSec: segment.trimStartSec,
       trimEndSec: segment.trimEndSec,
+      muted: segment.muted === true,
     })) ??
     (input.assetIds ?? []).map((assetId) => ({
       assetId: assetId.trim(),
@@ -1073,9 +1432,7 @@ export async function mergeVideoFrameClips(input: {
   if (assetIds.length < 2) {
     return { error: "Pick at least two clips to merge." };
   }
-  if (new Set(assetIds).size !== assetIds.length) {
-    return { error: "Duplicate clips are not allowed in a merge." };
-  }
+  // Same clip asset may appear more than once after a timeline split (different trims).
 
   for (const segment of segments) {
     if (!Number.isFinite(segment.trimStartSec) || segment.trimStartSec < 0) {
@@ -1132,7 +1489,7 @@ export async function mergeVideoFrameClips(input: {
     },
     select: { id: true, path: true, fileName: true },
   });
-  if (clips.length !== assetIds.length) {
+  if (clips.length !== new Set(assetIds).size) {
     return { error: "One or more selected clips were not found." };
   }
 
@@ -1158,8 +1515,9 @@ export async function mergeVideoFrameClips(input: {
     absoluteSourcePath: string;
     trimStartSec?: number;
     trimEndSec?: number;
+    muted?: boolean;
   }> = [];
-  let compositionDurationSec = 0;
+  let videoCompositionSec = 0;
   for (const segment of segments) {
     const clip = byId.get(segment.assetId);
     if (!clip) {
@@ -1173,9 +1531,10 @@ export async function mergeVideoFrameClips(input: {
       absoluteSourcePath: absolute,
       trimStartSec: segment.trimStartSec,
       trimEndSec: segment.trimEndSec,
+      muted: segment.muted === true,
     });
     if (segment.trimEndSec != null) {
-      compositionDurationSec += Math.max(
+      videoCompositionSec += Math.max(
         0,
         segment.trimEndSec - segment.trimStartSec,
       );
@@ -1183,6 +1542,7 @@ export async function mergeVideoFrameClips(input: {
   }
 
   const soundtrackMix: SoundtrackMixInput[] = [];
+  let audioExtentSec = 0;
   for (const track of audioTracks) {
     const asset = audioById.get(track.assetId);
     if (!asset) {
@@ -1199,7 +1559,13 @@ export async function mergeVideoFrameClips(input: {
       startAtSec: track.startAtSec,
       volume: track.volume,
     });
+    audioExtentSec = Math.max(
+      audioExtentSec,
+      Math.max(0, track.startAtSec) +
+        Math.max(0, track.trimEndSec - track.trimStartSec),
+    );
   }
+  const compositionDurationSec = Math.max(videoCompositionSec, audioExtentSec);
 
   const priorMerged = await prisma.videoFrameAsset.findMany({
     where: { projectId, kind: "MERGED" },

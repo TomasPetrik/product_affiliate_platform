@@ -66,6 +66,8 @@ export interface ConcatSegmentInput {
   trimStartSec?: number;
   /** Exclusive-ish end of kept range (seconds). */
   trimEndSec?: number;
+  /** Silence this clip's audio (keeps an AAC stream so concat + soundtrack mix stay aligned). */
+  muted?: boolean;
 }
 
 function trimArgs(segment: ConcatSegmentInput): string[] {
@@ -90,19 +92,74 @@ function trimArgs(segment: ConcatSegmentInput): string[] {
   return args;
 }
 
+async function normalizeClipWithSilentAudio(
+  segment: ConcatSegmentInput,
+  outPath: string,
+  normalizeVf: string,
+  trim: string[],
+): Promise<void> {
+  // Silent AAC keeps concat stream layout consistent so soundtrack can amix.
+  await runFfmpeg([
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-y",
+    "-i",
+    segment.absoluteSourcePath,
+    "-f",
+    "lavfi",
+    "-i",
+    "anullsrc=channel_layout=stereo:sample_rate=44100",
+    ...trim,
+    "-vf",
+    normalizeVf,
+    "-c:v",
+    "libx264",
+    "-preset",
+    "veryfast",
+    "-crf",
+    "23",
+    "-pix_fmt",
+    "yuv420p",
+    "-c:a",
+    "aac",
+    "-ac",
+    "2",
+    "-ar",
+    "44100",
+    "-shortest",
+    "-map",
+    "0:v:0",
+    "-map",
+    "1:a:0",
+    "-movflags",
+    "+faststart",
+    "-avoid_negative_ts",
+    "make_zero",
+    outPath,
+  ]);
+}
+
 async function normalizeClipForConcat(
   segment: ConcatSegmentInput,
   outPath: string,
-  options?: { stripAudio?: boolean; quality?: MergeExportQuality },
+  options?: {
+    stripAudio?: boolean;
+    quality?: MergeExportQuality;
+    /** Prefer silent AAC over -an so soundtrack can overlay muted clips. */
+    keepSilentAudio?: boolean;
+  },
 ): Promise<void> {
   const trim = trimArgs(segment);
-  const stripAudio = options?.stripAudio === true;
+  const stripAudio =
+    options?.stripAudio === true || segment.muted === true;
   const quality = parseMergeExportQuality(
     options?.quality ?? DEFAULT_MERGE_EXPORT_QUALITY,
   );
   const normalizeVf = normalizeVfForQuality(quality);
+  const keepSilentAudio = options?.keepSilentAudio === true;
 
-  if (stripAudio) {
+  if (stripAudio && !keepSilentAudio) {
     await runFfmpeg([
       "-hide_banner",
       "-loglevel",
@@ -128,6 +185,11 @@ async function normalizeClipForConcat(
       "make_zero",
       outPath,
     ]);
+    return;
+  }
+
+  if (stripAudio && keepSilentAudio) {
+    await normalizeClipWithSilentAudio(segment, outPath, normalizeVf, trim);
     return;
   }
 
@@ -166,46 +228,7 @@ async function normalizeClipForConcat(
     await runFfmpeg(baseArgs);
   } catch {
     // Clips without an audio stream fail AAC encode — pad with silence.
-    // Put trim after both inputs so -ss/-to apply to the output, not lavfi.
-    await runFfmpeg([
-      "-hide_banner",
-      "-loglevel",
-      "error",
-      "-y",
-      "-i",
-      segment.absoluteSourcePath,
-      "-f",
-      "lavfi",
-      "-i",
-      "anullsrc=channel_layout=stereo:sample_rate=44100",
-      ...trim,
-      "-vf",
-      normalizeVf,
-      "-c:v",
-      "libx264",
-      "-preset",
-      "veryfast",
-      "-crf",
-      "23",
-      "-pix_fmt",
-      "yuv420p",
-      "-c:a",
-      "aac",
-      "-ac",
-      "2",
-      "-ar",
-      "44100",
-      "-shortest",
-      "-map",
-      "0:v:0",
-      "-map",
-      "1:a:0",
-      "-movflags",
-      "+faststart",
-      "-avoid_negative_ts",
-      "make_zero",
-      outPath,
-    ]);
+    await normalizeClipWithSilentAudio(segment, outPath, normalizeVf, trim);
   }
 }
 
@@ -398,6 +421,68 @@ function keptSegmentDurationSec(segment: ConcatSegmentInput): number {
   return 0;
 }
 
+function soundtrackEndSec(track: SoundtrackMixInput): number {
+  const kept = Math.max(0, track.trimEndSec - track.trimStartSec);
+  return Math.max(0, track.startAtSec) + kept;
+}
+
+/** Black 9:16 pad (optional silent AAC) matching merge normalize settings. */
+async function generateBlackPadClip(input: {
+  outPath: string;
+  durationSec: number;
+  quality: MergeExportQuality;
+  withSilentAudio: boolean;
+}): Promise<void> {
+  const duration = Math.max(0.05, input.durationSec);
+  const { width, height } = mergeExportSize(input.quality);
+  const args = [
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-y",
+    "-f",
+    "lavfi",
+    "-i",
+    `color=c=black:s=${width}x${height}:r=30:d=${duration.toFixed(3)}`,
+  ];
+  if (input.withSilentAudio) {
+    args.push(
+      "-f",
+      "lavfi",
+      "-i",
+      `anullsrc=channel_layout=stereo:sample_rate=44100:d=${duration.toFixed(3)}`,
+      "-map",
+      "0:v:0",
+      "-map",
+      "1:a:0",
+      "-c:a",
+      "aac",
+      "-ac",
+      "2",
+      "-ar",
+      "44100",
+    );
+  } else {
+    args.push("-an");
+  }
+  args.push(
+    "-c:v",
+    "libx264",
+    "-preset",
+    "veryfast",
+    "-crf",
+    "23",
+    "-pix_fmt",
+    "yuv420p",
+    "-t",
+    duration.toFixed(3),
+    "-movflags",
+    "+faststart",
+    input.outPath,
+  );
+  await runFfmpeg(args);
+}
+
 /**
  * Concatenate local video files into a single H.264 MP4.
  * Each input is optionally trimmed, then normalized to 9:16 at the chosen
@@ -427,6 +512,11 @@ export async function concatVideoSegments(input: {
   const soundtracks = (input.soundtracks ?? []).filter(
     (track) => track.absoluteSourcePath.trim().length > 0,
   );
+  const anyClipMuted = segments.some((segment) => segment.muted === true);
+  // Keep silent AAC on muted clips (and when mixing a soundtrack) so streams match
+  // for concat and soundtrack can overlay unmuted clip audio.
+  const keepSilentAudio =
+    soundtracks.length > 0 || (anyClipMuted && !stripAudio);
 
   if (segments.length < 2) {
     throw new VideoCutError("Need at least two clips to merge.");
@@ -458,11 +548,44 @@ export async function concatVideoSegments(input: {
     const partPaths: string[] = [];
     for (let i = 0; i < segments.length; i += 1) {
       const partPath = path.join(dir, `part-${String(i).padStart(3, "0")}.mp4`);
-      await normalizeClipForConcat(segments[i]!, partPath, {
-        stripAudio,
+      const segment = segments[i]!;
+      await normalizeClipForConcat(segment, partPath, {
+        stripAudio: stripAudio || segment.muted === true,
+        keepSilentAudio,
         quality,
       });
       partPaths.push(partPath);
+    }
+
+    const videoKeptSec = segments.reduce(
+      (sum, segment) => sum + keptSegmentDurationSec(segment),
+      0,
+    );
+    const audioExtentSec = soundtracks.reduce(
+      (max, track) => Math.max(max, soundtrackEndSec(track)),
+      0,
+    );
+    const compositionDurationSec = Math.max(
+      videoKeptSec,
+      audioExtentSec,
+      input.compositionDurationSec != null &&
+        Number.isFinite(input.compositionDurationSec) &&
+        input.compositionDurationSec > 0
+        ? input.compositionDurationSec
+        : 0,
+    );
+    const blackPadSec = Math.max(0, compositionDurationSec - videoKeptSec);
+
+    // Soundtrack past the last clip → append black video (silent AAC when needed).
+    if (blackPadSec > 0.04) {
+      const padPath = path.join(dir, "black-pad.mp4");
+      await generateBlackPadClip({
+        outPath: padPath,
+        durationSec: blackPadSec,
+        quality,
+        withSilentAudio: !stripAudio || keepSilentAudio,
+      });
+      partPaths.push(padPath);
     }
 
     const listBody = partPaths
@@ -490,15 +613,6 @@ export async function concatVideoSegments(input: {
 
     let finalPath = concatPath;
     if (soundtracks.length > 0) {
-      const compositionDurationSec =
-        input.compositionDurationSec != null &&
-        Number.isFinite(input.compositionDurationSec) &&
-        input.compositionDurationSec > 0
-          ? input.compositionDurationSec
-          : segments.reduce(
-              (sum, segment) => sum + keptSegmentDurationSec(segment),
-              0,
-            );
       if (!(compositionDurationSec > 0)) {
         throw new VideoCutError(
           "Could not determine composition duration for soundtrack mix.",
@@ -508,7 +622,8 @@ export async function concatVideoSegments(input: {
         videoPath: concatPath,
         outPath,
         videoDurationSec: compositionDurationSec,
-        videoHasAudio: !stripAudio,
+        // Silent AAC is still an audio stream — amix overlays soundtrack on it.
+        videoHasAudio: !stripAudio || keepSilentAudio,
         soundtracks,
       });
       finalPath = outPath;

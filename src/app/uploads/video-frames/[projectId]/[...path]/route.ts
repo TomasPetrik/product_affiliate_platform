@@ -55,15 +55,23 @@ export async function GET(_request: Request, context: RouteContext) {
     return new Response("Not found", { status: 404 });
   }
 
-  const absolutePath = path.join(videoFrameProjectDir(projectId), relative);
+  // Literal prefix keeps Turbopack NFT tracing scoped to this upload root.
+  const absolutePath = path.join(
+    process.cwd(),
+    "storage",
+    "uploads",
+    "video-frames",
+    projectId,
+    relative,
+  );
   const root = videoFrameProjectDir(projectId);
   if (!absolutePath.startsWith(root + path.sep) && absolutePath !== root) {
     return new Response("Not found", { status: 404 });
   }
 
   try {
-    await access(absolutePath);
-    const info = await stat(absolutePath);
+    await access(/* turbopackIgnore: true */ absolutePath);
+    const info = await stat(/* turbopackIgnore: true */ absolutePath);
     if (!info.isFile()) {
       return new Response("Not found", { status: 404 });
     }
@@ -73,7 +81,7 @@ export async function GET(_request: Request, context: RouteContext) {
 
   const ext = path.extname(absolutePath).toLowerCase();
   const contentType = CONTENT_TYPES[ext] ?? "application/octet-stream";
-  const bytes = await readFile(absolutePath);
+  const bytes = await readFile(/* turbopackIgnore: true */ absolutePath);
 
   return new Response(bytes, {
     status: 200,

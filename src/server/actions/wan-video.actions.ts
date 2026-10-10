@@ -121,7 +121,7 @@ async function frameAssetToWaveSpeedUrl(assetId: string): Promise<string> {
     throw new Error("Video frame path is invalid.");
   }
 
-  const bytes = await readFile(absolute);
+  const bytes = await readFile(/* turbopackIgnore: true */ absolute);
   if (bytes.byteLength > MAX_WAN_VIDEO_IMAGE_BYTES) {
     throw new Error(
       `Frame must be ${Math.round(MAX_WAN_VIDEO_IMAGE_BYTES / (1024 * 1024))}MB or smaller.`,

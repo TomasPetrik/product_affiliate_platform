@@ -58,7 +58,7 @@ export async function GET(_request: Request, context: RouteContext) {
 
   const ext = path.extname(fileName).toLowerCase();
   const contentType = CONTENT_TYPES[ext] ?? "application/octet-stream";
-  const bytes = await readFile(absolutePath);
+  const bytes = await readFile(/* turbopackIgnore: true */ absolutePath);
 
   return new Response(bytes, {
     status: 200,

@@ -14,11 +14,13 @@ import {
   CloudUpload,
   Download,
   Film,
+  ImagePlus,
   Loader2,
   Plus,
   ScrollText,
   Sparkles,
   Trash2,
+  Upload,
   X,
 } from "lucide-react";
 
@@ -45,8 +47,11 @@ import {
 } from "@/components/admin/video-frame-wan-video-edit-dialog";
 import {
   clampSpan,
+  createCustomSpan,
   createDefaultSpans,
   formatVideoTime,
+  isCustomSpan,
+  isSourceSpan,
   newSpanId,
   previewTimeKey,
   timestampsForSpan,
@@ -55,6 +60,7 @@ import {
   type ExtractedFrame,
   type FrameSpan,
 } from "@/lib/video-frames";
+import { MAX_VIDEO_FRAME_PROJECT_VIDEO_BYTES } from "@/lib/video-frame-project-paths";
 import { cn } from "@/lib/utils";
 import {
   DEFAULT_WAN_SIZE,
@@ -106,11 +112,14 @@ import {
 import { VideoFrameClipCompareDialog } from "@/components/admin/video-frame-clip-compare-dialog";
 import { VideoFrameMergerPanel } from "@/components/admin/video-frame-merger-panel";
 import {
+  deleteCustomSpanMediaAction,
   deleteVideoFrameEditAction,
+  saveCustomSpanFramesAction,
   saveVideoFrameClipAction,
   saveVideoFrameEditAction,
   saveVideoFrameProjectAction,
   saveVideoFrameProjectFramesAction,
+  uploadVideoFrameLocalClipAction,
 } from "@/server/actions/video-frame-project.actions";
 import type { VideoFrameProjectAssetDto } from "@/server/services/video-frame-project.service";
 import { pollWanImageEditAction } from "@/server/actions/wan-image-edit.actions";
@@ -519,6 +528,117 @@ function spanClipCandidates(input: {
   });
 }
 
+/** Build Wan/Krea candidates from FRAME assets attached to a custom span. */
+function customSpanClipCandidates(
+  spanId: string,
+  assets: VideoFrameProjectDetail["assets"],
+): SpanClipFrameCandidate[] {
+  const frames = assets
+    .filter((asset) => asset.kind === "FRAME" && asset.spanId === spanId)
+    .sort(
+      (a, b) =>
+        (a.frameIndex ?? 0) - (b.frameIndex ?? 0) || a.timeSec - b.timeSec,
+    );
+  return frames.map((frame, frameIndex) => {
+    const editedAsset = findAssetNearTime(assets, frame.timeSec, "EDITED");
+    const label =
+      frameIndex === 0
+        ? "First"
+        : frameIndex === frames.length - 1
+          ? "Last"
+          : `#${frameIndex + 1}`;
+    return {
+      time: frame.timeSec,
+      label,
+      thumbUrl: editedAsset?.path ?? frame.path,
+      originalThumbUrl: frame.path,
+      editedUrl: editedAsset?.path ?? null,
+      editedAssetId: editedAsset?.id ?? null,
+      frameAssetId: frame.id,
+    };
+  });
+}
+
+const ACCEPT_CUSTOM_IMAGES =
+  "image/jpeg,image/png,image/webp,image/gif,image/avif,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.gif,.avif,.heic,.heif";
+const ACCEPT_CUSTOM_VIDEO =
+  "video/mp4,video/webm,video/quicktime,video/x-m4v,.mp4,.webm,.mov,.m4v";
+const ACCEPT_CUSTOM_MEDIA = `${ACCEPT_CUSTOM_IMAGES},${ACCEPT_CUSTOM_VIDEO}`;
+const CUSTOM_SPAN_MAX_IMAGES = 10;
+const CUSTOM_SPAN_SAMPLE_FRAMES = 4;
+
+function isImageFile(file: File): boolean {
+  if (
+    file.type === "image/jpeg" ||
+    file.type === "image/png" ||
+    file.type === "image/webp" ||
+    file.type === "image/gif" ||
+    file.type === "image/avif" ||
+    file.type === "image/heic" ||
+    file.type === "image/heif"
+  ) {
+    return true;
+  }
+  if (file.type.startsWith("image/")) return true;
+  return /\.(jpe?g|png|webp|gif|avif|heic|heif)$/i.test(file.name);
+}
+
+function isVideoFile(file: File): boolean {
+  if (file.type.startsWith("video/")) return true;
+  return /\.(mp4|webm|mov|m4v)$/i.test(file.name);
+}
+
+function hasFileDrag(event: { dataTransfer: DataTransfer | null }): boolean {
+  return Boolean(
+    event.dataTransfer &&
+      Array.from(event.dataTransfer.types).includes("Files"),
+  );
+}
+
+async function sampleFramesFromVideoFile(
+  file: File,
+  count: number,
+): Promise<Array<{ blob: Blob; timeSec: number; width: number; height: number }>> {
+  const url = URL.createObjectURL(file);
+  try {
+    const video = document.createElement("video");
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = "auto";
+    video.src = url;
+    await new Promise<void>((resolve, reject) => {
+      video.onloadedmetadata = () => resolve();
+      video.onerror = () => reject(new Error("Could not load video."));
+    });
+    const duration = video.duration;
+    if (!Number.isFinite(duration) || duration <= 0) {
+      throw new Error("Invalid video duration.");
+    }
+    const times = timestampsForSpan(0, duration, Math.max(1, count));
+    const canvas = document.createElement("canvas");
+    const results: Array<{
+      blob: Blob;
+      timeSec: number;
+      width: number;
+      height: number;
+    }> = [];
+    for (const time of times) {
+      const blob = await captureFrameBlob(video, canvas, time, {
+        quality: JPEG_QUALITY,
+      });
+      results.push({
+        blob,
+        timeSec: time,
+        width: canvas.width,
+        height: canvas.height,
+      });
+    }
+    return results;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 export function VideoFrameExtractPanel({
   project,
   waveSpeedConfigured = false,
@@ -624,6 +744,18 @@ export function VideoFrameExtractPanel({
   const [mergerAudioAssets, setMergerAudioAssets] = useState<
     VideoFrameProjectAssetDto[]
   >(() => audioFromProject(project));
+  const [projectAssets, setProjectAssets] = useState<VideoFrameProjectAssetDto[]>(
+    () => project.assets,
+  );
+  const [customSpanImportingId, setCustomSpanImportingId] = useState<string | null>(
+    null,
+  );
+  const [customSpanDropOverId, setCustomSpanDropOverId] = useState<string | null>(
+    null,
+  );
+  const customImageInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const customVideoInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const customMediaInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const [clipLightbox, setClipLightbox] = useState<VideoFrameProjectAssetDto | null>(
     null,
   );
@@ -662,7 +794,21 @@ export function VideoFrameExtractPanel({
     setSpanClips(clipsFromProject(project));
     setMergedClips(mergesFromProject(project));
     setMergerAudioAssets(audioFromProject(project));
+    setProjectAssets(project.assets);
   }, [project]);
+
+  function applyProjectDetail(detail: VideoFrameProjectDetail) {
+    setProjectAssets(detail.assets);
+    setFrames(framesFromProject(detail));
+    setSpanClips(clipsFromProject(detail));
+    setMergedClips(mergesFromProject(detail));
+    setMergerAudioAssets(audioFromProject(detail));
+    if (detail.spans.length > 0) {
+      setSpans(detail.spans);
+      spansRef.current = detail.spans;
+      setCommittedSpans(detail.spans);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -1870,12 +2016,23 @@ export function VideoFrameExtractPanel({
   function buildSpanClipCandidates(exportTimes: number[]): SpanClipFrameCandidate[] | null {
     const candidates = spanClipCandidates({
       exportTimes,
-      assets: project.assets,
+      assets: projectAssets,
       editedUrls,
       previewUrls,
     });
     if (candidates.length === 0) {
       setError("This span has no planned frames to generate a clip from.");
+      return null;
+    }
+    return candidates;
+  }
+
+  function buildCustomSpanClipCandidates(
+    spanId: string,
+  ): SpanClipFrameCandidate[] | null {
+    const candidates = customSpanClipCandidates(spanId, projectAssets);
+    if (candidates.length === 0) {
+      setError("Import images or a short video into this custom span first.");
       return null;
     }
     return candidates;
@@ -1888,7 +2045,11 @@ export function VideoFrameExtractPanel({
   }
 
   function openWanClip(spanId: string, spanIndex: number, exportTimes: number[]) {
-    const candidates = buildSpanClipCandidates(exportTimes);
+    const span = spans.find((item) => item.id === spanId);
+    const candidates =
+      span && isCustomSpan(span)
+        ? buildCustomSpanClipCandidates(spanId)
+        : buildSpanClipCandidates(exportTimes);
     if (!candidates) return;
     setWanClip({ spanId, spanIndex, candidates });
   }
@@ -1898,6 +2059,13 @@ export function VideoFrameExtractPanel({
     spanIndex: number,
     exportTimes: number[],
   ) {
+    const span = spans.find((item) => item.id === spanId);
+    if (span && isCustomSpan(span)) {
+      setError(
+        "Wan video edit uses the project source cut. Use Wan clip for custom spans (images / short video).",
+      );
+      return;
+    }
     const candidates = buildSpanClipCandidates(exportTimes);
     if (!candidates) return;
     const ordered = [...exportTimes].sort((a, b) => a - b);
@@ -2300,13 +2468,29 @@ export function VideoFrameExtractPanel({
     if (duration <= 0) {
       return;
     }
-    const last = spans[spans.length - 1];
-    const start = last ? Math.min(duration, last.end) : 0;
+    const lastSource = [...spans].reverse().find((span) => isSourceSpan(span));
+    const start = lastSource ? Math.min(duration, lastSource.end) : 0;
     const end = Math.min(duration, start + Math.max(1, duration / 4));
     const nextSpan = clampSpan(
-      { id: newSpanId(), start, end: Math.max(start + 0.1, end), frameCount: 4 },
+      {
+        id: newSpanId(),
+        kind: "source",
+        start,
+        end: Math.max(start + 0.1, end),
+        frameCount: 4,
+      },
       duration,
     );
+    setSpans((prev) => {
+      const next = [...prev, nextSpan];
+      spansRef.current = next;
+      setCommittedSpans(next);
+      return next;
+    });
+  }
+
+  function addCustomSpan() {
+    const nextSpan = createCustomSpan(`Custom ${spans.filter(isCustomSpan).length + 1}`);
     setSpans((prev) => {
       const next = [...prev, nextSpan];
       spansRef.current = next;
@@ -2322,6 +2506,195 @@ export function VideoFrameExtractPanel({
       setCommittedSpans(next);
       return next;
     });
+  }
+
+  async function importCustomSpanMedia(spanId: string, files: File[]) {
+    const videos = files.filter(isVideoFile);
+    const images = files.filter(isImageFile);
+    if (videos.length > 0) {
+      await importCustomSpanVideo(spanId, videos[0]!);
+      return;
+    }
+    if (images.length > 0) {
+      await importCustomSpanImages(spanId, images);
+      return;
+    }
+    setError(
+      "Drop JPG, PNG, WebP, GIF, AVIF images, or an MP4/WebM/MOV video.",
+    );
+  }
+
+  async function deleteCustomSpanFrame(spanId: string, frameAssetId: string) {
+    setCustomSpanImportingId(spanId);
+    setError(null);
+    try {
+      const result = await deleteCustomSpanMediaAction({
+        projectId: project.id,
+        spanId,
+        frameAssetIds: [frameAssetId],
+      });
+      if (result.error || !result.project) {
+        setError(result.error ?? "Failed to delete image.");
+        return;
+      }
+      applyProjectDetail(result.project);
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete image.");
+    } finally {
+      setCustomSpanImportingId(null);
+    }
+  }
+
+  async function deleteCustomSpanSourceVideo(spanId: string) {
+    setCustomSpanImportingId(spanId);
+    setError(null);
+    try {
+      const result = await deleteCustomSpanMediaAction({
+        projectId: project.id,
+        spanId,
+        deleteSourceVideo: true,
+      });
+      if (result.error || !result.project) {
+        setError(result.error ?? "Failed to delete video.");
+        return;
+      }
+      applyProjectDetail(result.project);
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete video.");
+    } finally {
+      setCustomSpanImportingId(null);
+    }
+  }
+
+  async function clearCustomSpanMedia(spanId: string) {
+    setCustomSpanImportingId(spanId);
+    setError(null);
+    try {
+      const result = await deleteCustomSpanMediaAction({
+        projectId: project.id,
+        spanId,
+        clearFrames: true,
+        deleteSourceVideo: true,
+      });
+      if (result.error || !result.project) {
+        setError(result.error ?? "Failed to clear media.");
+        return;
+      }
+      applyProjectDetail(result.project);
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to clear media.");
+    } finally {
+      setCustomSpanImportingId(null);
+    }
+  }
+
+  async function importCustomSpanImages(spanId: string, files: File[]) {
+    const images = files.filter(isImageFile).slice(0, CUSTOM_SPAN_MAX_IMAGES);
+    if (images.length === 0) {
+      setError("Choose JPG, PNG, WebP, GIF, or AVIF images.");
+      return;
+    }
+    setCustomSpanImportingId(spanId);
+    setError(null);
+    try {
+      const formData = new FormData();
+      formData.set("projectId", project.id);
+      formData.set("spanId", spanId);
+      const meta = images.map((file, index) => ({
+        spanId,
+        frameIndex: index,
+        timeSec: index,
+        fileName: file.name || `custom-${index + 1}.jpg`,
+      }));
+      formData.set("framesMeta", JSON.stringify(meta));
+      for (const file of images) {
+        formData.append("frameFiles", file, file.name);
+      }
+      const saved = await saveCustomSpanFramesAction(formData);
+      if (saved.error || !saved.project) {
+        setError(saved.error ?? "Failed to import images.");
+        return;
+      }
+      applyProjectDetail(saved.project);
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to import images.");
+    } finally {
+      setCustomSpanImportingId(null);
+    }
+  }
+
+  async function importCustomSpanVideo(spanId: string, file: File) {
+    if (!isVideoFile(file)) {
+      setError("Choose an MP4, WebM, or MOV video.");
+      return;
+    }
+    if (file.size > MAX_VIDEO_FRAME_PROJECT_VIDEO_BYTES) {
+      setError(
+        `Video must be ${Math.round(MAX_VIDEO_FRAME_PROJECT_VIDEO_BYTES / (1024 * 1024))}MB or smaller.`,
+      );
+      return;
+    }
+    setCustomSpanImportingId(spanId);
+    setError(null);
+    try {
+      const clipForm = new FormData();
+      clipForm.set("projectId", project.id);
+      clipForm.set("spanId", spanId);
+      clipForm.set("video", file);
+      const clipSaved = await uploadVideoFrameLocalClipAction(clipForm);
+      if (clipSaved.error || !clipSaved.project) {
+        setError(clipSaved.error ?? "Failed to upload video.");
+        return;
+      }
+
+      const sampled = await sampleFramesFromVideoFile(
+        file,
+        CUSTOM_SPAN_SAMPLE_FRAMES,
+      );
+      if (sampled.length === 0) {
+        setError("Could not sample frames from that video.");
+        applyProjectDetail(clipSaved.project);
+        return;
+      }
+
+      const formData = new FormData();
+      formData.set("projectId", project.id);
+      formData.set("spanId", spanId);
+      const meta = sampled.map((frame, index) => ({
+        spanId,
+        frameIndex: index,
+        timeSec: frame.timeSec,
+        fileName: `custom-video-${String(index + 1).padStart(2, "0")}.jpg`,
+        width: frame.width,
+        height: frame.height,
+      }));
+      formData.set("framesMeta", JSON.stringify(meta));
+      for (const frame of sampled) {
+        formData.append(
+          "frameFiles",
+          frame.blob,
+          `custom-video-${String(sampled.indexOf(frame) + 1).padStart(2, "0")}.jpg`,
+        );
+      }
+      const saved = await saveCustomSpanFramesAction(formData);
+      if (saved.error || !saved.project) {
+        setError(saved.error ?? "Failed to sample frames from video.");
+        applyProjectDetail(clipSaved.project);
+        return;
+      }
+      applyProjectDetail(saved.project);
+      router.refresh();
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to import short video.",
+      );
+    } finally {
+      setCustomSpanImportingId(null);
+    }
   }
 
   // Autosave name + committed spans (+ video metadata once known).
@@ -2368,15 +2741,20 @@ export function VideoFrameExtractPanel({
     router,
   ]);
 
-  const timelineSpans = spans;
-  const plannedMarks = committedSpans.flatMap((span, spanIndex) =>
-    timestampsForSpan(span.start, span.end, span.frameCount).map((time, index) => ({
-      spanId: span.id,
-      spanIndex,
-      index,
-      time,
-    })),
-  );
+  const timelineSpans = spans.filter(isSourceSpan);
+  const plannedMarks = committedSpans
+    .filter(isSourceSpan)
+    .flatMap((span) => {
+      const spanIndex = committedSpans.findIndex((item) => item.id === span.id);
+      return timestampsForSpan(span.start, span.end, span.frameCount).map(
+        (time, index) => ({
+          spanId: span.id,
+          spanIndex: spanIndex >= 0 ? spanIndex : 0,
+          index,
+          time,
+        }),
+      );
+    });
 
   // Live first/last boundary frames while dragging (especially last frame above end slider).
   useEffect(() => {
@@ -2396,7 +2774,9 @@ export function VideoFrameExtractPanel({
     liveGenerationRef.current = generation;
 
     const timer = window.setTimeout(() => {
-      const boundaryTimes = spans.flatMap((span) => [span.start, span.end]);
+      const boundaryTimes = spans
+        .filter(isSourceSpan)
+        .flatMap((span) => [span.start, span.end]);
       ensurePreviewTimes(boundaryTimes, {
         generation,
         generationRef: liveGenerationRef,
@@ -2437,7 +2817,9 @@ export function VideoFrameExtractPanel({
     prunePreviewCache(
       [
         ...neededTimes,
-        ...spansRef.current.flatMap((span) => [span.start, span.end]),
+        ...spansRef.current
+          .filter(isSourceSpan)
+          .flatMap((span) => [span.start, span.end]),
       ],
       previewCacheRef,
       setPreviewUrls,
@@ -2459,24 +2841,25 @@ export function VideoFrameExtractPanel({
   const extractFrames = useCallback(async () => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
-    const activeSpans = committedSpans;
+    const activeSpans = committedSpans.filter(isSourceSpan);
     if (!video || !canvas || duration <= 0 || activeSpans.length === 0) {
       return;
     }
 
-    const jobs = activeSpans.flatMap((span, spanIndex) => {
+    const jobs = activeSpans.flatMap((span) => {
+      const spanIndex = committedSpans.findIndex((item) => item.id === span.id);
       const times = timestampsForSpan(span.start, span.end, span.frameCount);
       return times.map((time, index) => ({
         span,
-        spanIndex,
+        spanIndex: spanIndex >= 0 ? spanIndex : 0,
         index,
         time,
-        filename: `frame-s${String(spanIndex + 1).padStart(2, "0")}-${String(index + 1).padStart(3, "0")}-${formatVideoTime(time).replace(":", "m").replace(".", "s")}.jpg`,
+        filename: `frame-s${String((spanIndex >= 0 ? spanIndex : 0) + 1).padStart(2, "0")}-${String(index + 1).padStart(3, "0")}-${formatVideoTime(time).replace(":", "m").replace(".", "s")}.jpg`,
       }));
     });
 
     if (jobs.length === 0) {
-      setError("Add at least one span with a frame count.");
+      setError("Add at least one source span with a frame count.");
       return;
     }
 
@@ -2567,7 +2950,7 @@ export function VideoFrameExtractPanel({
     }
   }, [duration, committedSpans, project.id, router]);
 
-  const plannedTotal = totalFrameCount(committedSpans);
+  const plannedTotal = totalFrameCount(committedSpans.filter(isSourceSpan));
 
   return (
     <div className="flex flex-col gap-6">
@@ -2663,13 +3046,32 @@ export function VideoFrameExtractPanel({
             <div>
               <CardTitle className="text-base">Frame spans</CardTitle>
               <p className="mt-1 text-sm text-muted-foreground">
-                One range slider per span (start + end thumbs). Export preview updates on release.
+                Source spans use the timeline. Custom spans import images or a short
+                video for Wan clip.
               </p>
             </div>
-            <Button type="button" variant="outline" size="sm" className="gap-1.5" onClick={addSpan}>
-              <Plus className="h-3.5 w-3.5" />
-              Add span
-            </Button>
+            <div className="flex shrink-0 flex-wrap gap-1.5">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                onClick={addSpan}
+              >
+                <Plus className="h-3.5 w-3.5" />
+                Add span
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                onClick={addCustomSpan}
+              >
+                <ImagePlus className="h-3.5 w-3.5" />
+                Custom span
+              </Button>
+            </div>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
             <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
@@ -2710,15 +3112,31 @@ export function VideoFrameExtractPanel({
 
             <div className="flex flex-col gap-3">
               {spans.map((span, index) => {
+                const custom = isCustomSpan(span);
                 const committed =
                   committedSpans.find((item) => item.id === span.id) ?? span;
-                const exportTimes = timestampsForSpan(
-                  committed.start,
-                  committed.end,
-                  committed.frameCount,
-                );
+                const customFrames = custom
+                  ? customSpanClipCandidates(span.id, projectAssets)
+                  : [];
+                const exportTimes = custom
+                  ? customFrames.map((frame) => frame.time)
+                  : timestampsForSpan(
+                      committed.start,
+                      committed.end,
+                      committed.frameCount,
+                    );
                 const startKey = previewTimeKey(span.start);
                 const endKey = previewTimeKey(span.end);
+                const importing = customSpanImportingId === span.id;
+                const spanClip = projectAssets.find(
+                  (asset) =>
+                    asset.kind === "CLIP" &&
+                    asset.spanId === span.id &&
+                    asset.fileName.startsWith("clip-local-"),
+                );
+                const wanReady = custom
+                  ? customFrames.length > 0
+                  : exportTimes.length > 0;
 
                 return (
                   <div
@@ -2733,23 +3151,31 @@ export function VideoFrameExtractPanel({
                             SPAN_COLORS[index % SPAN_COLORS.length],
                           )}
                         />
-                        <p className="text-sm font-medium">Span {index + 1}</p>
+                        <p className="text-sm font-medium">
+                          {custom
+                            ? span.label?.trim() || `Custom ${index + 1}`
+                            : `Span ${index + 1}`}
+                        </p>
                         <p className="truncate text-xs text-muted-foreground">
-                          {formatVideoTime(span.start)} – {formatVideoTime(span.end)}
+                          {custom
+                            ? `${customFrames.length} image${customFrames.length === 1 ? "" : "s"}${spanClip ? " · video" : ""}`
+                            : `${formatVideoTime(span.start)} – ${formatVideoTime(span.end)}`}
                         </p>
                       </div>
                       <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="gap-1.5"
-                          disabled={extracting || exportTimes.length === 0}
-                          onClick={() => openKreaClip(index, exportTimes)}
-                        >
-                          <Clapperboard className="size-3.5" />
-                          Krea clip
-                        </Button>
+                        {!custom ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="gap-1.5"
+                            disabled={extracting || !wanReady}
+                            onClick={() => openKreaClip(index, exportTimes)}
+                          >
+                            <Clapperboard className="size-3.5" />
+                            Krea clip
+                          </Button>
+                        ) : null}
                         {(() => {
                           const clipJob = wanClipJobs[span.id];
                           const clipBusy =
@@ -2770,7 +3196,9 @@ export function VideoFrameExtractPanel({
                                 variant="outline"
                                 size="sm"
                                 className="gap-1.5"
-                                disabled={extracting || exportTimes.length === 0}
+                                disabled={
+                                  extracting || importing || !wanReady
+                                }
                                 onClick={() =>
                                   openWanClip(span.id, index, exportTimes)
                                 }
@@ -2786,27 +3214,29 @@ export function VideoFrameExtractPanel({
                                     ? "Wan clip · retry"
                                     : "Wan clip"}
                               </Button>
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                className="gap-1.5"
-                                disabled={extracting || exportTimes.length === 0}
-                                onClick={() =>
-                                  openWanVideoEdit(span.id, index, exportTimes)
-                                }
-                              >
-                                {editBusy ? (
-                                  <Loader2 className="size-3.5 animate-spin" />
-                                ) : (
-                                  <Clapperboard className="size-3.5" />
-                                )}
-                                {editBusy
-                                  ? `Edit ${editJob.progress}%`
-                                  : editJob?.phase === "failed"
-                                    ? "Wan edit · retry"
-                                    : "Wan video edit"}
-                              </Button>
+                              {!custom ? (
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  className="gap-1.5"
+                                  disabled={extracting || !wanReady}
+                                  onClick={() =>
+                                    openWanVideoEdit(span.id, index, exportTimes)
+                                  }
+                                >
+                                  {editBusy ? (
+                                    <Loader2 className="size-3.5 animate-spin" />
+                                  ) : (
+                                    <Clapperboard className="size-3.5" />
+                                  )}
+                                  {editBusy
+                                    ? `Edit ${editJob.progress}%`
+                                    : editJob?.phase === "failed"
+                                      ? "Wan edit · retry"
+                                      : "Wan video edit"}
+                                </Button>
+                              ) : null}
                             </>
                           );
                         })()}
@@ -2815,7 +3245,7 @@ export function VideoFrameExtractPanel({
                           variant="ghost"
                           size="icon-sm"
                           aria-label={`Remove span ${index + 1}`}
-                          disabled={spans.length <= 1}
+                          disabled={spans.length <= 1 || importing}
                           onClick={() => removeSpan(span.id)}
                         >
                           <Trash2 className="size-4" />
@@ -2823,6 +3253,292 @@ export function VideoFrameExtractPanel({
                       </div>
                     </div>
 
+                    {custom ? (
+                      <div className="grid gap-3">
+                        <p className="text-xs text-muted-foreground">
+                          Import up to {CUSTOM_SPAN_MAX_IMAGES} images (JPG, PNG,
+                          WebP, GIF, AVIF), or a short video (we sample{" "}
+                          {CUSTOM_SPAN_SAMPLE_FRAMES} frames). Drag & drop or use
+                          the buttons, then run Wan clip.
+                        </p>
+                        <div
+                          className={cn(
+                            "grid gap-2 rounded-lg border border-dashed p-3 transition-colors",
+                            customSpanDropOverId === span.id
+                              ? "border-primary bg-primary/5"
+                              : "border-border bg-background/40",
+                          )}
+                          onDragEnter={(event) => {
+                            if (!hasFileDrag(event) || importing || extracting) {
+                              return;
+                            }
+                            event.preventDefault();
+                            setCustomSpanDropOverId(span.id);
+                          }}
+                          onDragOver={(event) => {
+                            if (!hasFileDrag(event) || importing || extracting) {
+                              return;
+                            }
+                            event.preventDefault();
+                            event.dataTransfer.dropEffect = "copy";
+                            if (customSpanDropOverId !== span.id) {
+                              setCustomSpanDropOverId(span.id);
+                            }
+                          }}
+                          onDragLeave={(event) => {
+                            if (
+                              event.currentTarget.contains(
+                                event.relatedTarget as Node | null,
+                              )
+                            ) {
+                              return;
+                            }
+                            if (customSpanDropOverId === span.id) {
+                              setCustomSpanDropOverId(null);
+                            }
+                          }}
+                          onDrop={(event) => {
+                            event.preventDefault();
+                            setCustomSpanDropOverId(null);
+                            if (importing || extracting) return;
+                            const files = Array.from(
+                              event.dataTransfer.files ?? [],
+                            );
+                            if (files.length > 0) {
+                              void importCustomSpanMedia(span.id, files);
+                            }
+                          }}
+                        >
+                          <p className="text-center text-[11px] text-muted-foreground">
+                            {customSpanDropOverId === span.id
+                              ? "Drop images or a short video…"
+                              : "Drop images or a short video here"}
+                          </p>
+                          <div className="flex flex-wrap justify-center gap-2">
+                          <input
+                            ref={(el) => {
+                              customImageInputRefs.current[span.id] = el;
+                            }}
+                            type="file"
+                            accept={ACCEPT_CUSTOM_IMAGES}
+                            multiple
+                            className="hidden"
+                            onChange={(event) => {
+                              const files = Array.from(event.target.files ?? []);
+                              event.target.value = "";
+                              if (files.length > 0) {
+                                void importCustomSpanImages(span.id, files);
+                              }
+                            }}
+                          />
+                          <input
+                            ref={(el) => {
+                              customVideoInputRefs.current[span.id] = el;
+                            }}
+                            type="file"
+                            accept={ACCEPT_CUSTOM_VIDEO}
+                            className="hidden"
+                            onChange={(event) => {
+                              const file = event.target.files?.[0];
+                              event.target.value = "";
+                              if (file) void importCustomSpanVideo(span.id, file);
+                            }}
+                          />
+                          <input
+                            ref={(el) => {
+                              customMediaInputRefs.current[span.id] = el;
+                            }}
+                            type="file"
+                            accept={ACCEPT_CUSTOM_MEDIA}
+                            multiple
+                            className="hidden"
+                            onChange={(event) => {
+                              const files = Array.from(event.target.files ?? []);
+                              event.target.value = "";
+                              if (files.length > 0) {
+                                void importCustomSpanMedia(span.id, files);
+                              }
+                            }}
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="gap-1.5"
+                            disabled={importing || extracting}
+                            onClick={() =>
+                              customImageInputRefs.current[span.id]?.click()
+                            }
+                          >
+                            {importing ? (
+                              <Loader2 className="size-3.5 animate-spin" />
+                            ) : (
+                              <ImagePlus className="size-3.5" />
+                            )}
+                            Import images
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="gap-1.5"
+                            disabled={importing || extracting}
+                            onClick={() =>
+                              customVideoInputRefs.current[span.id]?.click()
+                            }
+                          >
+                            {importing ? (
+                              <Loader2 className="size-3.5 animate-spin" />
+                            ) : (
+                              <Upload className="size-3.5" />
+                            )}
+                            Import short video
+                          </Button>
+                          {customFrames.length > 0 || spanClip ? (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="gap-1.5 text-destructive hover:text-destructive"
+                              disabled={importing || extracting}
+                              onClick={() =>
+                                void clearCustomSpanMedia(span.id)
+                              }
+                            >
+                              <Trash2 className="size-3.5" />
+                              Clear media
+                            </Button>
+                          ) : null}
+                          </div>
+                        </div>
+                        {spanClip ? (
+                          <div className="relative w-fit max-w-full">
+                            <video
+                              src={spanClip.path}
+                              muted
+                              playsInline
+                              controls
+                              preload="metadata"
+                              className="max-h-40 w-auto rounded-lg bg-black ring-1 ring-border"
+                            />
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              size="icon-sm"
+                              className="absolute right-1.5 top-1.5 bg-background/90 shadow"
+                              disabled={importing || extracting}
+                              aria-label="Delete imported video"
+                              onClick={() =>
+                                void deleteCustomSpanSourceVideo(span.id)
+                              }
+                            >
+                              <Trash2 className="size-3.5" />
+                            </Button>
+                          </div>
+                        ) : null}
+                        <div className="flex items-end gap-1.5 overflow-x-auto pb-0.5">
+                          {customFrames.length === 0 ? (
+                            <p className="text-xs text-muted-foreground">
+                              No images yet.
+                            </p>
+                          ) : (
+                            customFrames.map((frame) => (
+                              <div
+                                key={`${span.id}-${frame.frameAssetId ?? frame.time}`}
+                                className="relative flex shrink-0 flex-col items-center gap-1"
+                              >
+                                <button
+                                  type="button"
+                                  className="block"
+                                  onClick={() => {
+                                    if (frame.thumbUrl) {
+                                      setLightbox({
+                                        label: frame.label,
+                                        time: frame.time,
+                                        url: frame.thumbUrl,
+                                      });
+                                    }
+                                  }}
+                                >
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                  <img
+                                    src={frame.thumbUrl ?? ""}
+                                    alt={frame.label}
+                                    className="h-24 w-auto rounded-md bg-muted object-cover ring-1 ring-border"
+                                  />
+                                </button>
+                                {frame.frameAssetId ? (
+                                  <Button
+                                    type="button"
+                                    variant="secondary"
+                                    size="icon-sm"
+                                    className="absolute right-0.5 top-0.5 h-6 w-6 bg-background/90 shadow"
+                                    disabled={importing || extracting}
+                                    aria-label={`Delete ${frame.label}`}
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      void deleteCustomSpanFrame(
+                                        span.id,
+                                        frame.frameAssetId!,
+                                      );
+                                    }}
+                                  >
+                                    <X className="size-3" />
+                                  </Button>
+                                ) : null}
+                                <span className="text-[10px] text-muted-foreground">
+                                  {frame.label}
+                                </span>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                        {(() => {
+                          const clipsForSpan = spanClips.filter(
+                            (clip) =>
+                              clip.spanId === span.id &&
+                              !clip.fileName.startsWith("clip-local-"),
+                          );
+                          if (clipsForSpan.length === 0) return null;
+                          return (
+                            <div className="grid gap-2 border-t border-border pt-3">
+                              <p className="text-xs font-medium text-muted-foreground">
+                                Generated clips ({clipsForSpan.length})
+                              </p>
+                              <ul className="grid gap-2">
+                                {clipsForSpan.map((clip) => (
+                                  <li
+                                    key={clip.id}
+                                    className="flex flex-wrap items-center gap-3 rounded-lg border bg-background/80 p-2"
+                                  >
+                                    <video
+                                      src={clip.path}
+                                      muted
+                                      playsInline
+                                      preload="metadata"
+                                      className="aspect-[9/16] h-24 w-auto rounded-md bg-black object-cover ring-1 ring-border"
+                                    />
+                                    <div className="min-w-0 flex-1">
+                                      <p className="truncate text-sm font-medium">
+                                        {clip.fileName}
+                                      </p>
+                                    </div>
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => openClipLightbox(clip)}
+                                    >
+                                      Open
+                                    </Button>
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    ) : (
                     <div className="grid gap-4 lg:grid-cols-2">
                       <div className="flex min-w-0 flex-col gap-3">
                         <DualRangeScrubber
@@ -3242,6 +3958,7 @@ export function VideoFrameExtractPanel({
                         })()}
                       </div>
                     </div>
+                    )}
                   </div>
                 );
               })}

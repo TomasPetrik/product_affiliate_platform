@@ -1,9 +1,24 @@
+/** source = range on project video; custom = imported images / short video. */
+export type FrameSpanKind = "source" | "custom";
+
 /** Time span with how many frames to sample (first + last always included when count ≥ 2). */
 export interface FrameSpan {
   id: string;
   start: number;
   end: number;
   frameCount: number;
+  /** Defaults to "source" when omitted (back-compat with older projects). */
+  kind?: FrameSpanKind;
+  /** Optional display name (custom spans). */
+  label?: string;
+}
+
+export function isCustomSpan(span: FrameSpan): boolean {
+  return span.kind === "custom";
+}
+
+export function isSourceSpan(span: FrameSpan): boolean {
+  return !isCustomSpan(span);
 }
 
 export interface ExtractedFrame {
@@ -140,6 +155,7 @@ export function createDefaultSpans(duration: number): FrameSpan[] {
   return [
     {
       id: newSpanId(),
+      kind: "source",
       start: 0,
       end: duration,
       frameCount: 4,
@@ -147,11 +163,41 @@ export function createDefaultSpans(duration: number): FrameSpan[] {
   ];
 }
 
+export function createCustomSpan(label?: string): FrameSpan {
+  return {
+    id: newSpanId(),
+    kind: "custom",
+    start: 0,
+    end: 0,
+    frameCount: 1,
+    label: label?.trim() || "Custom",
+  };
+}
+
 export function totalFrameCount(spans: FrameSpan[]): number {
   return spans.reduce((sum, span) => sum + Math.max(0, Math.floor(span.frameCount)), 0);
 }
 
 export function clampSpan(span: FrameSpan, duration: number): FrameSpan {
+  const frameCount = Math.max(1, Math.min(120, Math.floor(span.frameCount) || 1));
+  const label =
+    typeof span.label === "string" && span.label.trim()
+      ? span.label.trim().slice(0, 80)
+      : undefined;
+
+  if (span.kind === "custom") {
+    const start = Math.max(0, Number.isFinite(span.start) ? span.start : 0);
+    const end = Math.max(start, Number.isFinite(span.end) ? span.end : start);
+    return {
+      ...span,
+      kind: "custom",
+      start,
+      end,
+      frameCount,
+      ...(label ? { label } : {}),
+    };
+  }
+
   const safeDuration = Number.isFinite(duration) && duration > 0 ? duration : 0;
   const rawStart = Number.isFinite(span.start) ? span.start : 0;
   const rawEnd = Number.isFinite(span.end) ? span.end : rawStart;
@@ -159,9 +205,11 @@ export function clampSpan(span: FrameSpan, duration: number): FrameSpan {
   const end = Math.min(Math.max(start, rawEnd), safeDuration);
   return {
     ...span,
+    kind: span.kind === "source" ? "source" : undefined,
     start,
     end,
-    frameCount: Math.max(1, Math.min(120, Math.floor(span.frameCount) || 1)),
+    frameCount,
+    ...(label ? { label } : {}),
   };
 }
 
@@ -178,6 +226,7 @@ export function uniquePreviewTimes(spans: FrameSpan[], step = 0.1): number[] {
   const seen = new Set<string>();
   const times: number[] = [];
   for (const span of spans) {
+    if (isCustomSpan(span)) continue;
     for (const time of timestampsForSpan(span.start, span.end, span.frameCount)) {
       const key = previewTimeKey(time, step);
       if (seen.has(key)) {

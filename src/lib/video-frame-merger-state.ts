@@ -12,6 +12,8 @@ export interface VideoFrameMergerSegmentState {
   trimStartSec: number;
   trimEndSec: number;
   durationSec: number;
+  /** When true, this clip's audio is silenced in the merge (soundtrack can still overlay). */
+  muted?: boolean;
 }
 
 /** Soundtrack placed on composition time (move via startAtSec, trim like video). */
@@ -77,6 +79,7 @@ function parseSegment(value: unknown): VideoFrameMergerSegmentState | null {
     trimStartSec: Math.max(0, trimStartSec),
     trimEndSec: Math.min(durationSec, Math.max(trimStartSec + MIN_TRIM_SEC, trimEndSec)),
     durationSec,
+    ...(value.muted === true ? { muted: true } : {}),
   };
 }
 

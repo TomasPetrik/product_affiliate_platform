@@ -9,7 +9,9 @@ import {
   deleteVideoFrameEdit,
   deleteVideoFrameProject,
   getVideoFrameProject,
+  deleteCustomSpanMedia,
   mergeVideoFrameClips,
+  replaceCustomSpanFrames,
   replaceVideoFrameProjectFrames,
   saveVideoFrameClip,
   saveVideoFrameEdit,
@@ -169,6 +171,124 @@ export async function saveVideoFrameProjectFramesAction(
   return { ok: true, project: result };
 }
 
+export async function saveCustomSpanFramesAction(
+  formData: FormData,
+): Promise<VideoFrameProjectActionState> {
+  const session = await requireAdminSession();
+  const projectId = String(formData.get("projectId") ?? "").trim();
+  const spanId = String(formData.get("spanId") ?? "").trim();
+  if (!projectId) {
+    return { error: "Missing project id." };
+  }
+  if (!spanId) {
+    return { error: "Missing span id." };
+  }
+
+  const metaRaw = formData.get("framesMeta");
+  if (typeof metaRaw !== "string") {
+    return { error: "Missing frame metadata." };
+  }
+
+  let metaJson: unknown;
+  try {
+    metaJson = JSON.parse(metaRaw);
+  } catch {
+    return { error: "Invalid frame metadata." };
+  }
+
+  const metaParsed = savedFrameMetaSchema.array().max(20).safeParse(metaJson);
+  if (!metaParsed.success) {
+    return {
+      error: metaParsed.error.issues[0]?.message ?? "Invalid frame metadata.",
+    };
+  }
+
+  const files = formData
+    .getAll("frameFiles")
+    .filter((value): value is File => value instanceof File && value.size > 0);
+
+  if (files.length !== metaParsed.data.length) {
+    return { error: "Frame files and metadata count do not match." };
+  }
+
+  const frames = metaParsed.data.map((meta, index) => ({
+    file: files[index]!,
+    frameIndex: meta.frameIndex,
+    timeSec: meta.timeSec,
+    fileName: meta.fileName,
+    width: meta.width,
+    height: meta.height,
+  }));
+
+  const result = await replaceCustomSpanFrames({ projectId, spanId, frames });
+  if ("error" in result) {
+    return { error: result.error };
+  }
+
+  await writeAuditLog({
+    actor: session,
+    action: "video_frame_project.save_custom_span_frames",
+    entityType: "VideoFrameProject",
+    entityId: result.id,
+    after: {
+      spanId,
+      frameCount: frames.length,
+      framesBytes: result.framesBytes,
+      totalBytes: result.totalBytes,
+    },
+  });
+
+  revalidateVideoFrameProjects(result.id);
+  return { ok: true, project: result };
+}
+
+export async function deleteCustomSpanMediaAction(input: {
+  projectId: string;
+  spanId: string;
+  frameAssetIds?: string[];
+  deleteSourceVideo?: boolean;
+  clearFrames?: boolean;
+}): Promise<VideoFrameProjectActionState> {
+  const session = await requireAdminSession();
+  const projectId = input.projectId.trim();
+  const spanId = input.spanId.trim();
+  if (!projectId) {
+    return { error: "Missing project id." };
+  }
+  if (!spanId) {
+    return { error: "Missing span id." };
+  }
+
+  const result = await deleteCustomSpanMedia({
+    projectId,
+    spanId,
+    frameAssetIds: input.frameAssetIds,
+    deleteSourceVideo: input.deleteSourceVideo === true,
+    clearFrames: input.clearFrames === true,
+  });
+  if ("error" in result) {
+    return { error: result.error };
+  }
+
+  await writeAuditLog({
+    actor: session,
+    action: "video_frame_project.delete_custom_span_media",
+    entityType: "VideoFrameProject",
+    entityId: result.id,
+    after: {
+      spanId,
+      frameAssetIds: input.frameAssetIds ?? [],
+      deleteSourceVideo: input.deleteSourceVideo === true,
+      clearFrames: input.clearFrames === true,
+      framesBytes: result.framesBytes,
+      totalBytes: result.totalBytes,
+    },
+  });
+
+  revalidateVideoFrameProjects(result.id);
+  return { ok: true, project: result };
+}
+
 export async function saveVideoFrameEditAction(input: {
   projectId: string;
   timeSec: number;
@@ -305,7 +425,12 @@ export async function uploadVideoFrameLocalClipAction(
     return { error: "Choose a video file." };
   }
 
-  const result = await uploadVideoFrameLocalClip({ projectId, video });
+  const spanIdRaw = String(formData.get("spanId") ?? "").trim();
+  const result = await uploadVideoFrameLocalClip({
+    projectId,
+    video,
+    spanId: spanIdRaw || null,
+  });
   if ("error" in result) {
     return { error: result.error };
   }
@@ -372,6 +497,7 @@ export async function saveVideoFrameMergerStateAction(input: {
       trimStartSec: number;
       trimEndSec: number;
       durationSec: number;
+      muted?: boolean;
     }>;
     audioTracks?: Array<{
       instanceId: string;
@@ -422,6 +548,7 @@ export async function mergeVideoFrameClipsAction(input: {
     assetId: string;
     trimStartSec: number;
     trimEndSec?: number;
+    muted?: boolean;
   }>;
   audioTracks?: Array<{
     assetId: string;

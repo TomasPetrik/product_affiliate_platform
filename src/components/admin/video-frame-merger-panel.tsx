@@ -16,9 +16,12 @@ import {
   Music,
   Pause,
   Play,
+  Scissors,
   Trash2,
   Undo2,
   Upload,
+  Volume2,
+  VolumeX,
   X,
   ZoomIn,
   ZoomOut,
@@ -78,6 +81,8 @@ const BASE_PPS = 48;
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 8;
 const MERGER_AUTOSAVE_DEBOUNCE_MS = 700;
+/** Minimum kept duration on each side of a split. */
+const MIN_SPLIT_SEC = 0.08;
 
 interface MergeSegment {
   instanceId: string;
@@ -85,6 +90,7 @@ interface MergeSegment {
   trimStartSec: number;
   trimEndSec: number;
   durationSec: number;
+  muted?: boolean;
 }
 
 type MergeAudioTrack = VideoFrameMergerAudioTrackState;
@@ -302,6 +308,7 @@ export function VideoFrameMergerPanel({
   );
   const [dragPoolId, setDragPoolId] = useState<string | null>(null);
   const [fileDropOver, setFileDropOver] = useState(false);
+  const [audioDropOver, setAudioDropOver] = useState(false);
   const [merging, setMerging] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadingAudio, setUploadingAudio] = useState(false);
@@ -317,6 +324,8 @@ export function VideoFrameMergerPanel({
   const [fullPreviewOpen, setFullPreviewOpen] = useState(false);
   const [previewPlaying, setPreviewPlaying] = useState(false);
   const [playheadSec, setPlayheadSec] = useState(() => hydrated.playheadSec);
+  /** Composition time past the last video clip (black frames + continuing audio). */
+  const [blackPadSec, setBlackPadSec] = useState(0);
   const [previewSegIndex, setPreviewSegIndex] = useState(
     () => hydrated.previewSegIndex,
   );
@@ -331,7 +340,14 @@ export function VideoFrameMergerPanel({
   const audioTracksRef = useRef(audioTracks);
   const selectedIdRef = useRef(selectedId);
   const playheadSecRef = useRef(playheadSec);
+  const blackPadSecRef = useRef(blackPadSec);
   const previewSegIndexRef = useRef(previewSegIndex);
+  const sequenceClipsRef = useRef<
+    Array<{ segment: MergeSegment; clip: VideoFrameProjectAssetDto }>
+  >([]);
+  const timelineAudioTracksRef = useRef<
+    Array<{ track: MergeAudioTrack; asset: VideoFrameProjectAssetDto }>
+  >([]);
   const zoomRef = useRef(zoom);
   const stripAudioRef = useRef(stripAudio);
   const exportQualityRef = useRef(exportQuality);
@@ -353,6 +369,9 @@ export function VideoFrameMergerPanel({
   useEffect(() => {
     playheadSecRef.current = playheadSec;
   }, [playheadSec]);
+  useEffect(() => {
+    blackPadSecRef.current = blackPadSec;
+  }, [blackPadSec]);
   useEffect(() => {
     previewSegIndexRef.current = previewSegIndex;
   }, [previewSegIndex]);
@@ -527,6 +546,8 @@ export function VideoFrameMergerPanel({
       ): row is { track: MergeAudioTrack; asset: VideoFrameProjectAssetDto } =>
         row != null,
     );
+  sequenceClipsRef.current = sequenceClips;
+  timelineAudioTracksRef.current = timelineAudioTracks;
 
   useEffect(() => {
     if (
@@ -562,7 +583,38 @@ export function VideoFrameMergerPanel({
   const pixelsPerSecond = BASE_PPS * zoom;
 
   const activePreview = sequenceClips[previewSegIndex] ?? null;
-  const primarySoundtrack = timelineAudioTracks[0] ?? null;
+  const soundtrackPreviewKey = timelineAudioTracks
+    .map(
+      ({ track }) =>
+        `${track.instanceId}:${track.startAtSec}:${track.trimStartSec}:${track.trimEndSec}`,
+    )
+    .join("|");
+
+  const videoCompositionSec = useMemo(
+    () =>
+      sequenceClips.reduce(
+        (sum, row) =>
+          sum +
+          Math.max(0, row.segment.trimEndSec - row.segment.trimStartSec),
+        0,
+      ),
+    [sequenceClips],
+  );
+
+  const audioExtentSec = useMemo(() => {
+    let max = 0;
+    for (const track of audioTracks) {
+      max = Math.max(
+        max,
+        Math.max(0, track.startAtSec) +
+          Math.max(0, track.trimEndSec - track.trimStartSec),
+      );
+    }
+    return max;
+  }, [audioTracks]);
+
+  const timelineDurationSec = Math.max(videoCompositionSec, audioExtentSec);
+  const inBlackPad = blackPadSec > 0.02;
 
   function compositionSecFromState(): number {
     const viewSegments = sequenceClips.map(({ segment, clip }) => ({
@@ -574,12 +626,13 @@ export function VideoFrameMergerPanel({
       trimEndSec: segment.trimEndSec,
     }));
     const active = sequenceClips[previewSegIndexRef.current];
-    if (!active) return 0;
-    return sourceToComposition(
+    if (!active) return Math.max(0, blackPadSecRef.current);
+    const base = sourceToComposition(
       viewSegments,
       active.segment.instanceId,
       playheadSecRef.current,
     );
+    return base + Math.max(0, blackPadSecRef.current);
   }
 
   function pushUndoSnapshot() {
@@ -600,6 +653,7 @@ export function VideoFrameMergerPanel({
       const prev = stack[stack.length - 1];
       if (!prev) return stack;
       setPreviewPlaying(false);
+      setBlackPadSec(0);
       setSegments(prev.segments.map((segment) => ({ ...segment })));
       setAudioTracks(prev.audioTracks.map((track) => ({ ...track })));
       setSelectedId(prev.selectedId);
@@ -628,6 +682,21 @@ export function VideoFrameMergerPanel({
   useEffect(() => {
     const video = previewVideoRef.current;
     if (!video || !activePreview || previewPlaying) return;
+    if (blackPadSec > 0.02) {
+      // Hold last frame of the last clip under the black pad.
+      if (video.getAttribute("src") !== activePreview.clip.path) {
+        video.src = activePreview.clip.path;
+        video.load();
+      }
+      const end = Math.max(
+        activePreview.segment.trimStartSec,
+        activePreview.segment.trimEndSec - 0.02,
+      );
+      if (video.readyState >= 1 && Math.abs(video.currentTime - end) > 0.05) {
+        video.currentTime = end;
+      }
+      return;
+    }
     if (video.getAttribute("src") !== activePreview.clip.path) {
       video.src = activePreview.clip.path;
       video.load();
@@ -650,7 +719,7 @@ export function VideoFrameMergerPanel({
       };
     }
     // Re-run when toggling full preview so the remounted <video> picks up src/time.
-  }, [activePreview, playheadSec, previewPlaying, fullPreviewOpen]);
+  }, [activePreview, playheadSec, previewPlaying, fullPreviewOpen, blackPadSec]);
 
   useEffect(() => {
     const video = previewVideoRef.current;
@@ -662,6 +731,12 @@ export function VideoFrameMergerPanel({
       return;
     }
 
+    // Black-pad region: video stays on last frame / paused; rAF drives the needle.
+    if (blackPadSecRef.current > 0.02) {
+      video.pause();
+      return;
+    }
+
     const startAt = Math.min(
       activePreview.segment.trimEndSec - 0.02,
       Math.max(activePreview.segment.trimStartSec, playheadSecRef.current),
@@ -670,7 +745,9 @@ export function VideoFrameMergerPanel({
     const playAt = () => {
       video.currentTime = startAt;
       void video.play().catch(() => setPreviewPlaying(false));
-      advancingClipRef.current = false;
+      // Keep advancingClipRef true until timeupdate confirms we're inside
+      // this segment — clearing it here caused the next clip (often the last)
+      // to be skipped when the previous timeupdate closure still fired.
     };
 
     if (video.getAttribute("src") !== activePreview.clip.path) {
@@ -690,6 +767,7 @@ export function VideoFrameMergerPanel({
     ) {
       playAt();
     } else {
+      advancingClipRef.current = false;
       void video.play().catch(() => setPreviewPlaying(false));
     }
     // playheadSec read from ref; fullPreviewOpen remounts the video element
@@ -701,24 +779,26 @@ export function VideoFrameMergerPanel({
     fullPreviewOpen,
   ]);
 
-  // Soundtrack preview: start once on Play, keep playing across video clip
-  // swaps. Do not reseek on every clip change / timeupdate — that caused a
-  // ~1s frozen audio loop.
+  // Soundtrack preview: follow composition time across video clip swaps.
+  // May start late (audio begins after playhead) and may switch pieces after a split.
   useEffect(() => {
     const audio = previewAudioRef.current;
     if (!audio) return;
 
-    if (!previewPlaying || !primarySoundtrack) {
+    if (!previewPlaying || timelineAudioTracksRef.current.length === 0) {
       audio.pause();
       return;
     }
 
-    const { track, asset } = primarySoundtrack;
     const video = previewVideoRef.current;
+    let cancelled = false;
+    let activeInstanceId: string | null = null;
 
     function compositionFromVideo(): number {
-      if (!video) return compositionSecFromState();
-      const viewSegments = sequenceClips.map(({ segment, clip }) => ({
+      const clips = sequenceClipsRef.current;
+      const pad = Math.max(0, blackPadSecRef.current);
+      if (!video || clips.length === 0) return compositionSecFromState();
+      const viewSegments = clips.map(({ segment, clip }) => ({
         instanceId: segment.instanceId,
         videoUrl: clip.path,
         label: clip.fileName,
@@ -726,107 +806,106 @@ export function VideoFrameMergerPanel({
         trimStartSec: segment.trimStartSec,
         trimEndSec: segment.trimEndSec,
       }));
-      const active = sequenceClips[previewSegIndexRef.current];
+      const active = clips[previewSegIndexRef.current];
       if (!active) return compositionSecFromState();
-      return sourceToComposition(
-        viewSegments,
-        active.segment.instanceId,
-        video.currentTime,
+      return (
+        sourceToComposition(
+          viewSegments,
+          active.segment.instanceId,
+          pad > 0.02 ? active.segment.trimEndSec : video.currentTime,
+        ) + pad
       );
     }
 
-    function sourceTimeForComposition(compositionSec: number): number | null {
-      const localSec =
-        track.trimStartSec + (compositionSec - track.startAtSec);
-      if (
-        compositionSec < track.startAtSec - 0.05 ||
-        localSec < track.trimStartSec - 0.05 ||
-        localSec > track.trimEndSec + 0.05
-      ) {
-        return null;
+    function resolveSoundtrack(compositionSec: number): {
+      assetPath: string;
+      sourceSec: number;
+      instanceId: string;
+    } | null {
+      for (const { track, asset } of timelineAudioTracksRef.current) {
+        const localSec =
+          track.trimStartSec + (compositionSec - track.startAtSec);
+        if (
+          compositionSec < track.startAtSec - 0.05 ||
+          localSec < track.trimStartSec - 0.05 ||
+          localSec > track.trimEndSec + 0.05
+        ) {
+          continue;
+        }
+        return {
+          assetPath: asset.path,
+          instanceId: track.instanceId,
+          sourceSec: Math.min(
+            track.trimEndSec - 0.02,
+            Math.max(track.trimStartSec, localSec),
+          ),
+        };
       }
-      return Math.min(
-        track.trimEndSec - 0.02,
-        Math.max(track.trimStartSec, localSec),
-      );
+      return null;
     }
 
-    let cancelled = false;
-    let started = false;
-
-    const ensureSrc = () => {
-      if (audio.getAttribute("src") !== asset.path) {
-        audio.src = asset.path;
-      }
-    };
-
-    const startAtComposition = () => {
-      if (cancelled || started) return;
-      ensureSrc();
-      const target = sourceTimeForComposition(compositionFromVideo());
-      if (target == null) {
-        audio.pause();
+    const syncAudio = () => {
+      if (cancelled) return;
+      const resolved = resolveSoundtrack(compositionFromVideo());
+      if (!resolved) {
+        activeInstanceId = null;
+        if (!audio.paused) audio.pause();
         return;
       }
-      const play = () => {
-        if (cancelled || started) return;
-        started = true;
-        audio.currentTime = target;
-        void audio.play().catch(() => {
-          started = false;
-        });
-      };
-      if (audio.readyState >= 1) {
-        play();
-      } else {
-        const onReady = () => {
-          audio.removeEventListener("loadeddata", onReady);
-          play();
+
+      const switched =
+        activeInstanceId !== resolved.instanceId ||
+        audio.getAttribute("src") !== resolved.assetPath;
+
+      if (switched) {
+        activeInstanceId = resolved.instanceId;
+        if (audio.getAttribute("src") !== resolved.assetPath) {
+          audio.src = resolved.assetPath;
+        }
+        const play = () => {
+          if (cancelled) return;
+          audio.currentTime = resolved.sourceSec;
+          void audio.play().catch(() => {});
         };
-        audio.addEventListener("loadeddata", onReady);
+        if (audio.readyState >= 1) {
+          play();
+        } else {
+          const onReady = () => {
+            audio.removeEventListener("loadeddata", onReady);
+            play();
+          };
+          audio.addEventListener("loadeddata", onReady);
+        }
+        return;
+      }
+
+      if (audio.paused) {
+        audio.currentTime = resolved.sourceSec;
+        void audio.play().catch(() => {});
+        return;
+      }
+      if (Math.abs(audio.currentTime - resolved.sourceSec) > 0.85) {
+        audio.currentTime = resolved.sourceSec;
       }
     };
 
     // Wait a frame so video has applied its seek for this Play press.
-    const startTimer = window.setTimeout(startAtComposition, 40);
-
-    const onTimeUpdate = () => {
-      if (cancelled || !started) return;
-      const target = sourceTimeForComposition(compositionFromVideo());
-      if (target == null) {
-        if (!audio.paused) audio.pause();
-        return;
-      }
-      // Resume if we paused while out of range; only hard-seek on large drift.
-      if (audio.paused) {
-        audio.currentTime = target;
-        void audio.play().catch(() => {});
-        return;
-      }
-      if (Math.abs(audio.currentTime - target) > 0.85) {
-        audio.currentTime = target;
-      }
-    };
-
-    video?.addEventListener("timeupdate", onTimeUpdate);
+    const startTimer = window.setTimeout(syncAudio, 40);
+    video?.addEventListener("timeupdate", syncAudio);
+    // Poll while playing so soundtrack keeps syncing through the black-pad
+    // region (video is paused there, so timeupdate stops).
+    const poll = window.setInterval(syncAudio, 180);
 
     return () => {
       cancelled = true;
       window.clearTimeout(startTimer);
-      video?.removeEventListener("timeupdate", onTimeUpdate);
+      window.clearInterval(poll);
+      video?.removeEventListener("timeupdate", syncAudio);
       audio.pause();
     };
-    // Intentionally omit activePreview / sequenceClips identity churn — audio
-    // must keep playing across sequential video clip advances.
+    // Keep effect stable across clip advances; track list identity is enough.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    previewPlaying,
-    primarySoundtrack?.track.instanceId,
-    primarySoundtrack?.asset.path,
-    primarySoundtrack?.track.trimStartSec,
-    primarySoundtrack?.track.trimEndSec,
-    primarySoundtrack?.track.startAtSec,
-  ]);
+  }, [previewPlaying, soundtrackPreviewKey]);
 
   async function addClipToSequence(assetId: string) {
     const clip = clipById.get(assetId);
@@ -863,6 +942,7 @@ export function VideoFrameMergerPanel({
   function onPoolDragEnd() {
     setDragPoolId(null);
     setFileDropOver(false);
+    setAudioDropOver(false);
   }
 
   function onSequenceDragOver(event: DragEvent<HTMLDivElement>) {
@@ -883,10 +963,17 @@ export function VideoFrameMergerPanel({
   function onSequenceDrop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
     setFileDropOver(false);
-    const files = videoFilesFromList(event.dataTransfer.files);
-    if (files.length > 0 && !dragPoolId) {
-      void uploadLocalClips(files);
-      return;
+    if (!dragPoolId) {
+      const videos = videoFilesFromList(event.dataTransfer.files);
+      const audios = audioFilesFromList(event.dataTransfer.files);
+      if (videos.length > 0) {
+        void uploadLocalClips(videos);
+        return;
+      }
+      if (audios.length > 0) {
+        void uploadLocalAudio(audios);
+        return;
+      }
     }
     const poolId =
       dragPoolId ?? event.dataTransfer.getData(POOL_DRAG_TYPE) ?? "";
@@ -912,8 +999,39 @@ export function VideoFrameMergerPanel({
     if (dragPoolId) return;
     event.preventDefault();
     setFileDropOver(false);
-    const files = videoFilesFromList(event.dataTransfer.files);
-    if (files.length > 0) void uploadLocalClips(files);
+    const videos = videoFilesFromList(event.dataTransfer.files);
+    const audios = audioFilesFromList(event.dataTransfer.files);
+    if (videos.length > 0) void uploadLocalClips(videos);
+    else if (audios.length > 0) void uploadLocalAudio(audios);
+  }
+
+  function onSoundtrackDragOver(event: DragEvent<HTMLDivElement>) {
+    if (!hasFileDrag(event) || dragPoolId) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    if (!audioDropOver) setAudioDropOver(true);
+  }
+
+  function onSoundtrackDragLeave(event: DragEvent<HTMLDivElement>) {
+    if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
+      return;
+    }
+    setAudioDropOver(false);
+  }
+
+  function onSoundtrackDrop(event: DragEvent<HTMLDivElement>) {
+    if (dragPoolId) return;
+    event.preventDefault();
+    setAudioDropOver(false);
+    const audios = audioFilesFromList(event.dataTransfer.files);
+    if (audios.length > 0) {
+      void uploadLocalAudio(audios);
+      return;
+    }
+    const videos = videoFilesFromList(event.dataTransfer.files);
+    if (videos.length > 0) {
+      setError("Drop audio files (MP3, WAV, AAC, OGG, M4A) on Soundtrack.");
+    }
   }
 
   function removeSegment(instanceId: string) {
@@ -968,15 +1086,137 @@ export function VideoFrameMergerPanel({
     );
   }
 
+  function toggleSegmentMuted(instanceId: string) {
+    pushUndoSnapshot();
+    setSegments((current) =>
+      current.map((segment) =>
+        segment.instanceId === instanceId
+          ? { ...segment, muted: !segment.muted }
+          : segment,
+      ),
+    );
+  }
+
+  function canSplitSelectedVideo(): boolean {
+    if (!selected) return false;
+    if (selected.segment.instanceId !== activePreview?.segment.instanceId) {
+      return false;
+    }
+    const { trimStartSec, trimEndSec } = selected.segment;
+    return (
+      playheadSec >= trimStartSec + MIN_SPLIT_SEC &&
+      playheadSec <= trimEndSec - MIN_SPLIT_SEC
+    );
+  }
+
+  function canSplitSelectedAudio(): boolean {
+    if (!selectedAudioTrack) return false;
+    const compositionSec = compositionSecFromState();
+    const track = selectedAudioTrack;
+    const localSec =
+      track.trimStartSec + (compositionSec - track.startAtSec);
+    return (
+      compositionSec >= track.startAtSec + MIN_SPLIT_SEC - 0.001 &&
+      localSec >= track.trimStartSec + MIN_SPLIT_SEC &&
+      localSec <= track.trimEndSec - MIN_SPLIT_SEC
+    );
+  }
+
+  function splitSelectedVideo() {
+    if (!selected || !canSplitSelectedVideo()) return;
+    const splitAt = playheadSec;
+    const index = sequenceClips.findIndex(
+      (row) => row.segment.instanceId === selected.segment.instanceId,
+    );
+    if (index < 0) return;
+
+    const original = selected.segment;
+    const left: MergeSegment = {
+      ...original,
+      instanceId: newInstanceId("seg"),
+      trimStartSec: original.trimStartSec,
+      trimEndSec: splitAt,
+    };
+    const right: MergeSegment = {
+      ...original,
+      instanceId: newInstanceId("seg"),
+      trimStartSec: splitAt,
+      trimEndSec: original.trimEndSec,
+    };
+
+    pushUndoSnapshot();
+    setSegments((current) => {
+      const from = current.findIndex(
+        (segment) => segment.instanceId === original.instanceId,
+      );
+      if (from < 0) return current;
+      const next = [...current];
+      next.splice(from, 1, left, right);
+      return next;
+    });
+    setSelectedId(left.instanceId);
+    setPreviewSegIndex(index);
+    setPlayheadSec(splitAt);
+    setPreviewPlaying(false);
+  }
+
+  function splitSelectedAudio() {
+    if (!selectedAudioTrack || !canSplitSelectedAudio()) return;
+    const compositionSec = compositionSecFromState();
+    const original = selectedAudioTrack;
+    const localSec = Number(
+      (
+        original.trimStartSec +
+        (compositionSec - original.startAtSec)
+      ).toFixed(3),
+    );
+
+    const left: MergeAudioTrack = {
+      ...original,
+      instanceId: newInstanceId("aud"),
+      trimStartSec: original.trimStartSec,
+      trimEndSec: localSec,
+      startAtSec: original.startAtSec,
+    };
+    const right: MergeAudioTrack = {
+      ...original,
+      instanceId: newInstanceId("aud"),
+      trimStartSec: localSec,
+      trimEndSec: original.trimEndSec,
+      startAtSec: Math.max(0, compositionSec),
+    };
+
+    pushUndoSnapshot();
+    setAudioTracks((current) => {
+      const from = current.findIndex(
+        (track) => track.instanceId === original.instanceId,
+      );
+      if (from < 0) return current;
+      const next = [...current];
+      next.splice(from, 1, left, right);
+      return next;
+    });
+    setSelectedId(left.instanceId);
+    setPreviewPlaying(false);
+  }
+
   function updateAudioTrim(
     instanceId: string,
     trimStartSec: number,
     trimEndSec: number,
+    startAtSec?: number,
   ) {
     setAudioTracks((current) =>
       current.map((track) =>
         track.instanceId === instanceId
-          ? { ...track, trimStartSec, trimEndSec }
+          ? {
+              ...track,
+              trimStartSec,
+              trimEndSec,
+              ...(startAtSec != null
+                ? { startAtSec: Math.max(0, startAtSec) }
+                : {}),
+            }
           : track,
       ),
     );
@@ -1187,6 +1427,7 @@ export function VideoFrameMergerPanel({
           assetId: segment.assetId,
           trimStartSec: segment.trimStartSec,
           trimEndSec: segment.trimEndSec,
+          muted: segment.muted === true,
         })),
         audioTracks: audioTracks.map((track) => ({
           assetId: track.assetId,
@@ -1213,21 +1454,57 @@ export function VideoFrameMergerPanel({
     setPreviewPlaying((current) => !current);
   }
 
+  function videoKeptFromClips(
+    clips: Array<{ segment: MergeSegment }>,
+  ): number {
+    return clips.reduce(
+      (sum, row) =>
+        sum + Math.max(0, row.segment.trimEndSec - row.segment.trimStartSec),
+      0,
+    );
+  }
+
+  function audioExtentFromTracks(tracks: MergeAudioTrack[]): number {
+    let max = 0;
+    for (const track of tracks) {
+      max = Math.max(
+        max,
+        Math.max(0, track.startAtSec) +
+          Math.max(0, track.trimEndSec - track.trimStartSec),
+      );
+    }
+    return max;
+  }
+
   function advanceToNextClip() {
     if (advancingClipRef.current) return;
+    const clips = sequenceClipsRef.current;
     const index = previewSegIndexRef.current;
-    if (index >= sequenceClips.length - 1) {
-      const last = sequenceClips[index];
+    if (index >= clips.length - 1) {
+      const last = clips[index];
       if (last) setPlayheadSec(last.segment.trimEndSec);
+      const videoKept = videoKeptFromClips(clips);
+      const timelineDur = Math.max(
+        videoKept,
+        audioExtentFromTracks(audioTracksRef.current),
+      );
+      if (timelineDur > videoKept + 0.05) {
+        // Continue into black pad while soundtrack keeps playing.
+        setBlackPadSec(0.001);
+        setPreviewPlaying(true);
+        return;
+      }
+      setBlackPadSec(0);
       setPreviewPlaying(false);
       return;
     }
-    const next = sequenceClips[index + 1];
+    const next = clips[index + 1];
     if (!next) {
       setPreviewPlaying(false);
       return;
     }
     advancingClipRef.current = true;
+    setBlackPadSec(0);
     setPreviewSegIndex(index + 1);
     setSelectedId(next.segment.instanceId);
     setPlayheadSec(next.segment.trimStartSec);
@@ -1236,12 +1513,34 @@ export function VideoFrameMergerPanel({
 
   function onPreviewTimeUpdate() {
     const video = previewVideoRef.current;
-    const row = sequenceClips[previewSegIndex];
-    if (!video || !row || !previewPlayingRef.current) return;
-    if (advancingClipRef.current) return;
+    if (!video || !previewPlayingRef.current) return;
+    if (blackPadSecRef.current > 0.02) return;
+
+    const clips = sequenceClipsRef.current;
+    const index = previewSegIndexRef.current;
+    const row = clips[index];
+    if (!row) return;
+
     const t = video.currentTime;
-    setPlayheadSec(t);
-    if (t >= row.segment.trimEndSec - 0.04) {
+    const { trimStartSec, trimEndSec } = row.segment;
+    const clamped = Math.min(trimEndSec, Math.max(trimStartSec, t));
+
+    // After a clip advance, ignore end-of-clip checks until the video has
+    // actually landed inside the new segment (prevents skipping the last clip).
+    if (advancingClipRef.current) {
+      if (t >= trimStartSec - 0.08 && t <= trimEndSec + 0.02) {
+        advancingClipRef.current = false;
+        setPlayheadSec(clamped);
+        // Fall through only when safely before the end threshold.
+        if (t >= trimEndSec - 0.04) {
+          advanceToNextClip();
+        }
+      }
+      return;
+    }
+
+    setPlayheadSec(clamped);
+    if (t >= trimEndSec - 0.04) {
       advanceToNextClip();
     }
   }
@@ -1250,6 +1549,7 @@ export function VideoFrameMergerPanel({
     const row = sequenceClips[segIndex];
     if (!row) return;
     setPreviewPlaying(false);
+    setBlackPadSec(0);
     setPreviewSegIndex(segIndex);
     setSelectedId(row.segment.instanceId);
     setPlayheadSec(
@@ -1259,6 +1559,46 @@ export function VideoFrameMergerPanel({
       ),
     );
   }
+
+  const blackPadActive = blackPadSec > 0;
+
+  // Drive playhead through the black-pad / audio-overrun region.
+  useEffect(() => {
+    if (!previewPlaying || !blackPadActive) return;
+    const video = previewVideoRef.current;
+    video?.pause();
+
+    const clips = sequenceClipsRef.current;
+    const videoKept = videoKeptFromClips(clips);
+    const timelineDur = Math.max(
+      videoKept,
+      audioExtentFromTracks(audioTracksRef.current),
+    );
+    if (!(timelineDur > videoKept + 0.04)) {
+      setBlackPadSec(0);
+      setPreviewPlaying(false);
+      return;
+    }
+
+    const startPad = Math.max(0, blackPadSecRef.current);
+    const startWall = performance.now();
+    let raf = 0;
+
+    const tick = () => {
+      if (!previewPlayingRef.current) return;
+      const elapsed = (performance.now() - startWall) / 1000;
+      const nextPad = startPad + elapsed;
+      if (videoKept + nextPad >= timelineDur - 0.02) {
+        setBlackPadSec(Math.max(0, timelineDur - videoKept));
+        setPreviewPlaying(false);
+        return;
+      }
+      setBlackPadSec(nextPad);
+      raf = window.requestAnimationFrame(tick);
+    };
+    raf = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(raf);
+  }, [previewPlaying, blackPadActive]);
 
   return (
     <Card>
@@ -1371,7 +1711,15 @@ export function VideoFrameMergerPanel({
           )}
         </div>
 
-        <div className="grid gap-2">
+        <div
+          className={cn(
+            "grid gap-2 rounded-xl transition-colors",
+            audioDropOver && "ring-2 ring-sky-500/40 ring-offset-2",
+          )}
+          onDragOver={onSoundtrackDragOver}
+          onDragLeave={onSoundtrackDragLeave}
+          onDrop={onSoundtrackDrop}
+        >
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-xs font-medium text-muted-foreground">
               Soundtrack
@@ -1407,8 +1755,8 @@ export function VideoFrameMergerPanel({
             </div>
           </div>
           <p className="text-[11px] text-muted-foreground">
-            MP3, WAV, AAC, OGG, or M4A · max {maxAudioMb}MB. Trim and drag on the
-            blue track under the video timeline — included in Generate merge.
+            MP3, WAV, AAC, OGG, or M4A · max {maxAudioMb}MB. Drop audio here, then
+            trim / move on the blue track — included in Generate merge.
           </p>
           {availableAudio.length > 0 ? (
             <div className="flex flex-wrap gap-2">
@@ -1427,11 +1775,18 @@ export function VideoFrameMergerPanel({
                 </button>
               ))}
             </div>
-          ) : audioAssets.length > 0 ? (
-            <p className="text-[11px] text-muted-foreground">
-              All uploaded soundtracks are on the timeline.
+          ) : (
+            <p
+              className={cn(
+                "rounded-lg border border-dashed px-3 py-5 text-center text-sm text-muted-foreground",
+                audioDropOver && "border-sky-500 bg-sky-500/5",
+              )}
+            >
+              {audioAssets.length > 0
+                ? "All uploaded soundtracks are on the timeline. Drop more audio here."
+                : "Drop audio files here to add a soundtrack."}
             </p>
-          ) : null}
+          )}
         </div>
 
         <div className="grid gap-2">
@@ -1543,8 +1898,49 @@ export function VideoFrameMergerPanel({
                           selected.segment.trimStartSec,
                       )}{" "}
                       kept
+                      {selected.segment.muted ? " · muted" : ""}
                     </p>
                     <div className="flex gap-1">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="gap-1"
+                        disabled={!canSplitSelectedVideo()}
+                        title={
+                          canSplitSelectedVideo()
+                            ? "Split this clip at the playhead"
+                            : "Move the playhead inside the selected clip to split"
+                        }
+                        onClick={splitSelectedVideo}
+                      >
+                        <Scissors className="size-3.5" />
+                        Split
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="gap-1"
+                        disabled={stripAudio}
+                        title={
+                          stripAudio
+                            ? "Global “Remove clip audio” is on"
+                            : selected.segment.muted
+                              ? "Unmute this clip"
+                              : "Mute this clip (soundtrack can still play)"
+                        }
+                        onClick={() =>
+                          toggleSegmentMuted(selected.segment.instanceId)
+                        }
+                      >
+                        {selected.segment.muted || stripAudio ? (
+                          <VolumeX className="size-3.5" />
+                        ) : (
+                          <Volume2 className="size-3.5" />
+                        )}
+                        {selected.segment.muted || stripAudio ? "Muted" : "Mute"}
+                      </Button>
                       <Button
                         type="button"
                         variant="ghost"
@@ -1596,16 +1992,34 @@ export function VideoFrameMergerPanel({
                       )}{" "}
                       kept
                     </p>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() =>
-                        removeAudioTrack(selectedAudioTrack.instanceId)
-                      }
-                    >
-                      Remove audio
-                    </Button>
+                    <div className="flex gap-1">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="gap-1"
+                        disabled={!canSplitSelectedAudio()}
+                        title={
+                          canSplitSelectedAudio()
+                            ? "Split soundtrack at the playhead"
+                            : "Move the playhead over the selected soundtrack to split"
+                        }
+                        onClick={splitSelectedAudio}
+                      >
+                        <Scissors className="size-3.5" />
+                        Split
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() =>
+                          removeAudioTrack(selectedAudioTrack.instanceId)
+                        }
+                      >
+                        Remove audio
+                      </Button>
+                    </div>
                   </div>
                 ) : null}
                 <VideoFrameMergeTimeline
@@ -1617,6 +2031,7 @@ export function VideoFrameMergerPanel({
                     durationSec: segment.durationSec,
                     trimStartSec: segment.trimStartSec,
                     trimEndSec: segment.trimEndSec,
+                    muted: segment.muted === true || stripAudio,
                   }))}
                   audioTracks={timelineAudioTracks.map(({ track, asset }) => ({
                     instanceId: track.instanceId,
@@ -1627,7 +2042,11 @@ export function VideoFrameMergerPanel({
                     startAtSec: track.startAtSec,
                   }))}
                   selectedId={selectedId}
+                  playheadSegmentId={
+                    sequenceClips[previewSegIndex]?.segment.instanceId ?? null
+                  }
                   playheadSec={playheadSec}
+                  blackPadSec={blackPadSec}
                   zoom={zoom}
                   pixelsPerSecond={pixelsPerSecond}
                   onZoomChange={setZoom}
@@ -1640,6 +2059,7 @@ export function VideoFrameMergerPanel({
                     setSelectedId(instanceId);
                     setPreviewSegIndex(index);
                     setPreviewPlaying(false);
+                    setBlackPadSec(0);
                     // Keep playhead if re-selecting same clip; otherwise jump to trim start.
                     if (instanceId !== selectedId) {
                       setPlayheadSec(row.segment.trimStartSec);
@@ -1649,14 +2069,35 @@ export function VideoFrameMergerPanel({
                     updateTrim(instanceId, start, end)
                   }
                   onTrimGestureStart={pushUndoSnapshot}
-                  onPlayheadChange={(instanceId, sec) => {
+                  onPlayheadChange={(instanceId, sec, compositionSec) => {
                     const index = sequenceClips.findIndex(
                       (row) => row.segment.instanceId === instanceId,
                     );
-                    setSelectedId(instanceId);
                     setPreviewSegIndex(index);
-                    setPlayheadSec(sec);
                     setPreviewPlaying(false);
+                    const videoKept = videoCompositionSec;
+                    if (
+                      compositionSec != null &&
+                      compositionSec > videoKept + 0.02
+                    ) {
+                      const last = sequenceClips[sequenceClips.length - 1];
+                      if (last) {
+                        setPlayheadSec(last.segment.trimEndSec);
+                      } else {
+                        setPlayheadSec(sec);
+                      }
+                      setBlackPadSec(compositionSec - videoKept);
+                    } else {
+                      setPlayheadSec(sec);
+                      setBlackPadSec(0);
+                    }
+                    // Keep soundtrack selected while scrubbing so Split targets audio.
+                    const audioStillSelected = audioTracksRef.current.some(
+                      (track) => track.instanceId === selectedIdRef.current,
+                    );
+                    if (!audioStillSelected) {
+                      setSelectedId(instanceId);
+                    }
                   }}
                   onReorderGestureStart={pushUndoSnapshot}
                   onReorder={(instanceId, toIndex) => {
@@ -1680,16 +2121,22 @@ export function VideoFrameMergerPanel({
         {activePreview ? (
           <div className="grid gap-2">
             <p className="text-xs font-medium text-muted-foreground">
-              Live preview · part {previewSegIndex + 1} of{" "}
-              {sequenceClips.length} ·{" "}
-              {formatMergeTimelineTime(playheadSec)}
+              Live preview ·{" "}
+              {inBlackPad
+                ? `black pad · ${formatMergeTimelineTime(videoCompositionSec + blackPadSec)}`
+                : `part ${previewSegIndex + 1} of ${sequenceClips.length} · ${formatMergeTimelineTime(playheadSec)}`}
+              {timelineDurationSec > videoCompositionSec + 0.04
+                ? ` · timeline ${formatMergeTimelineTime(timelineDurationSec)}`
+                : ""}
             </p>
             <div className="flex flex-wrap items-end gap-4">
               {!fullPreviewOpen ? (
-                <div className="w-[11rem] overflow-hidden rounded-xl border bg-black ring-1 ring-border">
+                <div className="relative w-[11rem] overflow-hidden rounded-xl border bg-black ring-1 ring-border">
                   <video
                     ref={previewVideoRef}
-                    muted
+                    muted={
+                      stripAudio || activePreview.segment.muted === true
+                    }
                     playsInline
                     controls={false}
                     preload="metadata"
@@ -1699,8 +2146,16 @@ export function VideoFrameMergerPanel({
                         advanceToNextClip();
                       }
                     }}
-                    className="aspect-[9/16] w-full object-contain"
+                    className={cn(
+                      "aspect-[9/16] w-full object-contain",
+                      inBlackPad && "opacity-0",
+                    )}
                   />
+                  {inBlackPad ? (
+                    <div className="absolute inset-0 flex items-center justify-center bg-black text-[10px] font-medium uppercase tracking-wide text-zinc-500">
+                      Black pad
+                    </div>
+                  ) : null}
                 </div>
               ) : (
                 <div className="flex w-[11rem] aspect-[9/16] items-center justify-center rounded-xl border border-dashed border-border bg-muted/40 text-center text-[10px] text-muted-foreground">
@@ -1789,12 +2244,15 @@ export function VideoFrameMergerPanel({
             <div className="flex shrink-0 items-center justify-between gap-3 border-b border-white/10 px-4 py-3 text-zinc-100">
               <div className="min-w-0">
                 <p className="truncate text-sm font-medium">
-                  Full preview · 9:16 · part {previewSegIndex + 1} of{" "}
-                  {sequenceClips.length}
+                  Full preview · 9:16 ·{" "}
+                  {inBlackPad
+                    ? "black pad"
+                    : `part ${previewSegIndex + 1} of ${sequenceClips.length}`}
                 </p>
                 <p className="truncate text-xs text-zinc-400">
-                  {activePreview.clip.fileName} ·{" "}
-                  {formatMergeTimelineTime(playheadSec)}
+                  {inBlackPad
+                    ? formatMergeTimelineTime(videoCompositionSec + blackPadSec)
+                    : `${activePreview.clip.fileName} · ${formatMergeTimelineTime(playheadSec)}`}
                 </p>
               </div>
               <div className="flex shrink-0 flex-wrap items-center gap-2">
@@ -1865,10 +2323,13 @@ export function VideoFrameMergerPanel({
               </div>
             </div>
             <div className="flex min-h-0 flex-1 items-center justify-center p-4">
-              <div className="h-full max-h-full w-auto max-w-full overflow-hidden rounded-xl bg-black shadow-2xl ring-1 ring-white/15 aspect-[9/16]">
+              <div className="relative h-full max-h-full w-auto max-w-full overflow-hidden rounded-xl bg-black shadow-2xl ring-1 ring-white/15 aspect-[9/16]">
                 <video
                   ref={previewVideoRef}
-                  muted
+                  muted={
+                    stripAudio ||
+                    (activePreview?.segment.muted === true)
+                  }
                   playsInline
                   controls={false}
                   preload="metadata"
@@ -1878,8 +2339,16 @@ export function VideoFrameMergerPanel({
                       advanceToNextClip();
                     }
                   }}
-                  className="h-full w-full object-contain"
+                  className={cn(
+                    "h-full w-full object-contain",
+                    inBlackPad && "opacity-0",
+                  )}
                 />
+                {inBlackPad ? (
+                  <div className="absolute inset-0 flex items-center justify-center bg-black text-xs font-medium uppercase tracking-wide text-zinc-500">
+                    Black pad
+                  </div>
+                ) : null}
               </div>
             </div>
           </div>
@@ -1940,7 +2409,7 @@ export function VideoFrameMergerPanel({
               htmlFor="merger-strip-audio"
               className="text-sm font-normal text-muted-foreground"
             >
-              Remove clip audio
+              Mute all clip audio
             </Label>
           </div>
           {sequenceClips.length > 0 || audioTracks.length > 0 ? (
@@ -1967,12 +2436,12 @@ export function VideoFrameMergerPanel({
             {MERGE_EXPORT_QUALITY_SIZES[exportQuality].label}, saved as the next
             version
             {audioTracks.length > 0
-              ? " · includes soundtrack"
+              ? " · soundtrack overlays clip audio"
               : stripAudio
-                ? " · no audio"
+                ? " · no clip audio"
                 : ""}
-            {stripAudio && audioTracks.length > 0
-              ? " (clip audio stripped)"
+            {segments.some((segment) => segment.muted) && !stripAudio
+              ? " · some clips muted"
               : ""}
             .
           </p>

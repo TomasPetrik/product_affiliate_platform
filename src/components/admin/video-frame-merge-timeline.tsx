@@ -8,7 +8,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type WheelEvent as ReactWheelEvent,
 } from "react";
-import { MoveHorizontal, Scissors } from "lucide-react";
+import { MoveHorizontal, Scissors, VolumeX } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
@@ -131,6 +131,8 @@ export interface MergeTimelineSegmentView {
   durationSec: number;
   trimStartSec: number;
   trimEndSec: number;
+  /** Clip audio silenced for this segment. */
+  muted?: boolean;
 }
 
 function keptDuration(segment: MergeTimelineSegmentView): number {
@@ -191,6 +193,124 @@ export function sourceToComposition(
   return offset;
 }
 
+type TimelineLayoutItem = {
+  segment: MergeTimelineSegmentView;
+  left: number;
+  width: number;
+};
+
+function videoKeptSecFromLayout(layout: TimelineLayoutItem[]): number {
+  return layout.reduce((sum, item) => sum + keptDuration(item.segment), 0);
+}
+
+function videoEndPxFromLayout(layout: TimelineLayoutItem[]): number {
+  if (layout.length === 0) return 0;
+  const last = layout[layout.length - 1]!;
+  return last.left + last.width;
+}
+
+/**
+ * Map composition seconds → x position on the laid-out track.
+ * Accounts for segment gaps and minimum clip widths (unlike sec * pps).
+ * Past the last clip, extends linearly (black-pad / audio overrun region).
+ */
+function compositionToLayoutPx(
+  layout: TimelineLayoutItem[],
+  compositionSec: number,
+  pixelsPerSecond: number,
+): number {
+  if (layout.length === 0) {
+    return Math.max(0, compositionSec) * pixelsPerSecond;
+  }
+  const videoKept = videoKeptSecFromLayout(layout);
+  const videoEndPx = videoEndPxFromLayout(layout);
+  if (compositionSec > videoKept + 1e-6) {
+    return videoEndPx + (compositionSec - videoKept) * pixelsPerSecond;
+  }
+  let remaining = Math.max(0, compositionSec);
+  for (let i = 0; i < layout.length; i += 1) {
+    const item = layout[i]!;
+    const kept = keptDuration(item.segment);
+    const isLast = i === layout.length - 1;
+    if (remaining <= kept + 1e-6 || isLast) {
+      const local = Math.min(kept, Math.max(0, remaining));
+      const ratio = kept > 0 ? local / kept : 0;
+      return item.left + ratio * item.width;
+    }
+    remaining -= kept;
+  }
+  return videoEndPx;
+}
+
+/** Map track x position → segment + source time (gaps resolve to the nearer clip). */
+function layoutPxToSource(
+  layout: TimelineLayoutItem[],
+  x: number,
+  pixelsPerSecond: number,
+): {
+  instanceId: string;
+  sourceSec: number;
+  index: number;
+  compositionSec: number;
+} | null {
+  if (layout.length === 0) return null;
+  const clampedX = Math.max(0, x);
+  const videoKept = videoKeptSecFromLayout(layout);
+  const videoEndPx = videoEndPxFromLayout(layout);
+  const last = layout[layout.length - 1]!;
+
+  if (clampedX > videoEndPx + 0.5) {
+    const compositionSec =
+      videoKept + (clampedX - videoEndPx) / Math.max(1, pixelsPerSecond);
+    return {
+      instanceId: last.segment.instanceId,
+      sourceSec: last.segment.trimEndSec,
+      index: layout.length - 1,
+      compositionSec: Number(compositionSec.toFixed(3)),
+    };
+  }
+
+  for (let i = 0; i < layout.length; i += 1) {
+    const item = layout[i]!;
+    const end =
+      i < layout.length - 1
+        ? layout[i + 1]!.left
+        : item.left + item.width;
+    if (clampedX < end || i === layout.length - 1) {
+      const rel = Math.min(item.width, Math.max(0, clampedX - item.left));
+      const ratio = item.width > 0 ? rel / item.width : 0;
+      const sourceSec =
+        item.segment.trimStartSec + ratio * keptDuration(item.segment);
+      const compositionSec = sourceToComposition(
+        layout.map((row) => row.segment),
+        item.segment.instanceId,
+        sourceSec,
+      );
+      return {
+        instanceId: item.segment.instanceId,
+        sourceSec: Number(sourceSec.toFixed(3)),
+        index: i,
+        compositionSec: Number(compositionSec.toFixed(3)),
+      };
+    }
+  }
+  return {
+    instanceId: last.segment.instanceId,
+    sourceSec: last.segment.trimEndSec,
+    index: layout.length - 1,
+    compositionSec: videoKept,
+  };
+}
+
+function layoutPxToComposition(
+  layout: TimelineLayoutItem[],
+  x: number,
+  pixelsPerSecond: number,
+): number {
+  const mapped = layoutPxToSource(layout, x, pixelsPerSecond);
+  return mapped?.compositionSec ?? 0;
+}
+
 export interface MergeTimelineAudioTrackView {
   instanceId: string;
   label: string;
@@ -206,7 +326,12 @@ export interface VideoFrameMergeTimelineProps {
   /** Optional soundtrack clips on a second track (composition time). */
   audioTracks?: MergeTimelineAudioTrackView[];
   selectedId: string | null;
-  /** Source time within the selected segment. */
+  /**
+   * Video segment the playhead is currently in (source-time space of `playheadSec`).
+   * Must stay set when a soundtrack is selected so the needle does not jump.
+   */
+  playheadSegmentId?: string | null;
+  /** Source time within `playheadSegmentId`. */
   playheadSec: number;
   /** Zoom multiplier (0.5–8). */
   zoom: number;
@@ -220,7 +345,16 @@ export interface VideoFrameMergeTimelineProps {
   ) => void;
   /** Fired once when a trim-handle drag begins (for undo snapshots). */
   onTrimGestureStart?: () => void;
-  onPlayheadChange: (instanceId: string, playheadSec: number) => void;
+  onPlayheadChange: (
+    instanceId: string,
+    playheadSec: number,
+    compositionSec?: number,
+  ) => void;
+  /**
+   * Extra composition time past the last video clip (black pad / audio overrun).
+   * Added on top of the mapped playhead composition when rendering the needle.
+   */
+  blackPadSec?: number;
   onZoomChange: (zoom: number) => void;
   /** Reorder by long-press then drag; `toIndex` is the target slot. */
   onReorder?: (fromInstanceId: string, toIndex: number) => void;
@@ -230,6 +364,8 @@ export interface VideoFrameMergeTimelineProps {
     instanceId: string,
     trimStartSec: number,
     trimEndSec: number,
+    /** When set (left-edge trim), keeps the right composition edge anchored. */
+    startAtSec?: number,
   ) => void;
   onAudioMove?: (instanceId: string, startAtSec: number) => void;
   onAudioGestureStart?: () => void;
@@ -513,6 +649,15 @@ function SegmentBlock({
             …
           </div>
         ) : null}
+        {segment.muted ? (
+          <div
+            className="pointer-events-none absolute left-1/2 top-1 z-10 flex -translate-x-1/2 items-center gap-0.5 rounded bg-black/65 px-1.5 py-0.5 text-[10px] font-medium text-zinc-100"
+            title="Clip audio muted"
+          >
+            <VolumeX className="size-3" />
+            Mute
+          </div>
+        ) : null}
 
         <button
           type="button"
@@ -551,39 +696,113 @@ function SegmentBlock({
   );
 }
 
+const AUDIO_MOVE_THRESHOLD_PX = 6;
+/** Snap soundtrack start to video-part starts when within this many pixels. */
+const AUDIO_SNAP_THRESHOLD_PX = 14;
+
+/** Composition-time starts of each video part (0, after first kept, …). */
+function videoPartStartSecs(segments: MergeTimelineSegmentView[]): number[] {
+  const starts: number[] = [0];
+  let t = 0;
+  for (let i = 0; i < segments.length - 1; i += 1) {
+    t += keptDuration(segments[i]!);
+    starts.push(Number(t.toFixed(3)));
+  }
+  return starts;
+}
+
+function snapToNearest(
+  value: number,
+  targets: number[],
+  thresholdSec: number,
+): number | null {
+  let best: number | null = null;
+  let bestDist = thresholdSec;
+  for (const target of targets) {
+    const dist = Math.abs(value - target);
+    if (dist <= bestDist) {
+      bestDist = dist;
+      best = target;
+    }
+  }
+  return best;
+}
+
 function AudioTrackBlock({
   track,
   selected,
   pixelsPerSecond,
   compositionDurationSec,
+  layout,
+  snapTargetsSec,
   onSelect,
   onTrimChange,
   onMove,
   onGestureStart,
+  onSnapGuideChange,
 }: {
   track: MergeTimelineAudioTrackView;
   selected: boolean;
   pixelsPerSecond: number;
   compositionDurationSec: number;
+  layout: TimelineLayoutItem[];
+  snapTargetsSec: number[];
   onSelect: () => void;
-  onTrimChange: (trimStartSec: number, trimEndSec: number) => void;
+  onTrimChange: (
+    trimStartSec: number,
+    trimEndSec: number,
+    startAtSec?: number,
+  ) => void;
   onMove: (startAtSec: number) => void;
   onGestureStart?: () => void;
+  onSnapGuideChange?: (compositionSec: number | null) => void;
 }) {
   const blockRef = useRef<HTMLDivElement>(null);
   const dragKindRef = useRef<"start" | "end" | "move" | null>(null);
-  const moveOriginRef = useRef<{ clientX: number; startAtSec: number } | null>(
-    null,
-  );
+  const pendingMoveRef = useRef<{
+    clientX: number;
+    startAtSec: number;
+    leftPx: number;
+  } | null>(null);
+  const moveOriginRef = useRef<{
+    clientX: number;
+    startAtSec: number;
+    leftPx: number;
+  } | null>(null);
+  const trimOriginRef = useRef<{
+    clientX: number;
+    trimStartSec: number;
+    trimEndSec: number;
+    startAtSec: number;
+    /** Composition time of the right edge — stays fixed while dragging left. */
+    rightCompSec: number;
+  } | null>(null);
+  const gestureStartedRef = useRef(false);
   const [dragging, setDragging] = useState<"start" | "end" | "move" | null>(
     null,
   );
+  const [snapped, setSnapped] = useState(false);
 
   const duration = Math.max(0.1, track.durationSec);
   const kept = Math.max(MIN_TRIM_SEC, track.trimEndSec - track.trimStartSec);
-  const blockWidth = Math.max(56, kept * pixelsPerSecond);
-  const leftPx = Math.max(0, track.startAtSec) * pixelsPerSecond;
-  const maxStartAt = Math.max(0, compositionDurationSec - MIN_TRIM_SEC);
+  const leftPx = compositionToLayoutPx(
+    layout,
+    Math.max(0, track.startAtSec),
+    pixelsPerSecond,
+  );
+  const rightPx = compositionToLayoutPx(
+    layout,
+    Math.max(0, track.startAtSec) + kept,
+    pixelsPerSecond,
+  );
+  const blockWidth = Math.max(56, rightPx - leftPx);
+  // Allow dragging past the video end — timeline grows with audio overrun.
+  const maxStartAt = Math.max(
+    compositionDurationSec - MIN_TRIM_SEC,
+    track.startAtSec,
+    0,
+  );
+  const snapThresholdSec = AUDIO_SNAP_THRESHOLD_PX / Math.max(1, pixelsPerSecond);
 
   function clampTrim(
     start: number,
@@ -604,64 +823,134 @@ function AudioTrackBlock({
     };
   }
 
+  function ensureGestureStarted() {
+    if (gestureStartedRef.current) return;
+    gestureStartedRef.current = true;
+    onGestureStart?.();
+  }
+
   function onPointerMove(event: PointerEvent) {
+    const pending = pendingMoveRef.current;
+    if (pending && dragKindRef.current == null) {
+      const dx = Math.abs(event.clientX - pending.clientX);
+      if (dx < AUDIO_MOVE_THRESHOLD_PX) return;
+      // Past threshold: promote tap → move drag.
+      ensureGestureStarted();
+      dragKindRef.current = "move";
+      moveOriginRef.current = pending;
+      pendingMoveRef.current = null;
+      setDragging("move");
+    }
+
     const kind = dragKindRef.current;
     if (!kind) return;
 
     if (kind === "move") {
       const origin = moveOriginRef.current;
       if (!origin) return;
-      const deltaSec = (event.clientX - origin.clientX) / pixelsPerSecond;
-      const next = Math.min(
-        maxStartAt,
-        Math.max(0, origin.startAtSec + deltaSec),
+      const nextLeftPx = origin.leftPx + (event.clientX - origin.clientX);
+      const raw = Math.min(
+        maxStartAt + kept,
+        Math.max(0, layoutPxToComposition(layout, nextLeftPx, pixelsPerSecond)),
       );
+      const snappedTo = snapToNearest(raw, snapTargetsSec, snapThresholdSec);
+      const next = snappedTo ?? raw;
+      setSnapped(snappedTo != null);
+      onSnapGuideChange?.(snappedTo);
       onMove(Number(next.toFixed(3)));
       return;
     }
 
-    const block = blockRef.current;
-    if (!block) return;
-    const rect = block.getBoundingClientRect();
+    const origin = trimOriginRef.current;
+    if (!origin) return;
+    const deltaSec =
+      (event.clientX - origin.clientX) / Math.max(1, pixelsPerSecond);
 
     if (kind === "start") {
-      const keptPx = Math.max(HANDLE_WIDTH * 2, rect.right - event.clientX);
-      const nextKept = keptPx / pixelsPerSecond;
-      const next = clampTrim(track.trimEndSec - nextKept, track.trimEndSec);
-      onTrimChange(next.start, next.end);
+      // Left edge only: keep right composition edge + trimEnd fixed.
+      let nextTrimStart = origin.trimStartSec + deltaSec;
+      nextTrimStart = Math.min(
+        origin.trimEndSec - MIN_TRIM_SEC,
+        Math.max(0, nextTrimStart),
+      );
+      const nextKept = origin.trimEndSec - nextTrimStart;
+      let nextStartAt = origin.rightCompSec - nextKept;
+      if (nextStartAt < 0) {
+        nextStartAt = 0;
+        nextTrimStart = origin.trimEndSec - origin.rightCompSec;
+        nextTrimStart = Math.min(
+          origin.trimEndSec - MIN_TRIM_SEC,
+          Math.max(0, nextTrimStart),
+        );
+      }
+      const next = clampTrim(nextTrimStart, origin.trimEndSec);
+      const keptAfter = next.end - next.start;
+      onTrimChange(
+        next.start,
+        next.end,
+        Math.max(0, origin.rightCompSec - keptAfter),
+      );
       return;
     }
 
-    const keptPx = Math.max(HANDLE_WIDTH * 2, event.clientX - rect.left);
-    const nextKept = keptPx / pixelsPerSecond;
-    const next = clampTrim(track.trimStartSec, track.trimStartSec + nextKept);
+    // Right edge only: keep left composition edge + trimStart fixed.
+    let nextTrimEnd = origin.trimEndSec + deltaSec;
+    nextTrimEnd = Math.min(
+      duration,
+      Math.max(origin.trimStartSec + MIN_TRIM_SEC, nextTrimEnd),
+    );
+    const next = clampTrim(origin.trimStartSec, nextTrimEnd);
     onTrimChange(next.start, next.end);
   }
 
   function stopDragging() {
     dragKindRef.current = null;
     moveOriginRef.current = null;
+    pendingMoveRef.current = null;
+    trimOriginRef.current = null;
+    gestureStartedRef.current = false;
     setDragging(null);
+    setSnapped(false);
+    onSnapGuideChange?.(null);
     window.removeEventListener("pointermove", onPointerMove);
     window.removeEventListener("pointerup", stopDragging);
   }
 
-  function beginDrag(
-    kind: "start" | "end" | "move",
-    event: ReactPointerEvent,
-  ) {
+  function beginTrimDrag(kind: "start" | "end", event: ReactPointerEvent) {
     event.preventDefault();
     event.stopPropagation();
     onSelect();
-    onGestureStart?.();
+    ensureGestureStarted();
     dragKindRef.current = kind;
+    const keptNow = Math.max(
+      MIN_TRIM_SEC,
+      track.trimEndSec - track.trimStartSec,
+    );
+    trimOriginRef.current = {
+      clientX: event.clientX,
+      trimStartSec: track.trimStartSec,
+      trimEndSec: track.trimEndSec,
+      startAtSec: track.startAtSec,
+      rightCompSec: Math.max(0, track.startAtSec) + keptNow,
+    };
     setDragging(kind);
-    if (kind === "move") {
-      moveOriginRef.current = {
-        clientX: event.clientX,
-        startAtSec: track.startAtSec,
-      };
-    }
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", stopDragging);
+  }
+
+  function beginBodyPointer(event: ReactPointerEvent) {
+    if ((event.target as HTMLElement).closest("[data-handle]")) return;
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    onSelect();
+    // Tap selects only; drag past threshold moves the clip.
+    pendingMoveRef.current = {
+      clientX: event.clientX,
+      startAtSec: track.startAtSec,
+      leftPx,
+    };
+    dragKindRef.current = null;
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", stopDragging);
   }
@@ -682,6 +971,7 @@ function AudioTrackBlock({
         selected
           ? "border-sky-400 shadow-[0_0_0_1px_rgba(0,0,0,0.35)]"
           : "border-sky-700/80",
+        snapped && "border-amber-300 shadow-[0_0_0_1px_rgba(251,191,36,0.7)]",
         dragging === "move" ? "cursor-grabbing" : "cursor-grab",
       )}
       style={{
@@ -691,12 +981,8 @@ function AudioTrackBlock({
         background:
           "repeating-linear-gradient(90deg, #0c4a6e 0px, #0c4a6e 3px, #075985 3px, #075985 6px)",
       }}
-      title={`${track.label} · drag to move · trim handles on edges`}
-      onPointerDown={(event) => {
-        if ((event.target as HTMLElement).closest("[data-handle]")) return;
-        if (event.button !== 0) return;
-        beginDrag("move", event);
-      }}
+      title={`${track.label} · tap to select · drag to move (snaps to video starts) · trim handles on edges`}
+      onPointerDown={beginBodyPointer}
     >
       <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-4">
         <span className="truncate text-[10px] font-medium text-sky-100/90">
@@ -711,7 +997,7 @@ function AudioTrackBlock({
           "absolute inset-y-0 left-0 z-20 flex w-3 cursor-ew-resize items-center justify-center bg-sky-300",
           dragging === "start" && "brightness-110",
         )}
-        onPointerDown={(event) => beginDrag("start", event)}
+        onPointerDown={(event) => beginTrimDrag("start", event)}
       >
         <span className="h-5 w-0.5 rounded-full bg-sky-950/80" />
       </button>
@@ -723,7 +1009,7 @@ function AudioTrackBlock({
           "absolute inset-y-0 right-0 z-20 flex w-3 cursor-ew-resize items-center justify-center bg-sky-300",
           dragging === "end" && "brightness-110",
         )}
-        onPointerDown={(event) => beginDrag("end", event)}
+        onPointerDown={(event) => beginTrimDrag("end", event)}
       >
         <MoveHorizontal className="size-3 text-sky-950 drop-shadow" />
       </button>
@@ -735,7 +1021,9 @@ export function VideoFrameMergeTimeline({
   segments,
   audioTracks = [],
   selectedId,
+  playheadSegmentId = null,
   playheadSec,
+  blackPadSec = 0,
   zoom,
   pixelsPerSecond,
   onSelect,
@@ -756,6 +1044,7 @@ export function VideoFrameMergeTimeline({
   const [draggingPlayhead, setDraggingPlayhead] = useState(false);
   const [reorderId, setReorderId] = useState<string | null>(null);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
+  const [audioSnapSec, setAudioSnapSec] = useState<number | null>(null);
   const reorderIdRef = useRef<string | null>(null);
   const dropIndexRef = useRef<number | null>(null);
   const layoutRef = useRef<
@@ -767,22 +1056,47 @@ export function VideoFrameMergeTimeline({
     [segments],
   );
 
+  const audioExtentSec = useMemo(() => {
+    let max = 0;
+    for (const track of audioTracks) {
+      const kept = Math.max(
+        MIN_TRIM_SEC,
+        track.trimEndSec - track.trimStartSec,
+      );
+      max = Math.max(max, Math.max(0, track.startAtSec) + kept);
+    }
+    return max;
+  }, [audioTracks]);
+
+  const timelineDurationSec = Math.max(totalKeptSec, audioExtentSec);
+  const overrunSec = Math.max(0, timelineDurationSec - totalKeptSec);
+
+  const audioSnapTargetsSec = useMemo(
+    () => videoPartStartSecs(segments),
+    [segments],
+  );
+
   const selected = segments.find((segment) => segment.instanceId === selectedId);
-  /** Video segment used for playhead mapping (audio selection must not break it). */
-  const playheadSegment = selected ?? segments[0] ?? null;
+  /** Prefer explicit playhead segment so soundtrack selection does not remap the needle. */
+  const playheadSegment =
+    segments.find((segment) => segment.instanceId === playheadSegmentId) ??
+    selected ??
+    segments[0] ??
+    null;
 
   const compositionSec = useMemo(() => {
-    if (!playheadSegment) return 0;
+    if (!playheadSegment) return Math.max(0, blackPadSec);
     const sourceSec = Math.min(
       playheadSegment.trimEndSec,
       Math.max(playheadSegment.trimStartSec, playheadSec),
     );
-    return sourceToComposition(
+    const base = sourceToComposition(
       segments,
       playheadSegment.instanceId,
       sourceSec,
     );
-  }, [segments, playheadSegment, playheadSec]);
+    return base + Math.max(0, blackPadSec);
+  }, [segments, playheadSegment, playheadSec, blackPadSec]);
 
   const layout = useMemo(() => {
     let x = 0;
@@ -795,9 +1109,16 @@ export function VideoFrameMergeTimeline({
   }, [segments, pixelsPerSecond]);
   layoutRef.current = layout;
 
-  const totalWidth = Math.max(160, layout.reduce((sum, item, index) => {
-    return sum + item.width + (index > 0 ? SEGMENT_GAP : 0);
-  }, 0));
+  const videoTrackWidth = Math.max(
+    160,
+    layout.reduce((sum, item, index) => {
+      return sum + item.width + (index > 0 ? SEGMENT_GAP : 0);
+    }, 0),
+  );
+  const totalWidth = Math.max(
+    160,
+    videoTrackWidth + overrunSec * pixelsPerSecond,
+  );
 
   function dropIndexFromClientX(clientX: number): number {
     const row = trackRowRef.current;
@@ -864,8 +1185,22 @@ export function VideoFrameMergeTimeline({
 
   const playheadPx = Math.min(
     totalWidth,
-    Math.max(0, compositionSec * pixelsPerSecond),
+    Math.max(
+      0,
+      compositionToLayoutPx(layout, compositionSec, pixelsPerSecond),
+    ),
   );
+
+  const audioSnapPx =
+    audioSnapSec != null
+      ? Math.min(
+          totalWidth,
+          Math.max(
+            0,
+            compositionToLayoutPx(layout, audioSnapSec, pixelsPerSecond),
+          ),
+        )
+      : null;
 
   const tickStep =
     pixelsPerSecond >= 120
@@ -877,7 +1212,7 @@ export function VideoFrameMergeTimeline({
           : 2;
 
   const ticks: number[] = [];
-  for (let t = 0; t <= totalKeptSec + 0.001; t += tickStep) {
+  for (let t = 0; t <= timelineDurationSec + 0.001; t += tickStep) {
     ticks.push(Number(t.toFixed(3)));
   }
 
@@ -886,11 +1221,14 @@ export function VideoFrameMergeTimeline({
     if (!row || segments.length === 0) return;
     const rect = row.getBoundingClientRect();
     const x = Math.min(rect.width, Math.max(0, clientX - rect.left));
-    const composition = x / pixelsPerSecond;
-    const mapped = compositionToSource(segments, composition);
+    const mapped = layoutPxToSource(layoutRef.current, x, pixelsPerSecond);
     if (!mapped) return;
-    onSelect(mapped.instanceId);
-    onPlayheadChange(mapped.instanceId, mapped.sourceSec);
+    // Scrubbing must not steal selection (e.g. soundtrack) onto the video under the needle.
+    onPlayheadChange(
+      mapped.instanceId,
+      mapped.sourceSec,
+      mapped.compositionSec,
+    );
   }
 
   function onPlayheadPointerMove(event: PointerEvent) {
@@ -1032,7 +1370,10 @@ export function VideoFrameMergeTimeline({
           {hasAudioTrack
             ? ` · ${audioTracks.length} audio`
             : ""}{" "}
-          · total kept {formatTimelineTime(totalKeptSec)}
+          · video {formatTimelineTime(totalKeptSec)}
+          {overrunSec > 0.04
+            ? ` · timeline ${formatTimelineTime(timelineDurationSec)} (black pad ${formatTimelineTime(overrunSec)})`
+            : ""}
           {selected ? ` · ${selected.label}` : ""}
           {selectedAudio ? ` · ${selectedAudio.label}` : ""}
           <span className="ml-2 text-zinc-500">
@@ -1065,7 +1406,9 @@ export function VideoFrameMergeTimeline({
               <div
                 key={t}
                 className="absolute top-0 h-2 w-px bg-zinc-600"
-                style={{ left: t * pixelsPerSecond }}
+                style={{
+                  left: compositionToLayoutPx(layout, t, pixelsPerSecond),
+                }}
               />
             ))}
           </div>
@@ -1090,7 +1433,8 @@ export function VideoFrameMergeTimeline({
           >
             <div className="flex items-stretch" style={{ gap: SEGMENT_GAP }}>
               {layout.map(({ segment }, index) => {
-                const isSelected = segment.instanceId === selectedId;
+                const isSelected =
+                  segment.instanceId === selectedId && blackPadSec < 0.02;
                 const guideInSegment =
                   isSelected &&
                   playheadSec >= segment.trimStartSec - 0.001 &&
@@ -1132,10 +1476,40 @@ export function VideoFrameMergeTimeline({
               })}
             </div>
 
+            {overrunSec > 0.04 ? (
+              <div
+                className="absolute top-0 flex items-center justify-center rounded-md border border-dashed border-zinc-600 bg-zinc-950/90 text-[10px] font-medium uppercase tracking-wide text-zinc-500"
+                style={{
+                  left: videoTrackWidth,
+                  width: Math.max(48, overrunSec * pixelsPerSecond),
+                  height: TRACK_HEIGHT,
+                }}
+                title="Black pad — video holds black while soundtrack continues"
+                onPointerDown={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  beginPlayheadDrag(event);
+                }}
+              >
+                Black
+              </div>
+            ) : null}
+
             {dropLineLeft != null ? (
               <div
                 className="pointer-events-none absolute top-[-4px] z-50 h-[calc(100%+8px)] w-0.5 rounded-full bg-[#f5d000] shadow-[0_0_6px_rgba(245,208,0,0.8)]"
                 style={{ left: dropLineLeft }}
+              />
+            ) : null}
+
+            {audioSnapPx != null ? (
+              <div
+                className="pointer-events-none absolute top-[-6px] z-50 w-0.5 rounded-full bg-amber-300 shadow-[0_0_8px_rgba(251,191,36,0.9)]"
+                style={{
+                  left: audioSnapPx,
+                  height: `calc(100% + 20px + ${playheadExtra}px)`,
+                }}
+                aria-hidden
               />
             ) : null}
 
@@ -1155,7 +1529,7 @@ export function VideoFrameMergeTimeline({
               role="slider"
               aria-label="Playhead"
               aria-valuemin={0}
-              aria-valuemax={totalKeptSec}
+              aria-valuemax={timelineDurationSec}
               aria-valuenow={compositionSec}
               tabIndex={0}
               onKeyDown={(event) => {
@@ -1164,13 +1538,26 @@ export function VideoFrameMergeTimeline({
                   event.preventDefault();
                   const delta = event.key === "ArrowLeft" ? -step : step;
                   const nextComp = Math.min(
-                    totalKeptSec,
+                    timelineDurationSec,
                     Math.max(0, compositionSec + delta),
                   );
+                  if (nextComp > totalKeptSec + 0.001) {
+                    const last = segments[segments.length - 1];
+                    if (!last) return;
+                    onPlayheadChange(
+                      last.instanceId,
+                      last.trimEndSec,
+                      nextComp,
+                    );
+                    return;
+                  }
                   const mapped = compositionToSource(segments, nextComp);
                   if (!mapped) return;
-                  onSelect(mapped.instanceId);
-                  onPlayheadChange(mapped.instanceId, mapped.sourceSec);
+                  onPlayheadChange(
+                    mapped.instanceId,
+                    mapped.sourceSec,
+                    nextComp,
+                  );
                 }
               }}
             >
@@ -1198,15 +1585,23 @@ export function VideoFrameMergeTimeline({
                     track={track}
                     selected={track.instanceId === selectedId}
                     pixelsPerSecond={pixelsPerSecond}
-                    compositionDurationSec={totalKeptSec}
+                    compositionDurationSec={timelineDurationSec}
+                    layout={layout}
+                    snapTargetsSec={audioSnapTargetsSec}
                     onSelect={() => onAudioSelect?.(track.instanceId)}
-                    onTrimChange={(start, end) =>
-                      onAudioTrimChange?.(track.instanceId, start, end)
+                    onTrimChange={(start, end, startAtSec) =>
+                      onAudioTrimChange?.(
+                        track.instanceId,
+                        start,
+                        end,
+                        startAtSec,
+                      )
                     }
                     onMove={(startAtSec) =>
                       onAudioMove?.(track.instanceId, startAtSec)
                     }
                     onGestureStart={onAudioGestureStart}
+                    onSnapGuideChange={setAudioSnapSec}
                   />
                 ))}
               </div>
@@ -1218,7 +1613,7 @@ export function VideoFrameMergeTimeline({
             style={{ width: totalWidth }}
           >
             <span>00:00.00</span>
-            <span>{formatTimelineTime(totalKeptSec)}</span>
+            <span>{formatTimelineTime(timelineDurationSec)}</span>
           </div>
         </div>
       </div>

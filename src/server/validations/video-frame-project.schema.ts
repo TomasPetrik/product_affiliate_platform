@@ -5,6 +5,8 @@ export const frameSpanSchema = z.object({
   start: z.number().finite().min(0),
   end: z.number().finite().min(0),
   frameCount: z.number().int().min(1).max(120),
+  kind: z.enum(["source", "custom"]).optional(),
+  label: z.string().trim().max(80).optional(),
 });
 
 export const videoFrameProjectNameSchema = z
@@ -36,6 +38,8 @@ export const mergeVideoFrameSegmentSchema = z
     assetId: z.string().min(1),
     trimStartSec: z.number().finite().min(0).default(0),
     trimEndSec: z.number().finite().positive().optional(),
+    /** Silence this clip's audio; soundtrack may still overlay. */
+    muted: z.boolean().optional(),
   })
   .refine(
     (value) =>
@@ -93,6 +97,7 @@ export const videoFrameMergerSegmentStateSchema = z.object({
   trimStartSec: z.number().finite().min(0),
   trimEndSec: z.number().finite().positive(),
   durationSec: z.number().finite().positive(),
+  muted: z.boolean().optional(),
 });
 
 export const videoFrameMergerAudioTrackStateSchema = z.object({

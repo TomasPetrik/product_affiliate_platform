@@ -279,18 +279,141 @@ export async function cutVideoSegment(input: {
   }
 }
 
+export interface SoundtrackMixInput {
+  absoluteSourcePath: string;
+  trimStartSec: number;
+  trimEndSec: number;
+  /** Composition time (seconds) where the trimmed audio begins. */
+  startAtSec: number;
+  /** Linear gain 0–1. */
+  volume?: number;
+}
+
+const MERGE_MAX_SOUNDTRACKS = 8;
+
+function soundtrackFilterLabel(index: number): string {
+  return `bg${index}`;
+}
+
+/**
+ * Mix one or more trimmed/offset soundtracks onto a concatenated video.
+ * When `videoHasAudio` is false, soundtracks become the sole audio stream.
+ */
+async function mixSoundtracksOntoVideo(input: {
+  videoPath: string;
+  outPath: string;
+  videoDurationSec: number;
+  videoHasAudio: boolean;
+  soundtracks: SoundtrackMixInput[];
+}): Promise<void> {
+  const tracks = input.soundtracks.filter(
+    (track) => track.absoluteSourcePath.trim().length > 0,
+  );
+  if (tracks.length === 0) {
+    throw new VideoCutError("No soundtrack paths provided.");
+  }
+  if (tracks.length > MERGE_MAX_SOUNDTRACKS) {
+    throw new VideoCutError(
+      `Too many soundtracks to mix (max ${MERGE_MAX_SOUNDTRACKS}).`,
+    );
+  }
+
+  const videoDur = Math.max(0.1, input.videoDurationSec);
+  const filterParts: string[] = [];
+  const mixInputs: string[] = [];
+
+  if (input.videoHasAudio) {
+    filterParts.push(
+      `[0:a]aformat=sample_fmts=fltp:channel_layouts=stereo,aresample=44100[va]`,
+    );
+    mixInputs.push("[va]");
+  }
+
+  for (let i = 0; i < tracks.length; i += 1) {
+    const track = tracks[i]!;
+    const trimStart = Math.max(0, track.trimStartSec);
+    const trimEnd = Math.max(trimStart + 0.05, track.trimEndSec);
+    const delayMs = Math.max(0, Math.round(track.startAtSec * 1000));
+    const volume = Math.min(
+      1,
+      Math.max(0, Number.isFinite(track.volume) ? track.volume! : 1),
+    );
+    const label = soundtrackFilterLabel(i);
+    // Input index is i+1 because 0 is the video.
+    filterParts.push(
+      `[${i + 1}:a]atrim=start=${trimStart.toFixed(3)}:end=${trimEnd.toFixed(3)},asetpts=PTS-STARTPTS,volume=${volume.toFixed(3)},aformat=sample_fmts=fltp:channel_layouts=stereo,aresample=44100,adelay=${delayMs}|${delayMs},apad,atrim=0:${videoDur.toFixed(3)},asetpts=PTS-STARTPTS[${label}]`,
+    );
+    mixInputs.push(`[${label}]`);
+  }
+
+  const filterComplex =
+    mixInputs.length === 1
+      ? `${filterParts.join(";")}`
+      : `${filterParts.join(";")};${mixInputs.join("")}amix=inputs=${mixInputs.length}:duration=first:dropout_transition=0:normalize=0[aout]`;
+
+  const mapAudio = mixInputs.length === 1 ? mixInputs[0]! : "[aout]";
+
+  const args: string[] = [
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-y",
+    "-i",
+    input.videoPath,
+  ];
+  for (const track of tracks) {
+    args.push("-i", track.absoluteSourcePath);
+  }
+  args.push(
+    "-filter_complex",
+    filterComplex,
+    "-map",
+    "0:v:0",
+    "-map",
+    mapAudio,
+    "-c:v",
+    "copy",
+    "-c:a",
+    "aac",
+    "-ac",
+    "2",
+    "-ar",
+    "44100",
+    "-movflags",
+    "+faststart",
+    "-t",
+    videoDur.toFixed(3),
+    input.outPath,
+  );
+
+  await runFfmpeg(args);
+}
+
+function keptSegmentDurationSec(segment: ConcatSegmentInput): number {
+  const start = Math.max(0, segment.trimStartSec ?? 0);
+  const end = segment.trimEndSec;
+  if (end != null && Number.isFinite(end) && end > start) {
+    return end - start;
+  }
+  return 0;
+}
+
 /**
  * Concatenate local video files into a single H.264 MP4.
  * Each input is optionally trimmed, then normalized to 9:16 at the chosen
  * quality (720p / 1080p / 2K), 30fps, AAC — or no audio when stripAudio is set.
+ * Optional soundtracks are trimmed, delayed to composition time, and mixed in.
  */
 export async function concatVideoSegments(input: {
   absoluteSourcePaths?: string[];
   segments?: ConcatSegmentInput[];
-  /** When true, output has no audio track. */
+  /** When true, clip audio is stripped (soundtracks may still be mixed in). */
   stripAudio?: boolean;
   /** 9:16 output size. Defaults to 1080p. */
   quality?: MergeExportQuality;
+  soundtracks?: SoundtrackMixInput[];
+  /** Total kept composition duration (seconds). Used when mixing soundtracks. */
+  compositionDurationSec?: number;
 }): Promise<{ bytes: Buffer; contentType: string; filename: string }> {
   const segments: ConcatSegmentInput[] =
     input.segments?.filter((s) => s.absoluteSourcePath.trim().length > 0) ??
@@ -300,6 +423,9 @@ export async function concatVideoSegments(input: {
   const stripAudio = input.stripAudio === true;
   const quality = parseMergeExportQuality(
     input.quality ?? DEFAULT_MERGE_EXPORT_QUALITY,
+  );
+  const soundtracks = (input.soundtracks ?? []).filter(
+    (track) => track.absoluteSourcePath.trim().length > 0,
   );
 
   if (segments.length < 2) {
@@ -317,7 +443,14 @@ export async function concatVideoSegments(input: {
     }
   }
 
+  for (const track of soundtracks) {
+    if (track.trimEndSec <= track.trimStartSec + 0.04) {
+      throw new VideoCutError("A trimmed soundtrack is too short to merge.");
+    }
+  }
+
   const dir = await mkdtemp(path.join(tmpdir(), "radarcut-merge-"));
+  const concatPath = path.join(dir, "concat.mp4");
   const outPath = path.join(dir, "merged.mp4");
   const listPath = path.join(dir, "concat.txt");
 
@@ -352,10 +485,36 @@ export async function concatVideoSegments(input: {
       "copy",
       "-movflags",
       "+faststart",
-      outPath,
+      concatPath,
     ]);
 
-    const bytes = await readFile(outPath);
+    let finalPath = concatPath;
+    if (soundtracks.length > 0) {
+      const compositionDurationSec =
+        input.compositionDurationSec != null &&
+        Number.isFinite(input.compositionDurationSec) &&
+        input.compositionDurationSec > 0
+          ? input.compositionDurationSec
+          : segments.reduce(
+              (sum, segment) => sum + keptSegmentDurationSec(segment),
+              0,
+            );
+      if (!(compositionDurationSec > 0)) {
+        throw new VideoCutError(
+          "Could not determine composition duration for soundtrack mix.",
+        );
+      }
+      await mixSoundtracksOntoVideo({
+        videoPath: concatPath,
+        outPath,
+        videoDurationSec: compositionDurationSec,
+        videoHasAudio: !stripAudio,
+        soundtracks,
+      });
+      finalPath = outPath;
+    }
+
+    const bytes = await readFile(finalPath);
     if (bytes.byteLength <= 0) {
       throw new VideoCutError("Merge produced an empty file.");
     }

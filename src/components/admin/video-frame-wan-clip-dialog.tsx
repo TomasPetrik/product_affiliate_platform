@@ -30,6 +30,7 @@ import {
   type WanVideoResolution,
 } from "@/lib/wan-video";
 import type { SpanClipFrameCandidate } from "@/components/admin/video-frame-krea-clip-dialog";
+import { WanCostEstimate } from "@/components/admin/wan-cost-estimate";
 import { createWanVideoHistoryId } from "@/lib/wan-video-history";
 import { submitWanVideoAction } from "@/server/actions/wan-video.actions";
 
@@ -62,6 +63,8 @@ export interface WanClipJob {
   referenceImages: File[];
   timeSec: number;
   inferenceMs?: number;
+  /** WaveSpeed USD charge when known. */
+  costUsd?: number | null;
 }
 
 export interface VideoFrameWanClipDialogProps {
@@ -872,7 +875,19 @@ export function VideoFrameWanClipDialog({
               ) : null}
             </div>
 
-            <div className="flex flex-wrap items-center justify-between gap-3 border-t px-5 py-3">
+            <div className="flex flex-col gap-2 border-t px-5 py-3">
+              <WanCostEstimate
+                enabled={waveSpeedConfigured && !busy}
+                input={{
+                  kind: "reference-to-video",
+                  duration,
+                  resolution,
+                  aspectRatio,
+                  generateAudio,
+                  enablePromptExpansion,
+                }}
+              />
+              <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="text-xs text-muted-foreground">
                 {selectedCandidates.length} frame
                 {selectedCandidates.length === 1 ? "" : "s"} selected
@@ -914,6 +929,7 @@ export function VideoFrameWanClipDialog({
                     </>
                   )}
                 </Button>
+              </div>
               </div>
             </div>
           </form>

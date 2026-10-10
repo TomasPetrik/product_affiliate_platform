@@ -26,6 +26,7 @@ export interface PersistedWanFrameJob {
   size: string;
   seed: string;
   inferenceMs?: number;
+  costUsd?: number | null;
 }
 
 export interface PersistedWanClipJob {
@@ -49,6 +50,7 @@ export interface PersistedWanClipJob {
   historyId: string;
   timeSec: number;
   inferenceMs?: number;
+  costUsd?: number | null;
 }
 
 export interface PersistedWanVideoEditJob {
@@ -73,6 +75,7 @@ export interface PersistedWanVideoEditJob {
   historyId: string;
   timeSec: number;
   inferenceMs?: number;
+  costUsd?: number | null;
 }
 
 export interface VideoFrameActiveJobsSnapshot {
@@ -134,6 +137,7 @@ export function toPersistedFrameJob(job: {
   size: string;
   seed: string;
   inferenceMs?: number;
+  costUsd?: number | null;
 }): PersistedWanFrameJob | null {
   if (!shouldPersistJob(job)) return null;
   return {
@@ -152,6 +156,7 @@ export function toPersistedFrameJob(job: {
     size: job.size,
     seed: job.seed,
     inferenceMs: job.inferenceMs,
+    costUsd: job.costUsd,
   };
 }
 
@@ -176,6 +181,7 @@ export function toPersistedClipJob(job: {
   historyId: string;
   timeSec: number;
   inferenceMs?: number;
+  costUsd?: number | null;
 }): PersistedWanClipJob | null {
   if (!shouldPersistJob(job)) return null;
   return {
@@ -199,6 +205,7 @@ export function toPersistedClipJob(job: {
     historyId: job.historyId,
     timeSec: job.timeSec,
     inferenceMs: job.inferenceMs,
+    costUsd: job.costUsd,
   };
 }
 
@@ -224,6 +231,7 @@ export function toPersistedVideoEditJob(job: {
   historyId: string;
   timeSec: number;
   inferenceMs?: number;
+  costUsd?: number | null;
 }): PersistedWanVideoEditJob | null {
   if (!shouldPersistJob(job)) return null;
   return {
@@ -248,6 +256,7 @@ export function toPersistedVideoEditJob(job: {
     historyId: job.historyId,
     timeSec: job.timeSec,
     inferenceMs: job.inferenceMs,
+    costUsd: job.costUsd,
   };
 }
 

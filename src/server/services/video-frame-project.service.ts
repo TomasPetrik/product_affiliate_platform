@@ -9,6 +9,7 @@ import type { VideoFrameAssetKind } from "@/generated/prisma/enums";
 import {
   isLocalVideoFrameUpload,
   LOCAL_VIDEO_FRAME_UPLOAD_PREFIX,
+  MAX_VIDEO_FRAME_PROJECT_AUDIO_BYTES,
   MAX_VIDEO_FRAME_PROJECT_VIDEO_BYTES,
   publicVideoFramePath,
   videoFrameProjectDir,
@@ -30,6 +31,7 @@ import { prisma } from "@/lib/prisma";
 import {
   concatVideoSegments,
   VideoCutError,
+  type SoundtrackMixInput,
 } from "@/server/services/video-cut.service";
 
 const ALLOWED_VIDEO_TYPES = new Set([
@@ -37,6 +39,19 @@ const ALLOWED_VIDEO_TYPES = new Set([
   "video/webm",
   "video/quicktime",
   "video/x-m4v",
+]);
+
+const ALLOWED_AUDIO_TYPES = new Set([
+  "audio/mpeg",
+  "audio/mp3",
+  "audio/wav",
+  "audio/x-wav",
+  "audio/mp4",
+  "audio/aac",
+  "audio/ogg",
+  "audio/webm",
+  "audio/x-m4a",
+  "audio/m4a",
 ]);
 
 const THUMB_MAX_WIDTH = 384;
@@ -68,6 +83,8 @@ export interface VideoFrameProjectAssetDto {
   bytes: number;
   width: number | null;
   height: number | null;
+  /** WaveSpeed USD charge when this asset came from a Wan generation. */
+  costUsd: number | null;
 }
 
 export interface VideoFrameProjectDetail {
@@ -87,6 +104,8 @@ export interface VideoFrameProjectDetail {
   editedBytes: number;
   clipsBytes: number;
   totalBytes: number;
+  /** Sum of WaveSpeed costs on EDITED + CLIP assets (USD). */
+  wanCostUsd: number;
   assets: VideoFrameProjectAssetDto[];
   updatedAt: Date;
   createdAt: Date;
@@ -144,6 +163,30 @@ function extensionForVideo(file: File): string {
   }
 }
 
+function extensionForAudio(file: File): string {
+  const fromName = path.extname(file.name).toLowerCase();
+  if (fromName && /^\.(mp3|wav|aac|ogg|m4a|webm)$/.test(fromName)) {
+    return fromName;
+  }
+  switch (file.type) {
+    case "audio/wav":
+    case "audio/x-wav":
+      return ".wav";
+    case "audio/aac":
+      return ".aac";
+    case "audio/ogg":
+      return ".ogg";
+    case "audio/mp4":
+    case "audio/x-m4a":
+    case "audio/m4a":
+      return ".m4a";
+    case "audio/webm":
+      return ".webm";
+    default:
+      return ".mp3";
+  }
+}
+
 async function recalculateProjectSizes(projectId: string) {
   const [project, assets] = await Promise.all([
     prisma.videoFrameProject.findUniqueOrThrow({
@@ -169,7 +212,11 @@ async function recalculateProjectSizes(projectId: string) {
       thumbnailsBytes = sum;
     } else if (row.kind === "EDITED") {
       editedBytes = sum;
-    } else if (row.kind === "CLIP" || row.kind === "MERGED") {
+    } else if (
+      row.kind === "CLIP" ||
+      row.kind === "MERGED" ||
+      row.kind === "AUDIO"
+    ) {
       clipsBytes += sum;
     }
   }
@@ -214,6 +261,7 @@ function mapDetail(
       bytes: number;
       width: number | null;
       height: number | null;
+      costUsd: { toNumber(): number } | number | null;
     }>;
   },
 ): VideoFrameProjectDetail {
@@ -222,12 +270,48 @@ function mapDetail(
       .filter((asset) => asset.kind === "CLIP")
       .map((asset) => asset.id),
   );
+  const audioIds = new Set(
+    project.assets
+      .filter((asset) => asset.kind === "AUDIO")
+      .map((asset) => asset.id),
+  );
   const merger =
     sanitizeVideoFrameMergerState(
       parseVideoFrameMergerState(project.mergerJson) ??
         emptyVideoFrameMergerState(),
       clipIds,
+      audioIds,
     );
+
+  const assets: VideoFrameProjectAssetDto[] = project.assets.map((asset) => {
+    const rawCost = asset.costUsd;
+    const costUsd =
+      rawCost == null
+        ? null
+        : typeof rawCost === "number"
+          ? rawCost
+          : rawCost.toNumber();
+    return {
+      id: asset.id,
+      kind: asset.kind,
+      spanId: asset.spanId,
+      frameIndex: asset.frameIndex,
+      timeSec: asset.timeSec,
+      label: asset.label,
+      fileName: asset.fileName,
+      path: asset.path,
+      bytes: asset.bytes,
+      width: asset.width,
+      height: asset.height,
+      costUsd:
+        costUsd != null && Number.isFinite(costUsd) ? costUsd : null,
+    };
+  });
+
+  const wanCostUsd = assets.reduce((sum, asset) => {
+    if (asset.kind !== "EDITED" && asset.kind !== "CLIP") return sum;
+    return sum + (asset.costUsd ?? 0);
+  }, 0);
 
   return {
     id: project.id,
@@ -246,19 +330,8 @@ function mapDetail(
     editedBytes: toNumber(project.editedBytes),
     clipsBytes: toNumber(project.clipsBytes),
     totalBytes: toNumber(project.totalBytes),
-    assets: project.assets.map((asset) => ({
-      id: asset.id,
-      kind: asset.kind,
-      spanId: asset.spanId,
-      frameIndex: asset.frameIndex,
-      timeSec: asset.timeSec,
-      label: asset.label,
-      fileName: asset.fileName,
-      path: asset.path,
-      bytes: asset.bytes,
-      width: asset.width,
-      height: asset.height,
-    })),
+    wanCostUsd,
+    assets,
     updatedAt: project.updatedAt,
     createdAt: project.createdAt,
   };
@@ -400,8 +473,8 @@ export async function saveVideoFrameMergerState(input: {
     where: { id: projectId },
     include: {
       assets: {
-        where: { kind: "CLIP" },
-        select: { id: true },
+        where: { kind: { in: ["CLIP", "AUDIO"] } },
+        select: { id: true, kind: true },
       },
     },
   });
@@ -409,10 +482,19 @@ export async function saveVideoFrameMergerState(input: {
     return { error: "Project not found." };
   }
 
-  const clipIds = new Set(existing.assets.map((asset) => asset.id));
+  const clipIds = new Set(
+    existing.assets
+      .filter((asset) => asset.kind === "CLIP")
+      .map((asset) => asset.id),
+  );
+  const audioIds = new Set(
+    existing.assets
+      .filter((asset) => asset.kind === "AUDIO")
+      .map((asset) => asset.id),
+  );
   const parsed =
     parseVideoFrameMergerState(input.state) ?? emptyVideoFrameMergerState();
-  const state = sanitizeVideoFrameMergerState(parsed, clipIds);
+  const state = sanitizeVideoFrameMergerState(parsed, clipIds, audioIds);
 
   const updated = await prisma.videoFrameProject.update({
     where: { id: projectId },
@@ -542,6 +624,7 @@ export async function saveVideoFrameEdit(input: {
   frameIndex?: number | null;
   sourceUrl: string;
   prompt?: string;
+  costUsd?: number | null;
 }): Promise<VideoFrameProjectDetail | { error: string }> {
   const existing = await prisma.videoFrameProject.findUnique({
     where: { id: input.projectId },
@@ -621,6 +704,13 @@ export async function saveVideoFrameEdit(input: {
     });
   }
 
+  const costUsd =
+    typeof input.costUsd === "number" &&
+    Number.isFinite(input.costUsd) &&
+    input.costUsd >= 0
+      ? input.costUsd
+      : null;
+
   await prisma.videoFrameAsset.create({
     data: {
       projectId: input.projectId,
@@ -633,6 +723,7 @@ export async function saveVideoFrameEdit(input: {
       bytes: buffer.byteLength,
       width,
       height,
+      costUsd,
     },
   });
 
@@ -703,6 +794,7 @@ export async function saveVideoFrameClip(input: {
   sourceUrl: string;
   provider: "wan" | "krea" | "wan-edit";
   prompt?: string;
+  costUsd?: number | null;
 }): Promise<VideoFrameProjectDetail | { error: string }> {
   const existing = await prisma.videoFrameProject.findUnique({
     where: { id: input.projectId },
@@ -752,6 +844,13 @@ export async function saveVideoFrameClip(input: {
   const absolute = path.join(clipsDir, fileName);
   await writeFile(absolute, buffer);
 
+  const costUsd =
+    typeof input.costUsd === "number" &&
+    Number.isFinite(input.costUsd) &&
+    input.costUsd >= 0
+      ? input.costUsd
+      : null;
+
   await prisma.videoFrameAsset.create({
     data: {
       projectId: input.projectId,
@@ -764,6 +863,7 @@ export async function saveVideoFrameClip(input: {
       bytes: buffer.byteLength,
       width: null,
       height: null,
+      costUsd,
     },
   });
 
@@ -837,6 +937,71 @@ export async function uploadVideoFrameLocalClip(input: {
   return detail ?? { error: "Project not found after uploading clip." };
 }
 
+/**
+ * Persist an admin-uploaded audio file as an AUDIO asset (merger soundtrack).
+ */
+export async function uploadVideoFrameLocalAudio(input: {
+  projectId: string;
+  audio: File;
+}): Promise<VideoFrameProjectDetail | { error: string }> {
+  const projectId = input.projectId.trim();
+  if (!projectId) {
+    return { error: "Missing project." };
+  }
+
+  const existing = await prisma.videoFrameProject.findUnique({
+    where: { id: projectId },
+    select: { id: true },
+  });
+  if (!existing) {
+    return { error: "Project not found." };
+  }
+
+  if (input.audio.size <= 0) {
+    return { error: "Audio file is empty." };
+  }
+  if (input.audio.size > MAX_VIDEO_FRAME_PROJECT_AUDIO_BYTES) {
+    return {
+      error: `Audio must be ${Math.round(MAX_VIDEO_FRAME_PROJECT_AUDIO_BYTES / (1024 * 1024))}MB or smaller.`,
+    };
+  }
+  if (
+    !ALLOWED_AUDIO_TYPES.has(input.audio.type) &&
+    !input.audio.type.startsWith("audio/") &&
+    !/\.(mp3|wav|aac|ogg|m4a|webm)$/i.test(input.audio.name)
+  ) {
+    return { error: "Use an MP3, WAV, AAC, OGG, or M4A audio file." };
+  }
+
+  const audioDir = path.join(videoFrameProjectDir(projectId), "audio");
+  await mkdir(audioDir, { recursive: true });
+
+  const ext = extensionForAudio(input.audio).replace(/^\./, "") || "mp3";
+  const fileName = `audio-local-${randomBytes(4).toString("hex")}.${ext}`;
+  const absolute = path.join(audioDir, fileName);
+  const buffer = Buffer.from(await input.audio.arrayBuffer());
+  await writeFile(absolute, buffer);
+
+  await prisma.videoFrameAsset.create({
+    data: {
+      projectId,
+      kind: "AUDIO",
+      spanId: null,
+      frameIndex: null,
+      timeSec: 0,
+      fileName,
+      path: publicVideoFramePath(projectId, `audio/${fileName}`),
+      bytes: buffer.byteLength,
+      width: null,
+      height: null,
+    },
+  });
+
+  await recalculateProjectSizes(projectId);
+  const detail = await getVideoFrameProject(projectId);
+  return detail ?? { error: "Project not found after uploading audio." };
+}
+
 function absoluteFromPublicUpload(publicPath: string): string | null {
   if (!isLocalVideoFrameUpload(publicPath)) return null;
   const relative = publicPath.slice(LOCAL_VIDEO_FRAME_UPLOAD_PREFIX.length);
@@ -865,15 +1030,25 @@ export interface MergeVideoFrameSegmentInput {
   trimEndSec?: number;
 }
 
+export interface MergeVideoFrameAudioTrackInput {
+  assetId: string;
+  trimStartSec: number;
+  trimEndSec: number;
+  startAtSec: number;
+  volume?: number;
+}
+
 /**
  * Concatenate ordered CLIP assets into a versioned MERGED asset (1.0, 1.1, …).
  * Optional per-segment trim ranges are applied during ffmpeg normalize.
+ * Optional AUDIO soundtracks are trimmed, placed on composition time, and mixed in.
  */
 export async function mergeVideoFrameClips(input: {
   projectId: string;
   assetIds?: string[];
   segments?: MergeVideoFrameSegmentInput[];
-  /** When true, merged output has no audio track. */
+  audioTracks?: MergeVideoFrameAudioTrackInput[];
+  /** When true, strip clip audio (soundtrack still mixed when present). */
   stripAudio?: boolean;
   /** 9:16 export size (720p / 1080p / 2K). */
   exportQuality?: MergeExportQuality;
@@ -915,6 +1090,32 @@ export async function mergeVideoFrameClips(input: {
     }
   }
 
+  const audioTracks: MergeVideoFrameAudioTrackInput[] = (
+    input.audioTracks ?? []
+  ).map((track) => ({
+    assetId: track.assetId.trim(),
+    trimStartSec: track.trimStartSec,
+    trimEndSec: track.trimEndSec,
+    startAtSec: track.startAtSec,
+    volume: track.volume,
+  }));
+
+  for (const track of audioTracks) {
+    if (!track.assetId) {
+      return { error: "Invalid soundtrack asset." };
+    }
+    if (
+      !Number.isFinite(track.trimStartSec) ||
+      track.trimStartSec < 0 ||
+      !Number.isFinite(track.trimEndSec) ||
+      track.trimEndSec <= track.trimStartSec + 0.04 ||
+      !Number.isFinite(track.startAtSec) ||
+      track.startAtSec < 0
+    ) {
+      return { error: "Invalid trim or placement on a soundtrack." };
+    }
+  }
+
   const existing = await prisma.videoFrameProject.findUnique({
     where: { id: projectId },
     select: { id: true },
@@ -935,12 +1136,30 @@ export async function mergeVideoFrameClips(input: {
     return { error: "One or more selected clips were not found." };
   }
 
+  const audioAssetIds = audioTracks.map((track) => track.assetId);
+  const audioAssets =
+    audioAssetIds.length > 0
+      ? await prisma.videoFrameAsset.findMany({
+          where: {
+            projectId,
+            kind: "AUDIO",
+            id: { in: audioAssetIds },
+          },
+          select: { id: true, path: true, fileName: true },
+        })
+      : [];
+  if (audioAssets.length !== new Set(audioAssetIds).size) {
+    return { error: "One or more soundtracks were not found." };
+  }
+
   const byId = new Map(clips.map((clip) => [clip.id, clip]));
+  const audioById = new Map(audioAssets.map((asset) => [asset.id, asset]));
   const concatSegments: Array<{
     absoluteSourcePath: string;
     trimStartSec?: number;
     trimEndSec?: number;
   }> = [];
+  let compositionDurationSec = 0;
   for (const segment of segments) {
     const clip = byId.get(segment.assetId);
     if (!clip) {
@@ -954,6 +1173,31 @@ export async function mergeVideoFrameClips(input: {
       absoluteSourcePath: absolute,
       trimStartSec: segment.trimStartSec,
       trimEndSec: segment.trimEndSec,
+    });
+    if (segment.trimEndSec != null) {
+      compositionDurationSec += Math.max(
+        0,
+        segment.trimEndSec - segment.trimStartSec,
+      );
+    }
+  }
+
+  const soundtrackMix: SoundtrackMixInput[] = [];
+  for (const track of audioTracks) {
+    const asset = audioById.get(track.assetId);
+    if (!asset) {
+      return { error: "One or more soundtracks were not found." };
+    }
+    const absolute = absoluteFromPublicUpload(asset.path);
+    if (!absolute) {
+      return { error: `Invalid path for audio ${asset.fileName}.` };
+    }
+    soundtrackMix.push({
+      absoluteSourcePath: absolute,
+      trimStartSec: track.trimStartSec,
+      trimEndSec: track.trimEndSec,
+      startAtSec: track.startAtSec,
+      volume: track.volume,
     });
   }
 
@@ -973,6 +1217,9 @@ export async function mergeVideoFrameClips(input: {
       segments: concatSegments,
       stripAudio: input.stripAudio === true,
       quality: exportQuality,
+      soundtracks: soundtrackMix,
+      compositionDurationSec:
+        compositionDurationSec > 0 ? compositionDurationSec : undefined,
     });
   } catch (error) {
     if (error instanceof VideoCutError) {

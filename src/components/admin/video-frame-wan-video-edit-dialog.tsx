@@ -40,6 +40,7 @@ import {
 } from "@/lib/wan-video-edit";
 import { createWanVideoEditHistoryId } from "@/lib/wan-video-edit-history";
 import type { SpanClipFrameCandidate } from "@/components/admin/video-frame-krea-clip-dialog";
+import { WanCostEstimate } from "@/components/admin/wan-cost-estimate";
 import { previewSpanCutAction } from "@/server/actions/video-frame-cut.actions";
 import { submitWanVideoEditAction } from "@/server/actions/wan-video-edit.actions";
 
@@ -74,6 +75,8 @@ export interface WanVideoEditJob {
   referenceAudios: File[];
   timeSec: number;
   inferenceMs?: number;
+  /** WaveSpeed USD charge when known. */
+  costUsd?: number | null;
 }
 
 export interface VideoFrameWanVideoEditDialogProps {
@@ -1161,7 +1164,18 @@ export function VideoFrameWanVideoEditDialog({
               ) : null}
             </div>
 
-            <div className="flex flex-wrap items-center justify-between gap-3 border-t px-5 py-3">
+            <div className="flex flex-col gap-2 border-t px-5 py-3">
+              <WanCostEstimate
+                enabled={waveSpeedConfigured && !busy && !cutTooLong}
+                input={{
+                  kind: "video-edit",
+                  duration: duration === "auto" ? null : duration,
+                  resolution,
+                  generateAudio,
+                  enablePromptExpansion,
+                }}
+              />
+              <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="text-xs text-muted-foreground">
                 {totalRefCount > 0
                   ? `${totalRefCount} ref image${totalRefCount === 1 ? "" : "s"}`
@@ -1210,6 +1224,7 @@ export function VideoFrameWanVideoEditDialog({
                     </>
                   )}
                 </Button>
+              </div>
               </div>
             </div>
           </form>

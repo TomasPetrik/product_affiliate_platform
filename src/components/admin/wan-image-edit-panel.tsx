@@ -22,6 +22,7 @@ import {
   X,
 } from "lucide-react";
 
+import { WanCostEstimate } from "@/components/admin/wan-cost-estimate";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -518,6 +519,7 @@ export function WanImageEditPanel({ configured }: WanImageEditPanelProps) {
     status: string;
     outputs: string[];
     inferenceMs?: number;
+    costUsd?: number | null;
     error?: string;
   }) {
     const draft = pendingHistoryRef.current;
@@ -538,6 +540,7 @@ export function WanImageEditPanel({ configured }: WanImageEditPanelProps) {
         status: update.status,
         outputs: update.outputs,
         inferenceMs: update.inferenceMs,
+        costUsd: update.costUsd,
         error: update.error,
         source: "standalone",
       };
@@ -561,6 +564,7 @@ export function WanImageEditPanel({ configured }: WanImageEditPanelProps) {
         status: result.status,
         outputs: result.outputs,
         inferenceMs: result.inferenceMs,
+        costUsd: result.costUsd,
         error: result.error,
       });
       return;
@@ -589,6 +593,7 @@ export function WanImageEditPanel({ configured }: WanImageEditPanelProps) {
         status: result.status,
         outputs: result.outputs,
         inferenceMs: result.inferenceMs,
+        costUsd: result.costUsd,
       });
       return;
     }
@@ -602,6 +607,7 @@ export function WanImageEditPanel({ configured }: WanImageEditPanelProps) {
         status: result.status,
         outputs: result.outputs,
         inferenceMs: result.inferenceMs,
+        costUsd: result.costUsd,
         error: message,
       });
     }
@@ -798,6 +804,11 @@ export function WanImageEditPanel({ configured }: WanImageEditPanelProps) {
                 </div>
               </div>
             </div>
+
+            <WanCostEstimate
+              enabled={configured && !busy}
+              input={{ kind: "image-edit", size }}
+            />
 
             <div className="flex flex-wrap items-center gap-3">
               <Button type="submit" disabled={busy || !configured || !image || !prompt.trim()}>

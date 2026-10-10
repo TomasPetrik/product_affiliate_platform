@@ -24,6 +24,7 @@ import {
   KreaVideoFramePicker,
   type PickedKreaFrame,
 } from "@/components/admin/krea-video-frame-picker";
+import { WanCostEstimate } from "@/components/admin/wan-cost-estimate";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -259,6 +260,7 @@ export function WanVideoEditPanel({ configured }: WanVideoEditPanelProps) {
     status: string;
     outputs: string[];
     inferenceMs?: number;
+    costUsd?: number | null;
     error?: string;
   }) {
     try {
@@ -290,6 +292,7 @@ export function WanVideoEditPanel({ configured }: WanVideoEditPanelProps) {
         status: update.status,
         outputs: update.outputs,
         inferenceMs: update.inferenceMs,
+        costUsd: update.costUsd,
         error: update.error,
         source: "standalone",
       });
@@ -375,6 +378,7 @@ export function WanVideoEditPanel({ configured }: WanVideoEditPanelProps) {
         status: result.status,
         outputs: result.outputs,
         inferenceMs: result.inferenceMs,
+        costUsd: result.costUsd,
         error: result.error,
       });
       return;
@@ -403,6 +407,7 @@ export function WanVideoEditPanel({ configured }: WanVideoEditPanelProps) {
         status: result.status,
         outputs: result.outputs,
         inferenceMs: result.inferenceMs,
+        costUsd: result.costUsd,
       });
       return;
     }
@@ -416,6 +421,7 @@ export function WanVideoEditPanel({ configured }: WanVideoEditPanelProps) {
         status: result.status,
         outputs: result.outputs,
         inferenceMs: result.inferenceMs,
+        costUsd: result.costUsd,
         error: message,
       });
     }
@@ -985,6 +991,17 @@ export function WanVideoEditPanel({ configured }: WanVideoEditPanelProps) {
                 <AlertDescription>{error}</AlertDescription>
               </Alert>
             ) : null}
+
+            <WanCostEstimate
+              enabled={configured && !busy}
+              input={{
+                kind: "video-edit",
+                duration: duration === "auto" ? null : duration,
+                resolution,
+                generateAudio,
+                enablePromptExpansion,
+              }}
+            />
 
             <div className="flex flex-wrap items-center gap-2">
               <Button

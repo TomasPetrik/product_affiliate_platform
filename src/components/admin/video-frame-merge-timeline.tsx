@@ -13,6 +13,7 @@ import { MoveHorizontal, Scissors } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const TRACK_HEIGHT = 72;
+const AUDIO_TRACK_HEIGHT = 44;
 const HANDLE_WIDTH = 14;
 const MIN_TRIM_SEC = 0.08;
 const SEGMENT_GAP = 4;
@@ -190,8 +191,20 @@ export function sourceToComposition(
   return offset;
 }
 
+export interface MergeTimelineAudioTrackView {
+  instanceId: string;
+  label: string;
+  durationSec: number;
+  trimStartSec: number;
+  trimEndSec: number;
+  /** Composition time where the trimmed audio begins. */
+  startAtSec: number;
+}
+
 export interface VideoFrameMergeTimelineProps {
   segments: MergeTimelineSegmentView[];
+  /** Optional soundtrack clips on a second track (composition time). */
+  audioTracks?: MergeTimelineAudioTrackView[];
   selectedId: string | null;
   /** Source time within the selected segment. */
   playheadSec: number;
@@ -212,6 +225,14 @@ export interface VideoFrameMergeTimelineProps {
   /** Reorder by long-press then drag; `toIndex` is the target slot. */
   onReorder?: (fromInstanceId: string, toIndex: number) => void;
   onReorderGestureStart?: () => void;
+  onAudioSelect?: (instanceId: string) => void;
+  onAudioTrimChange?: (
+    instanceId: string,
+    trimStartSec: number,
+    trimEndSec: number,
+  ) => void;
+  onAudioMove?: (instanceId: string, startAtSec: number) => void;
+  onAudioGestureStart?: () => void;
 }
 
 type DragKind = "start" | "end" | null;
@@ -530,8 +551,189 @@ function SegmentBlock({
   );
 }
 
+function AudioTrackBlock({
+  track,
+  selected,
+  pixelsPerSecond,
+  compositionDurationSec,
+  onSelect,
+  onTrimChange,
+  onMove,
+  onGestureStart,
+}: {
+  track: MergeTimelineAudioTrackView;
+  selected: boolean;
+  pixelsPerSecond: number;
+  compositionDurationSec: number;
+  onSelect: () => void;
+  onTrimChange: (trimStartSec: number, trimEndSec: number) => void;
+  onMove: (startAtSec: number) => void;
+  onGestureStart?: () => void;
+}) {
+  const blockRef = useRef<HTMLDivElement>(null);
+  const dragKindRef = useRef<"start" | "end" | "move" | null>(null);
+  const moveOriginRef = useRef<{ clientX: number; startAtSec: number } | null>(
+    null,
+  );
+  const [dragging, setDragging] = useState<"start" | "end" | "move" | null>(
+    null,
+  );
+
+  const duration = Math.max(0.1, track.durationSec);
+  const kept = Math.max(MIN_TRIM_SEC, track.trimEndSec - track.trimStartSec);
+  const blockWidth = Math.max(56, kept * pixelsPerSecond);
+  const leftPx = Math.max(0, track.startAtSec) * pixelsPerSecond;
+  const maxStartAt = Math.max(0, compositionDurationSec - MIN_TRIM_SEC);
+
+  function clampTrim(
+    start: number,
+    end: number,
+  ): { start: number; end: number } {
+    let nextStart = Math.min(Math.max(0, start), duration - MIN_TRIM_SEC);
+    let nextEnd = Math.min(duration, Math.max(MIN_TRIM_SEC, end));
+    if (nextEnd - nextStart < MIN_TRIM_SEC) {
+      if (dragKindRef.current === "start") {
+        nextStart = nextEnd - MIN_TRIM_SEC;
+      } else {
+        nextEnd = nextStart + MIN_TRIM_SEC;
+      }
+    }
+    return {
+      start: Math.max(0, nextStart),
+      end: Math.min(duration, nextEnd),
+    };
+  }
+
+  function onPointerMove(event: PointerEvent) {
+    const kind = dragKindRef.current;
+    if (!kind) return;
+
+    if (kind === "move") {
+      const origin = moveOriginRef.current;
+      if (!origin) return;
+      const deltaSec = (event.clientX - origin.clientX) / pixelsPerSecond;
+      const next = Math.min(
+        maxStartAt,
+        Math.max(0, origin.startAtSec + deltaSec),
+      );
+      onMove(Number(next.toFixed(3)));
+      return;
+    }
+
+    const block = blockRef.current;
+    if (!block) return;
+    const rect = block.getBoundingClientRect();
+
+    if (kind === "start") {
+      const keptPx = Math.max(HANDLE_WIDTH * 2, rect.right - event.clientX);
+      const nextKept = keptPx / pixelsPerSecond;
+      const next = clampTrim(track.trimEndSec - nextKept, track.trimEndSec);
+      onTrimChange(next.start, next.end);
+      return;
+    }
+
+    const keptPx = Math.max(HANDLE_WIDTH * 2, event.clientX - rect.left);
+    const nextKept = keptPx / pixelsPerSecond;
+    const next = clampTrim(track.trimStartSec, track.trimStartSec + nextKept);
+    onTrimChange(next.start, next.end);
+  }
+
+  function stopDragging() {
+    dragKindRef.current = null;
+    moveOriginRef.current = null;
+    setDragging(null);
+    window.removeEventListener("pointermove", onPointerMove);
+    window.removeEventListener("pointerup", stopDragging);
+  }
+
+  function beginDrag(
+    kind: "start" | "end" | "move",
+    event: ReactPointerEvent,
+  ) {
+    event.preventDefault();
+    event.stopPropagation();
+    onSelect();
+    onGestureStart?.();
+    dragKindRef.current = kind;
+    setDragging(kind);
+    if (kind === "move") {
+      moveOriginRef.current = {
+        clientX: event.clientX,
+        startAtSec: track.startAtSec,
+      };
+    }
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", stopDragging);
+  }
+
+  useEffect(
+    () => () => {
+      stopDragging();
+    },
+    [],
+  );
+
+  return (
+    <div
+      ref={blockRef}
+      data-audio-id={track.instanceId}
+      className={cn(
+        "absolute top-0 touch-none select-none overflow-hidden rounded-md border-2",
+        selected
+          ? "border-sky-400 shadow-[0_0_0_1px_rgba(0,0,0,0.35)]"
+          : "border-sky-700/80",
+        dragging === "move" ? "cursor-grabbing" : "cursor-grab",
+      )}
+      style={{
+        left: leftPx,
+        width: blockWidth,
+        height: AUDIO_TRACK_HEIGHT,
+        background:
+          "repeating-linear-gradient(90deg, #0c4a6e 0px, #0c4a6e 3px, #075985 3px, #075985 6px)",
+      }}
+      title={`${track.label} · drag to move · trim handles on edges`}
+      onPointerDown={(event) => {
+        if ((event.target as HTMLElement).closest("[data-handle]")) return;
+        if (event.button !== 0) return;
+        beginDrag("move", event);
+      }}
+    >
+      <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-4">
+        <span className="truncate text-[10px] font-medium text-sky-100/90">
+          {track.label}
+        </span>
+      </div>
+      <button
+        type="button"
+        data-handle="start"
+        aria-label="Trim audio start"
+        className={cn(
+          "absolute inset-y-0 left-0 z-20 flex w-3 cursor-ew-resize items-center justify-center bg-sky-300",
+          dragging === "start" && "brightness-110",
+        )}
+        onPointerDown={(event) => beginDrag("start", event)}
+      >
+        <span className="h-5 w-0.5 rounded-full bg-sky-950/80" />
+      </button>
+      <button
+        type="button"
+        data-handle="end"
+        aria-label="Trim audio end"
+        className={cn(
+          "absolute inset-y-0 right-0 z-20 flex w-3 cursor-ew-resize items-center justify-center bg-sky-300",
+          dragging === "end" && "brightness-110",
+        )}
+        onPointerDown={(event) => beginDrag("end", event)}
+      >
+        <MoveHorizontal className="size-3 text-sky-950 drop-shadow" />
+      </button>
+    </div>
+  );
+}
+
 export function VideoFrameMergeTimeline({
   segments,
+  audioTracks = [],
   selectedId,
   playheadSec,
   zoom,
@@ -543,6 +745,10 @@ export function VideoFrameMergeTimeline({
   onZoomChange,
   onReorder,
   onReorderGestureStart,
+  onAudioSelect,
+  onAudioTrimChange,
+  onAudioMove,
+  onAudioGestureStart,
 }: VideoFrameMergeTimelineProps) {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const trackRowRef = useRef<HTMLDivElement>(null);
@@ -562,11 +768,21 @@ export function VideoFrameMergeTimeline({
   );
 
   const selected = segments.find((segment) => segment.instanceId === selectedId);
+  /** Video segment used for playhead mapping (audio selection must not break it). */
+  const playheadSegment = selected ?? segments[0] ?? null;
 
   const compositionSec = useMemo(() => {
-    if (!selectedId) return 0;
-    return sourceToComposition(segments, selectedId, playheadSec);
-  }, [segments, selectedId, playheadSec]);
+    if (!playheadSegment) return 0;
+    const sourceSec = Math.min(
+      playheadSegment.trimEndSec,
+      Math.max(playheadSegment.trimStartSec, playheadSec),
+    );
+    return sourceToComposition(
+      segments,
+      playheadSegment.instanceId,
+      sourceSec,
+    );
+  }, [segments, playheadSegment, playheadSec]);
 
   const layout = useMemo(() => {
     let x = 0;
@@ -797,19 +1013,31 @@ export function VideoFrameMergeTimeline({
     }
   }
 
+  const hasAudioTrack = audioTracks.length > 0;
+  const audioLaneHeight = hasAudioTrack ? AUDIO_TRACK_HEIGHT + 22 : 0;
+  const playheadExtra = hasAudioTrack ? audioLaneHeight + 8 : 0;
+
   if (segments.length === 0) {
     return null;
   }
+
+  const selectedAudio =
+    audioTracks.find((track) => track.instanceId === selectedId) ?? null;
 
   return (
     <div className="overflow-hidden rounded-xl border border-zinc-700/80 bg-[#1c1c1e] text-zinc-100 shadow-sm">
       <div className="flex items-center justify-between gap-2 border-b border-zinc-800 px-3 py-1.5">
         <p className="truncate text-[11px] font-medium text-zinc-300">
-          {segments.length} clip{segments.length === 1 ? "" : "s"} · total kept{" "}
-          {formatTimelineTime(totalKeptSec)}
+          {segments.length} clip{segments.length === 1 ? "" : "s"}
+          {hasAudioTrack
+            ? ` · ${audioTracks.length} audio`
+            : ""}{" "}
+          · total kept {formatTimelineTime(totalKeptSec)}
           {selected ? ` · ${selected.label}` : ""}
+          {selectedAudio ? ` · ${selectedAudio.label}` : ""}
           <span className="ml-2 text-zinc-500">
-            Hold a clip to reorder · pinch / Ctrl+scroll to zoom
+            Hold a clip to reorder · drag audio to move · pinch / Ctrl+scroll to
+            zoom
           </span>
         </p>
         <div className="relative shrink-0">
@@ -827,7 +1055,10 @@ export function VideoFrameMergeTimeline({
       >
         <div
           className="relative"
-          style={{ width: totalWidth, minHeight: TRACK_HEIGHT + 52 }}
+          style={{
+            width: totalWidth,
+            minHeight: TRACK_HEIGHT + 52 + audioLaneHeight,
+          }}
         >
           <div className="relative mb-1 h-3" style={{ width: totalWidth }}>
             {ticks.map((t) => (
@@ -908,15 +1139,18 @@ export function VideoFrameMergeTimeline({
               />
             ) : null}
 
-            {/* Global playhead cursor across the whole row */}
+            {/* Global playhead cursor across video (+ audio lane when present) */}
             <div
               data-playhead
               className={cn(
-                "absolute top-[-10px] z-40 flex h-[calc(100%+18px)] w-4 -translate-x-1/2 cursor-ew-resize flex-col items-center",
+                "absolute top-[-10px] z-40 flex w-4 -translate-x-1/2 cursor-ew-resize flex-col items-center",
                 draggingPlayhead && "opacity-100",
                 reorderId && "pointer-events-none opacity-40",
               )}
-              style={{ left: playheadPx }}
+              style={{
+                left: playheadPx,
+                height: `calc(100% + 18px + ${playheadExtra}px)`,
+              }}
               onPointerDown={beginPlayheadDrag}
               role="slider"
               aria-label="Playhead"
@@ -945,6 +1179,39 @@ export function VideoFrameMergeTimeline({
               <div className="mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full bg-[#f5d000] ring-2 ring-black/40" />
             </div>
           </div>
+
+          {hasAudioTrack ? (
+            <div className="mt-2">
+              <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-sky-400/90">
+                Soundtrack
+              </p>
+              <div
+                className="relative rounded-md bg-zinc-900/80 ring-1 ring-sky-900/60"
+                style={{
+                  width: totalWidth,
+                  height: AUDIO_TRACK_HEIGHT + 4,
+                }}
+              >
+                {audioTracks.map((track) => (
+                  <AudioTrackBlock
+                    key={track.instanceId}
+                    track={track}
+                    selected={track.instanceId === selectedId}
+                    pixelsPerSecond={pixelsPerSecond}
+                    compositionDurationSec={totalKeptSec}
+                    onSelect={() => onAudioSelect?.(track.instanceId)}
+                    onTrimChange={(start, end) =>
+                      onAudioTrimChange?.(track.instanceId, start, end)
+                    }
+                    onMove={(startAtSec) =>
+                      onAudioMove?.(track.instanceId, startAtSec)
+                    }
+                    onGestureStart={onAudioGestureStart}
+                  />
+                ))}
+              </div>
+            </div>
+          ) : null}
 
           <div
             className="mt-1 flex justify-between text-[10px] tabular-nums text-zinc-500"

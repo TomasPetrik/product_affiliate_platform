@@ -24,6 +24,7 @@ import {
   KreaVideoFramePicker,
   type PickedKreaFrame,
 } from "@/components/admin/krea-video-frame-picker";
+import { WanCostEstimate } from "@/components/admin/wan-cost-estimate";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -199,6 +200,7 @@ export function WanVideoPanel({ configured }: WanVideoPanelProps) {
     status: string;
     outputs: string[];
     inferenceMs?: number;
+    costUsd?: number | null;
     error?: string;
   }) {
     try {
@@ -219,6 +221,7 @@ export function WanVideoPanel({ configured }: WanVideoPanelProps) {
         status: update.status,
         outputs: update.outputs,
         inferenceMs: update.inferenceMs,
+        costUsd: update.costUsd,
         error: update.error,
         source: "standalone",
       });
@@ -273,6 +276,7 @@ export function WanVideoPanel({ configured }: WanVideoPanelProps) {
         status: result.status,
         outputs: result.outputs,
         inferenceMs: result.inferenceMs,
+        costUsd: result.costUsd,
         error: result.error,
       });
       return;
@@ -301,6 +305,7 @@ export function WanVideoPanel({ configured }: WanVideoPanelProps) {
         status: result.status,
         outputs: result.outputs,
         inferenceMs: result.inferenceMs,
+        costUsd: result.costUsd,
       });
       return;
     }
@@ -314,6 +319,7 @@ export function WanVideoPanel({ configured }: WanVideoPanelProps) {
         status: result.status,
         outputs: result.outputs,
         inferenceMs: result.inferenceMs,
+        costUsd: result.costUsd,
         error: message,
       });
     }
@@ -740,6 +746,18 @@ export function WanVideoPanel({ configured }: WanVideoPanelProps) {
                 />
               </div>
             </div>
+
+            <WanCostEstimate
+              enabled={configured && !busy}
+              input={{
+                kind: "reference-to-video",
+                duration,
+                resolution,
+                aspectRatio,
+                generateAudio,
+                enablePromptExpansion,
+              }}
+            />
 
             <div className="flex flex-wrap items-center gap-3">
               <Button

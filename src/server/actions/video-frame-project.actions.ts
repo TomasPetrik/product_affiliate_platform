@@ -15,6 +15,7 @@ import {
   saveVideoFrameEdit,
   saveVideoFrameMergerState,
   updateVideoFrameProject,
+  uploadVideoFrameLocalAudio,
   uploadVideoFrameLocalClip,
   type VideoFrameProjectDetail,
 } from "@/server/services/video-frame-project.service";
@@ -175,6 +176,7 @@ export async function saveVideoFrameEditAction(input: {
   frameIndex?: number | null;
   sourceUrl: string;
   prompt?: string;
+  costUsd?: number | null;
 }): Promise<VideoFrameProjectActionState> {
   const session = await requireAdminSession();
   if (!input.projectId || !input.sourceUrl?.trim()) {
@@ -188,6 +190,7 @@ export async function saveVideoFrameEditAction(input: {
     frameIndex: input.frameIndex,
     sourceUrl: input.sourceUrl.trim(),
     prompt: input.prompt,
+    costUsd: input.costUsd,
   });
   if ("error" in result) {
     return { error: result.error };
@@ -200,6 +203,7 @@ export async function saveVideoFrameEditAction(input: {
     entityId: result.id,
     after: {
       timeSec: input.timeSec,
+      costUsd: input.costUsd ?? null,
       editedBytes: result.editedBytes,
       totalBytes: result.totalBytes,
     },
@@ -249,6 +253,7 @@ export async function saveVideoFrameClipAction(input: {
   sourceUrl: string;
   provider: "wan" | "krea" | "wan-edit";
   prompt?: string;
+  costUsd?: number | null;
 }): Promise<VideoFrameProjectActionState> {
   const session = await requireAdminSession();
   if (!input.projectId || !input.sourceUrl?.trim() || !input.spanId?.trim()) {
@@ -262,6 +267,7 @@ export async function saveVideoFrameClipAction(input: {
     sourceUrl: input.sourceUrl.trim(),
     provider: input.provider,
     prompt: input.prompt,
+    costUsd: input.costUsd,
   });
   if ("error" in result) {
     return { error: result.error };
@@ -275,6 +281,7 @@ export async function saveVideoFrameClipAction(input: {
     after: {
       spanId: input.spanId,
       provider: input.provider,
+      costUsd: input.costUsd ?? null,
       clipsBytes: result.clipsBytes,
       totalBytes: result.totalBytes,
     },
@@ -320,6 +327,42 @@ export async function uploadVideoFrameLocalClipAction(
   return { ok: true, project: result };
 }
 
+export async function uploadVideoFrameLocalAudioAction(
+  formData: FormData,
+): Promise<VideoFrameProjectActionState> {
+  const session = await requireAdminSession();
+  const projectId = String(formData.get("projectId") ?? "").trim();
+  if (!projectId) {
+    return { error: "Missing project." };
+  }
+
+  const audio = formData.get("audio");
+  if (!(audio instanceof File) || audio.size <= 0) {
+    return { error: "Choose an audio file." };
+  }
+
+  const result = await uploadVideoFrameLocalAudio({ projectId, audio });
+  if ("error" in result) {
+    return { error: result.error };
+  }
+
+  await writeAuditLog({
+    actor: session,
+    action: "video_frame_project.upload_local_audio",
+    entityType: "VideoFrameProject",
+    entityId: result.id,
+    after: {
+      fileName: audio.name,
+      bytes: audio.size,
+      clipsBytes: result.clipsBytes,
+      totalBytes: result.totalBytes,
+    },
+  });
+
+  revalidateVideoFrameProjects(result.id);
+  return { ok: true, project: result };
+}
+
 export async function saveVideoFrameMergerStateAction(input: {
   projectId: string;
   state: {
@@ -329,6 +372,15 @@ export async function saveVideoFrameMergerStateAction(input: {
       trimStartSec: number;
       trimEndSec: number;
       durationSec: number;
+    }>;
+    audioTracks?: Array<{
+      instanceId: string;
+      assetId: string;
+      trimStartSec: number;
+      trimEndSec: number;
+      durationSec: number;
+      startAtSec: number;
+      volume?: number;
     }>;
     selectedId: string | null;
     playheadSec: number;
@@ -350,6 +402,7 @@ export async function saveVideoFrameMergerStateAction(input: {
     projectId: parsed.data.projectId,
     state: {
       ...parsed.data.state,
+      audioTracks: parsed.data.state.audioTracks ?? [],
       stripAudio: parsed.data.state.stripAudio === true,
       exportQuality: parsed.data.state.exportQuality ?? "1080p",
     },
@@ -370,6 +423,13 @@ export async function mergeVideoFrameClipsAction(input: {
     trimStartSec: number;
     trimEndSec?: number;
   }>;
+  audioTracks?: Array<{
+    assetId: string;
+    trimStartSec: number;
+    trimEndSec: number;
+    startAtSec: number;
+    volume?: number;
+  }>;
   stripAudio?: boolean;
   exportQuality?: "720p" | "1080p" | "2K";
 }): Promise<VideoFrameProjectActionState> {
@@ -385,6 +445,7 @@ export async function mergeVideoFrameClipsAction(input: {
     ...parsed.data,
     exportQuality: parsed.data.exportQuality ?? "1080p",
     stripAudio: parsed.data.stripAudio === true,
+    audioTracks: parsed.data.audioTracks,
   });
   if ("error" in result) {
     return { error: result.error };
@@ -404,6 +465,7 @@ export async function mergeVideoFrameClipsAction(input: {
         parsed.data.segments?.map((segment) => segment.assetId) ??
         parsed.data.assetIds,
       segments: parsed.data.segments,
+      audioTracks: parsed.data.audioTracks,
       stripAudio: parsed.data.stripAudio === true,
       exportQuality: parsed.data.exportQuality ?? "1080p",
       label: newestMerged?.label ?? null,

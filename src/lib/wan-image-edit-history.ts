@@ -25,6 +25,8 @@ export interface WanHistoryEntry {
   status: string;
   outputs: string[];
   inferenceMs?: number;
+  /** WaveSpeed USD charge when known. */
+  costUsd?: number | null;
   error?: string;
   /** Where the run was started. Older entries omit this (treated as standalone). */
   source?: WanHistorySource;

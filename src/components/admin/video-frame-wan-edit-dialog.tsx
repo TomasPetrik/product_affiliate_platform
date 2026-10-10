@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { WanCostEstimate } from "@/components/admin/wan-cost-estimate";
 import { WanReferenceImagesPicker } from "@/components/admin/wan-reference-images-picker";
 import { formatVideoTime } from "@/lib/video-frames";
 import {
@@ -48,6 +49,8 @@ export interface WanFrameJob {
   mainImage: File | null;
   referenceImages: File[];
   inferenceMs?: number;
+  /** WaveSpeed USD charge when known. */
+  costUsd?: number | null;
 }
 
 export interface VideoFrameWanEditDialogProps {
@@ -418,6 +421,11 @@ export function VideoFrameWanEditDialog({
                   </div>
                 </div>
               </div>
+
+              <WanCostEstimate
+                enabled={waveSpeedConfigured && !busy}
+                input={{ kind: "image-edit", size }}
+              />
 
               <div className="flex flex-wrap items-center gap-2">
                 <Button

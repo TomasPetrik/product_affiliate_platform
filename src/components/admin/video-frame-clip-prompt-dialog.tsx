@@ -4,6 +4,7 @@ import { Dialog } from "@base-ui/react/dialog";
 import { X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { formatWanCostUsd } from "@/lib/wan-cost";
 import { formatVideoTime } from "@/lib/video-frames";
 import { formatWanVideoEditHistoryTime } from "@/lib/wan-video-edit-history";
 
@@ -27,6 +28,7 @@ export interface ClipPromptDetails {
   status: string;
   sourceLabel?: string;
   inferenceMs?: number;
+  costUsd?: number | null;
 }
 
 export interface VideoFrameClipPromptDialogProps {
@@ -148,6 +150,12 @@ export function VideoFrameClipPromptDialog({
                     <ParamRow
                       label="Inference"
                       value={`${(details.inferenceMs / 1000).toFixed(1)}s`}
+                    />
+                  ) : null}
+                  {details.costUsd != null ? (
+                    <ParamRow
+                      label="Cost"
+                      value={formatWanCostUsd(details.costUsd)}
                     />
                   ) : null}
                   {details.predictionId ? (

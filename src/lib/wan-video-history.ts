@@ -28,6 +28,8 @@ export interface WanVideoHistoryEntry {
   status: string;
   outputs: string[];
   inferenceMs?: number;
+  /** WaveSpeed USD charge when known. */
+  costUsd?: number | null;
   error?: string;
   source?: WanVideoHistorySource;
   sourceLabel?: string;

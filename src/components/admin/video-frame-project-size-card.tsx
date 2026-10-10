@@ -1,6 +1,7 @@
-import { HardDrive } from "lucide-react";
+import { DollarSign, HardDrive } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { formatWanCostUsd } from "@/lib/wan-cost";
 import { formatByteSize } from "@/lib/video-frame-project-paths";
 
 interface VideoFrameProjectSizeCardProps {
@@ -14,6 +15,8 @@ interface VideoFrameProjectSizeCardProps {
   thumbnailCount: number;
   editedCount: number;
   clipCount: number;
+  /** Sum of WaveSpeed costs for Wan edits + clips (USD). */
+  wanCostUsd?: number;
 }
 
 export function VideoFrameProjectSizeCard({
@@ -27,6 +30,7 @@ export function VideoFrameProjectSizeCard({
   thumbnailCount,
   editedCount,
   clipCount,
+  wanCostUsd = 0,
 }: VideoFrameProjectSizeCardProps) {
   const rows = [
     { label: "Original video", value: formatByteSize(videoBytes) },
@@ -57,7 +61,7 @@ export function VideoFrameProjectSizeCard({
           Storage
         </CardTitle>
       </CardHeader>
-      <CardContent>
+      <CardContent className="grid gap-4">
         <dl className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
           {rows.map((row) => (
             <div
@@ -75,6 +79,20 @@ export function VideoFrameProjectSizeCard({
             </div>
           ))}
         </dl>
+
+        <div className="rounded-lg border border-border bg-muted/20 px-3 py-2">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <DollarSign className="size-3.5" />
+            Wan generation cost
+          </div>
+          <p className="mt-0.5 text-sm font-semibold tabular-nums">
+            {formatWanCostUsd(wanCostUsd)}
+          </p>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">
+            Sum of WaveSpeed charges for Wan image edits and generated clips saved
+            on this project.
+          </p>
+        </div>
       </CardContent>
     </Card>
   );

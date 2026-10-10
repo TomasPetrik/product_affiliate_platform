@@ -88,6 +88,7 @@ import {
   saveWanVideoHistoryEntry,
   type WanVideoHistoryEntry,
 } from "@/lib/wan-video-history";
+import { formatWanCostUsd } from "@/lib/wan-cost";
 import { estimateWanVideoEditProgressPercent } from "@/lib/wan-video-edit";
 import {
   createWanVideoEditHistoryId,
@@ -346,6 +347,17 @@ function editedUrlsFromProject(project: VideoFrameProjectDetail): Record<string,
   return map;
 }
 
+function editedCostsFromProject(
+  project: VideoFrameProjectDetail,
+): Record<string, number> {
+  const map: Record<string, number> = {};
+  for (const asset of project.assets) {
+    if (asset.kind !== "EDITED" || asset.costUsd == null) continue;
+    map[previewTimeKey(asset.timeSec)] = asset.costUsd;
+  }
+  return map;
+}
+
 function clipsFromProject(project: VideoFrameProjectDetail): VideoFrameProjectAssetDto[] {
   return project.assets
     .filter((asset) => asset.kind === "CLIP")
@@ -356,6 +368,14 @@ function mergesFromProject(
   project: VideoFrameProjectDetail | { assets: VideoFrameProjectAssetDto[] },
 ): VideoFrameProjectAssetDto[] {
   return project.assets.filter((asset) => asset.kind === "MERGED");
+}
+
+function audioFromProject(
+  project: VideoFrameProjectDetail | { assets: VideoFrameProjectAssetDto[] },
+): VideoFrameProjectAssetDto[] {
+  return project.assets
+    .filter((asset) => asset.kind === "AUDIO")
+    .sort((a, b) => a.fileName.localeCompare(b.fileName));
 }
 
 function newestClipForSpan(
@@ -389,6 +409,7 @@ function clipPromptFromWanEdit(
     status: entry.status,
     sourceLabel: entry.sourceLabel,
     inferenceMs: entry.inferenceMs,
+    costUsd: entry.costUsd,
   };
 }
 
@@ -408,6 +429,7 @@ function clipPromptFromWanClip(entry: WanVideoHistoryEntry): ClipPromptDetails {
     status: entry.status,
     sourceLabel: entry.sourceLabel,
     inferenceMs: entry.inferenceMs,
+    costUsd: entry.costUsd,
   };
 }
 
@@ -561,6 +583,9 @@ export function VideoFrameExtractPanel({
   const [editedUrls, setEditedUrls] = useState<Record<string, string>>(() =>
     editedUrlsFromProject(project),
   );
+  const [editedCosts, setEditedCosts] = useState<Record<string, number>>(() =>
+    editedCostsFromProject(project),
+  );
   const [wanJobs, setWanJobs] = useState<Record<string, WanFrameJob>>({});
   const [wanEdit, setWanEdit] = useState<{
     label: string;
@@ -596,6 +621,9 @@ export function VideoFrameExtractPanel({
   const [mergedClips, setMergedClips] = useState<VideoFrameProjectAssetDto[]>(() =>
     mergesFromProject(project),
   );
+  const [mergerAudioAssets, setMergerAudioAssets] = useState<
+    VideoFrameProjectAssetDto[]
+  >(() => audioFromProject(project));
   const [clipLightbox, setClipLightbox] = useState<VideoFrameProjectAssetDto | null>(
     null,
   );
@@ -633,6 +661,7 @@ export function VideoFrameExtractPanel({
   useEffect(() => {
     setSpanClips(clipsFromProject(project));
     setMergedClips(mergesFromProject(project));
+    setMergerAudioAssets(audioFromProject(project));
   }, [project]);
 
   useEffect(() => {
@@ -701,6 +730,7 @@ export function VideoFrameExtractPanel({
 
   useEffect(() => {
     setEditedUrls(editedUrlsFromProject(project));
+    setEditedCosts(editedCostsFromProject(project));
   }, [project]);
 
   useEffect(() => {
@@ -910,6 +940,7 @@ export function VideoFrameExtractPanel({
         status: string;
         outputs: string[];
         inferenceMs?: number;
+        costUsd?: number | null;
         error?: string;
       },
     ) {
@@ -931,6 +962,7 @@ export function VideoFrameExtractPanel({
           status: update.status,
           outputs: update.outputs,
           inferenceMs: update.inferenceMs,
+          costUsd: update.costUsd ?? job.costUsd,
           error: update.error,
           source: "video-frame",
           sourceLabel: `${project.name} · ${job.label} · ${formatVideoTime(job.time)}`,
@@ -941,7 +973,12 @@ export function VideoFrameExtractPanel({
       }
     }
 
-    async function persistCompletedJob(job: WanFrameJob, outputUrl: string, inferenceMs?: number) {
+    async function persistCompletedJob(
+      job: WanFrameJob,
+      outputUrl: string,
+      inferenceMs?: number,
+      costUsd?: number | null,
+    ) {
       const key = previewTimeKey(job.time);
       if (wanSavingRef.current.has(key)) {
         return;
@@ -958,6 +995,7 @@ export function VideoFrameExtractPanel({
           progress: 97,
           error: null,
           inferenceMs,
+          costUsd,
         },
       }));
 
@@ -965,6 +1003,7 @@ export function VideoFrameExtractPanel({
         status: "completed",
         outputs: [outputUrl],
         inferenceMs,
+        costUsd,
       });
 
       try {
@@ -973,6 +1012,7 @@ export function VideoFrameExtractPanel({
           timeSec: job.time,
           sourceUrl: outputUrl,
           prompt: job.prompt || undefined,
+          costUsd,
         });
         // Do not bail on poll-effect `cancelled`: entering "saving" changes the
         // polling signature and tears down this effect, which would otherwise
@@ -992,6 +1032,7 @@ export function VideoFrameExtractPanel({
             status: "failed",
             outputs: [outputUrl],
             inferenceMs,
+            costUsd,
             error: saved.error ?? "Could not save edited frame.",
           });
           return;
@@ -1003,7 +1044,11 @@ export function VideoFrameExtractPanel({
               Math.round(asset.timeSec * 10) / 10 === Math.round(job.time * 10) / 10,
           );
         const editUrl = edited?.path ?? outputUrl;
+        const savedCost = edited?.costUsd ?? costUsd;
         setEditedUrls((prev) => ({ ...prev, [key]: editUrl }));
+        if (savedCost != null) {
+          setEditedCosts((prev) => ({ ...prev, [key]: savedCost }));
+        }
         setWanJobs((prev) => ({
           ...prev,
           [key]: {
@@ -1015,6 +1060,7 @@ export function VideoFrameExtractPanel({
             error: null,
             apiProgress: 100,
             inferenceMs,
+            costUsd: savedCost,
           },
         }));
         router.refresh();
@@ -1063,7 +1109,12 @@ export function VideoFrameExtractPanel({
 
         const frameOutput = result.outputs[0] ?? latest.outputUrl;
         if (isWanCompleted(result.status) && frameOutput) {
-          await persistCompletedJob(latest, frameOutput, result.inferenceMs);
+          await persistCompletedJob(
+            latest,
+            frameOutput,
+            result.inferenceMs,
+            result.costUsd,
+          );
           continue;
         }
 
@@ -1180,6 +1231,7 @@ export function VideoFrameExtractPanel({
         status: string;
         outputs: string[];
         inferenceMs?: number;
+        costUsd?: number | null;
         error?: string;
       },
     ) {
@@ -1205,6 +1257,7 @@ export function VideoFrameExtractPanel({
           status: update.status,
           outputs: update.outputs,
           inferenceMs: update.inferenceMs,
+          costUsd: update.costUsd ?? job.costUsd,
           error: update.error,
           source: "video-frame",
           sourceLabel: `${project.name} · ${job.spanLabel}`,
@@ -1222,6 +1275,7 @@ export function VideoFrameExtractPanel({
       job: WanClipJob,
       outputUrl: string,
       inferenceMs?: number,
+      costUsd?: number | null,
     ) {
       const key = job.spanId;
       if (wanClipSavingRef.current.has(key)) {
@@ -1239,6 +1293,7 @@ export function VideoFrameExtractPanel({
           progress: 97,
           error: null,
           inferenceMs,
+          costUsd,
         },
       }));
 
@@ -1246,6 +1301,7 @@ export function VideoFrameExtractPanel({
         status: "completed",
         outputs: [outputUrl],
         inferenceMs,
+        costUsd,
       });
 
       try {
@@ -1256,6 +1312,7 @@ export function VideoFrameExtractPanel({
           sourceUrl: outputUrl,
           provider: "wan",
           prompt: job.prompt || undefined,
+          costUsd,
         });
         // Ignore poll-effect cancellation — see persistCompletedJob.
         if (saved.error || !saved.project) {
@@ -1273,6 +1330,7 @@ export function VideoFrameExtractPanel({
             status: "failed",
             outputs: [outputUrl],
             inferenceMs,
+            costUsd,
             error: saved.error ?? "Could not save clip.",
           });
           return;
@@ -1285,6 +1343,7 @@ export function VideoFrameExtractPanel({
         const savedClip = newestClipForSpan(saved.project, job.spanId, previousIds);
         setSpanClips(clipsFromProject(saved.project));
         const clipUrl = savedClip?.path ?? outputUrl;
+        const savedCost = savedClip?.costUsd ?? costUsd;
         if (savedClip && job.historyId) {
           try {
             const existing = await getWanVideoHistoryEntry(job.historyId);
@@ -1297,6 +1356,7 @@ export function VideoFrameExtractPanel({
                 status: "completed",
                 outputs: [outputUrl],
                 inferenceMs,
+                costUsd: savedCost,
               });
             }
           } catch {
@@ -1314,6 +1374,7 @@ export function VideoFrameExtractPanel({
             error: null,
             apiProgress: 100,
             inferenceMs,
+            costUsd: savedCost,
           },
         }));
         router.refresh();
@@ -1366,7 +1427,12 @@ export function VideoFrameExtractPanel({
 
         const clipOutput = result.outputs[0] ?? latest.outputUrl;
         if (isWanCompleted(result.status) && clipOutput) {
-          await persistCompletedClipJob(latest, clipOutput, result.inferenceMs);
+          await persistCompletedClipJob(
+            latest,
+            clipOutput,
+            result.inferenceMs,
+            result.costUsd,
+          );
           continue;
         }
 
@@ -1485,6 +1551,7 @@ export function VideoFrameExtractPanel({
         status: string;
         outputs: string[];
         inferenceMs?: number;
+        costUsd?: number | null;
         error?: string;
       },
     ) {
@@ -1512,6 +1579,7 @@ export function VideoFrameExtractPanel({
           status: update.status,
           outputs: update.outputs,
           inferenceMs: update.inferenceMs,
+          costUsd: update.costUsd ?? job.costUsd,
           error: update.error,
           source: "video-frame",
           sourceLabel: `${project.name} · ${job.spanLabel}`,
@@ -1529,6 +1597,7 @@ export function VideoFrameExtractPanel({
       job: WanVideoEditJob,
       outputUrl: string,
       inferenceMs?: number,
+      costUsd?: number | null,
     ) {
       const key = job.spanId;
       if (wanVideoEditSavingRef.current.has(key)) return;
@@ -1544,6 +1613,7 @@ export function VideoFrameExtractPanel({
           progress: 97,
           error: null,
           inferenceMs,
+          costUsd,
         },
       }));
 
@@ -1551,6 +1621,7 @@ export function VideoFrameExtractPanel({
         status: "completed",
         outputs: [outputUrl],
         inferenceMs,
+        costUsd,
       });
 
       try {
@@ -1561,6 +1632,7 @@ export function VideoFrameExtractPanel({
           sourceUrl: outputUrl,
           provider: "wan-edit",
           prompt: job.prompt || undefined,
+          costUsd,
         });
         // Ignore poll-effect cancellation — see persistCompletedJob.
         if (saved.error || !saved.project) {
@@ -1578,6 +1650,7 @@ export function VideoFrameExtractPanel({
             status: "failed",
             outputs: [outputUrl],
             inferenceMs,
+            costUsd,
             error: saved.error ?? "Could not save edited clip.",
           });
           return;
@@ -1590,6 +1663,7 @@ export function VideoFrameExtractPanel({
         const savedClip = newestClipForSpan(saved.project, job.spanId, previousIds);
         setSpanClips(clipsFromProject(saved.project));
         const clipUrl = savedClip?.path ?? outputUrl;
+        const savedCost = savedClip?.costUsd ?? costUsd;
         if (savedClip && job.historyId) {
           try {
             const existing = await getWanVideoEditHistoryEntry(job.historyId);
@@ -1602,6 +1676,7 @@ export function VideoFrameExtractPanel({
                 status: "completed",
                 outputs: [outputUrl],
                 inferenceMs,
+                costUsd: savedCost,
               });
             }
           } catch {
@@ -1619,6 +1694,7 @@ export function VideoFrameExtractPanel({
             error: null,
             apiProgress: 100,
             inferenceMs,
+            costUsd: savedCost,
           },
         }));
         router.refresh();
@@ -1671,6 +1747,7 @@ export function VideoFrameExtractPanel({
             latest,
             editOutput,
             result.inferenceMs,
+            result.costUsd,
           );
           continue;
         }
@@ -2032,6 +2109,11 @@ export function VideoFrameExtractPanel({
       return;
     }
     setEditedUrls((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+    setEditedCosts((prev) => {
       const next = { ...prev };
       delete next[key];
       return next;
@@ -2897,6 +2979,13 @@ export function VideoFrameExtractPanel({
                                       titleSuffix=" · Wan edit"
                                       onOpenFull={() => void openWanEdit(time, label)}
                                     />
+                                    {(editedCosts[key] ?? wanJob?.costUsd) != null ? (
+                                      <span className="text-[10px] tabular-nums text-muted-foreground">
+                                        {formatWanCostUsd(
+                                          editedCosts[key] ?? wanJob?.costUsd,
+                                        )}
+                                      </span>
+                                    ) : null}
                                     <button
                                       type="button"
                                       className="text-[10px] text-muted-foreground underline-offset-2 hover:text-destructive hover:underline"
@@ -3090,6 +3179,11 @@ export function VideoFrameExtractPanel({
                                                   : ` · ${promptDetails.duration}s`
                                               }`
                                             : ""}
+                                          {clip.costUsd != null
+                                            ? ` · ${formatWanCostUsd(clip.costUsd)}`
+                                            : promptDetails?.costUsd != null
+                                              ? ` · ${formatWanCostUsd(promptDetails.costUsd)}`
+                                              : ""}
                                         </p>
                                       </div>
                                       <div className="flex gap-1.5">
@@ -3180,6 +3274,7 @@ export function VideoFrameExtractPanel({
       <VideoFrameMergerPanel
         projectId={project.id}
         clips={spanClips}
+        audioAssets={mergerAudioAssets}
         merged={mergedClips}
         initialMergerState={project.merger}
         onAssetsUpdated={(assets) => {
@@ -3192,6 +3287,7 @@ export function VideoFrameExtractPanel({
               ),
           );
           setMergedClips(mergesFromProject({ assets }));
+          setMergerAudioAssets(audioFromProject({ assets }));
         }}
         onOpenClip={openClipLightbox}
       />

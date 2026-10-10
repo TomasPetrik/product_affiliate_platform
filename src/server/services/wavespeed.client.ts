@@ -119,6 +119,31 @@ export interface WanPrediction {
   timings?: { inference?: number };
   /** 0–100 when WaveSpeed reports progress; otherwise undefined. */
   progress?: number;
+  /** USD charge when WaveSpeed includes it on the prediction payload. */
+  costUsd?: number;
+}
+
+export interface WaveSpeedPriceQuote {
+  modelId: string;
+  price: number;
+  discountedPrice: number;
+  discountRate: number;
+  currency: string;
+}
+
+const WAVESPEED_PRICE_URL = "https://api.wavespeed.ai/api/v3/model/price";
+const WAVESPEED_BILLINGS_SEARCH_URL =
+  "https://api.wavespeed.ai/api/v3/billings/search";
+
+function parseUsdAmount(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+    return value;
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && parsed >= 0) return parsed;
+  }
+  return undefined;
 }
 
 function normalizePrediction(raw: unknown): WanPrediction {
@@ -131,6 +156,11 @@ function normalizePrediction(raw: unknown): WanPrediction {
     created_at?: string;
     timings?: { inference?: number };
     progress?: unknown;
+    price?: unknown;
+    cost?: unknown;
+    discounted_price?: unknown;
+    billing?: { price?: unknown; discounted_price?: unknown };
+    execution?: { price?: unknown; cost?: unknown };
   }>(raw);
 
   if (!data?.id) {
@@ -147,6 +177,15 @@ function normalizePrediction(raw: unknown): WanPrediction {
     progress = Math.min(100, Math.max(0, progress));
   }
 
+  const costUsd =
+    parseUsdAmount(data.discounted_price) ??
+    parseUsdAmount(data.price) ??
+    parseUsdAmount(data.cost) ??
+    parseUsdAmount(data.billing?.discounted_price) ??
+    parseUsdAmount(data.billing?.price) ??
+    parseUsdAmount(data.execution?.price) ??
+    parseUsdAmount(data.execution?.cost);
+
   return {
     id: data.id,
     status: data.status ?? "created",
@@ -156,7 +195,131 @@ function normalizePrediction(raw: unknown): WanPrediction {
     created_at: data.created_at,
     timings: data.timings,
     progress,
+    costUsd,
   };
+}
+
+/** Estimate payable USD for a model request (Pricing API). */
+export async function estimateWaveSpeedPrice(input: {
+  modelId: string;
+  inputs?: Record<string, unknown>;
+}): Promise<WaveSpeedPriceQuote | null> {
+  const apiKey = requireApiKey();
+  const body: Record<string, unknown> = { model_id: input.modelId };
+  if (input.inputs) {
+    body.inputs = input.inputs;
+  }
+
+  try {
+    const response = await fetch(WAVESPEED_PRICE_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+      cache: "no-store",
+    });
+    if (!response.ok) return null;
+    const data = unwrapWaveSpeedData<{
+      model_id?: string;
+      price?: unknown;
+      discounted_price?: unknown;
+      discount_rate?: unknown;
+      currency?: string;
+    }>(await response.json());
+    const price = parseUsdAmount(data?.price);
+    const discountedPrice = parseUsdAmount(data?.discounted_price) ?? price;
+    if (price == null || discountedPrice == null) return null;
+    return {
+      modelId: data?.model_id ?? input.modelId,
+      price,
+      discountedPrice,
+      discountRate:
+        typeof data?.discount_rate === "number" && Number.isFinite(data.discount_rate)
+          ? data.discount_rate
+          : 100,
+      currency: data?.currency?.trim() || "USD",
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Look up the actual billed USD for a prediction (may lag briefly after completion). */
+export async function getWaveSpeedBillingCostUsd(
+  predictionId: string,
+): Promise<number | null> {
+  const id = predictionId.trim();
+  if (!id) return null;
+  const apiKey = requireApiKey();
+
+  try {
+    const response = await fetch(WAVESPEED_BILLINGS_SEARCH_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        prediction_uuids: [id],
+        page: 1,
+        page_size: 10,
+      }),
+      cache: "no-store",
+    });
+    if (!response.ok) return null;
+    const data = unwrapWaveSpeedData<{
+      items?: Array<{
+        price?: unknown;
+        billing_type?: string;
+        order?: { price?: unknown };
+      }>;
+    }>(await response.json());
+    const items = Array.isArray(data?.items) ? data.items : [];
+    let total = 0;
+    let found = false;
+    for (const item of items) {
+      const amount =
+        parseUsdAmount(item.price) ?? parseUsdAmount(item.order?.price);
+      if (amount == null) continue;
+      found = true;
+      total += amount;
+    }
+    return found ? total : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Prefer prediction payload cost, then billing search, then a Pricing API estimate.
+ */
+export async function resolveWaveSpeedCostUsd(input: {
+  predictionId: string;
+  predictionCostUsd?: number;
+  modelId?: string;
+  priceInputs?: Record<string, unknown>;
+}): Promise<number | null> {
+  if (
+    typeof input.predictionCostUsd === "number" &&
+    Number.isFinite(input.predictionCostUsd)
+  ) {
+    return input.predictionCostUsd;
+  }
+
+  const billed = await getWaveSpeedBillingCostUsd(input.predictionId);
+  if (billed != null) return billed;
+
+  if (input.modelId) {
+    const quote = await estimateWaveSpeedPrice({
+      modelId: input.modelId,
+      inputs: input.priceInputs,
+    });
+    if (quote) return quote.discountedPrice;
+  }
+
+  return null;
 }
 
 export async function submitWanImageEditPro(

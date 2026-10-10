@@ -9,12 +9,14 @@ import { extensionForMime } from "@/lib/wan-image-edit";
 import {
   clampWanVideoEditDuration,
   DEFAULT_WAN_VIDEO_EDIT_RESOLUTION,
+  isWanCompleted,
   MAX_WAN_VIDEO_EDIT_AUDIO_BYTES,
   MAX_WAN_VIDEO_EDIT_IMAGE_BYTES,
   MAX_WAN_VIDEO_EDIT_REFERENCE_AUDIOS,
   MAX_WAN_VIDEO_EDIT_REFERENCE_IMAGES,
   MAX_WAN_VIDEO_EDIT_VIDEO_BYTES,
   WAN_VIDEO_EDIT_INPUT_MAX_SEC,
+  WAN_VIDEO_EDIT_MODEL,
   WAN_VIDEO_EDIT_RESOLUTIONS,
   type WanVideoEditResolution,
 } from "@/lib/wan-video-edit";
@@ -30,6 +32,7 @@ import {
 import {
   getWaveSpeedPrediction,
   isWaveSpeedConfigured,
+  resolveWaveSpeedCostUsd,
   submitWanVideoEdit,
   uploadWaveSpeedMedia,
   WaveSpeedError,
@@ -81,6 +84,8 @@ export interface WanVideoEditPollState {
   outputs: string[];
   inferenceMs?: number;
   progress?: number;
+  /** USD charged / estimated for this prediction. */
+  costUsd?: number;
 }
 
 function absoluteFromPublicUpload(publicPath: string): string | null {
@@ -381,12 +386,22 @@ export async function pollWanVideoEditAction(
 
   try {
     const prediction = await getWaveSpeedPrediction(id);
+    let costUsd: number | undefined;
+    if (isWanCompleted(prediction.status)) {
+      costUsd =
+        (await resolveWaveSpeedCostUsd({
+          predictionId: prediction.id,
+          predictionCostUsd: prediction.costUsd,
+          modelId: prediction.model ?? WAN_VIDEO_EDIT_MODEL,
+        })) ?? undefined;
+    }
     return {
       predictionId: prediction.id,
       status: prediction.status,
       outputs: prediction.outputs,
       inferenceMs: prediction.timings?.inference,
       progress: prediction.progress,
+      costUsd,
       error: prediction.error,
     };
   } catch (error) {

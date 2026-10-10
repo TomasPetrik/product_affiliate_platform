@@ -47,6 +47,22 @@ export const mergeVideoFrameSegmentSchema = z
     },
   );
 
+export const mergeVideoFrameAudioTrackSchema = z
+  .object({
+    assetId: z.string().min(1),
+    trimStartSec: z.number().finite().min(0).default(0),
+    trimEndSec: z.number().finite().positive(),
+    startAtSec: z.number().finite().min(0).default(0),
+    volume: z.number().finite().min(0).max(1).optional(),
+  })
+  .refine(
+    (value) => value.trimEndSec > value.trimStartSec + 0.04,
+    {
+      message: "Each trimmed audio track must be longer than 0.04s.",
+      path: ["trimEndSec"],
+    },
+  );
+
 export const mergeVideoFrameClipsSchema = z
   .object({
     projectId: z.string().min(1),
@@ -60,6 +76,7 @@ export const mergeVideoFrameClipsSchema = z
       .min(2, "Pick at least two clips to merge.")
       .max(40, "Too many clips to merge.")
       .optional(),
+    audioTracks: z.array(mergeVideoFrameAudioTrackSchema).max(8).optional(),
     stripAudio: z.boolean().optional(),
     exportQuality: z.enum(["720p", "1080p", "2K"]).optional(),
   })
@@ -78,10 +95,21 @@ export const videoFrameMergerSegmentStateSchema = z.object({
   durationSec: z.number().finite().positive(),
 });
 
+export const videoFrameMergerAudioTrackStateSchema = z.object({
+  instanceId: z.string().min(1).max(80),
+  assetId: z.string().min(1),
+  trimStartSec: z.number().finite().min(0),
+  trimEndSec: z.number().finite().positive(),
+  durationSec: z.number().finite().positive(),
+  startAtSec: z.number().finite().min(0),
+  volume: z.number().finite().min(0).max(1).optional(),
+});
+
 export const saveVideoFrameMergerStateSchema = z.object({
   projectId: z.string().min(1),
   state: z.object({
     segments: z.array(videoFrameMergerSegmentStateSchema).max(40),
+    audioTracks: z.array(videoFrameMergerAudioTrackStateSchema).max(8).optional(),
     selectedId: z.string().min(1).max(80).nullable(),
     playheadSec: z.number().finite().min(0),
     previewSegIndex: z.number().int().min(0).max(40),

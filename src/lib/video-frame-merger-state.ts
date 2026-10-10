@@ -14,13 +14,27 @@ export interface VideoFrameMergerSegmentState {
   durationSec: number;
 }
 
+/** Soundtrack placed on composition time (move via startAtSec, trim like video). */
+export interface VideoFrameMergerAudioTrackState {
+  instanceId: string;
+  assetId: string;
+  trimStartSec: number;
+  trimEndSec: number;
+  durationSec: number;
+  /** Where the trimmed audio begins on the merged composition timeline. */
+  startAtSec: number;
+  /** Linear gain 0–1. Defaults to 1 when omitted. */
+  volume?: number;
+}
+
 export interface VideoFrameMergerState {
   segments: VideoFrameMergerSegmentState[];
+  audioTracks: VideoFrameMergerAudioTrackState[];
   selectedId: string | null;
   playheadSec: number;
   previewSegIndex: number;
   zoom: number;
-  /** When true, Generate merge strips all audio from the output. */
+  /** When true, Generate merge strips clip audio (soundtrack still mixed in). */
   stripAudio: boolean;
   /** 9:16 export size for Generate merge. */
   exportQuality: MergeExportQuality;
@@ -66,6 +80,28 @@ function parseSegment(value: unknown): VideoFrameMergerSegmentState | null {
   };
 }
 
+function parseAudioTrack(value: unknown): VideoFrameMergerAudioTrackState | null {
+  const base = parseSegment(value);
+  if (!base || !isRecord(value)) return null;
+  const startAtSec =
+    typeof value.startAtSec === "number" && Number.isFinite(value.startAtSec)
+      ? Math.max(0, value.startAtSec)
+      : 0;
+  const volumeRaw =
+    typeof value.volume === "number" && Number.isFinite(value.volume)
+      ? value.volume
+      : undefined;
+  const volume =
+    volumeRaw == null
+      ? undefined
+      : Math.min(1, Math.max(0, volumeRaw));
+  return {
+    ...base,
+    startAtSec,
+    ...(volume != null ? { volume } : {}),
+  };
+}
+
 /** Parse JSON from DB / client into a validated merger state. */
 export function parseVideoFrameMergerState(
   value: unknown,
@@ -77,6 +113,14 @@ export function parseVideoFrameMergerState(
   for (const item of value.segments) {
     const segment = parseSegment(item);
     if (segment) segments.push(segment);
+  }
+
+  const audioTracks: VideoFrameMergerAudioTrackState[] = [];
+  if (Array.isArray(value.audioTracks)) {
+    for (const item of value.audioTracks) {
+      const track = parseAudioTrack(item);
+      if (track) audioTracks.push(track);
+    }
   }
 
   const zoomRaw = typeof value.zoom === "number" ? value.zoom : 1.5;
@@ -97,6 +141,7 @@ export function parseVideoFrameMergerState(
 
   return {
     segments,
+    audioTracks,
     selectedId,
     playheadSec,
     previewSegIndex: Math.min(
@@ -109,20 +154,25 @@ export function parseVideoFrameMergerState(
   };
 }
 
-/** Drop segments whose clip assets no longer exist; clamp selection/playhead. */
+/** Drop segments/tracks whose assets no longer exist; clamp selection/playhead. */
 export function sanitizeVideoFrameMergerState(
   state: VideoFrameMergerState,
   existingClipIds: ReadonlySet<string>,
+  existingAudioIds: ReadonlySet<string> = new Set(),
 ): VideoFrameMergerState {
   const segments = state.segments.filter((segment) =>
     existingClipIds.has(segment.assetId),
   );
+  const audioTracks = (state.audioTracks ?? []).filter((track) =>
+    existingAudioIds.has(track.assetId),
+  );
   const selectedStillThere =
     state.selectedId != null &&
-    segments.some((segment) => segment.instanceId === state.selectedId);
+    (segments.some((segment) => segment.instanceId === state.selectedId) ||
+      audioTracks.some((track) => track.instanceId === state.selectedId));
   const selectedId = selectedStillThere
     ? state.selectedId
-    : (segments[0]?.instanceId ?? null);
+    : (segments[0]?.instanceId ?? audioTracks[0]?.instanceId ?? null);
   let previewSegIndex = state.previewSegIndex;
   if (selectedId) {
     const idx = segments.findIndex((segment) => segment.instanceId === selectedId);
@@ -136,10 +186,11 @@ export function sanitizeVideoFrameMergerState(
         selected.trimEndSec,
         Math.max(selected.trimStartSec, state.playheadSec),
       )
-    : 0;
+    : Math.max(0, state.playheadSec);
 
   return {
     segments,
+    audioTracks,
     selectedId,
     playheadSec,
     previewSegIndex,
@@ -152,6 +203,7 @@ export function sanitizeVideoFrameMergerState(
 export function emptyVideoFrameMergerState(): VideoFrameMergerState {
   return {
     segments: [],
+    audioTracks: [],
     selectedId: null,
     playheadSec: 0,
     previewSegIndex: 0,

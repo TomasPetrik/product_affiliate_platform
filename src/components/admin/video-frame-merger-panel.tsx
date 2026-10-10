@@ -13,6 +13,7 @@ import {
   Loader2,
   Maximize2,
   Minimize2,
+  Music,
   Pause,
   Play,
   Trash2,
@@ -46,23 +47,31 @@ import {
   parseMergeExportQuality,
   type MergeExportQuality,
 } from "@/lib/video-frame-merge-quality";
-import { MAX_VIDEO_FRAME_PROJECT_VIDEO_BYTES } from "@/lib/video-frame-project-paths";
+import {
+  MAX_VIDEO_FRAME_PROJECT_AUDIO_BYTES,
+  MAX_VIDEO_FRAME_PROJECT_VIDEO_BYTES,
+} from "@/lib/video-frame-project-paths";
 import {
   emptyVideoFrameMergerState,
   sanitizeVideoFrameMergerState,
+  type VideoFrameMergerAudioTrackState,
   type VideoFrameMergerState,
 } from "@/lib/video-frame-merger-state";
 import { cn } from "@/lib/utils";
 import {
   mergeVideoFrameClipsAction,
   saveVideoFrameMergerStateAction,
+  uploadVideoFrameLocalAudioAction,
   uploadVideoFrameLocalClipAction,
 } from "@/server/actions/video-frame-project.actions";
 import type { VideoFrameProjectAssetDto } from "@/server/services/video-frame-project.service";
+import { sourceToComposition } from "@/components/admin/video-frame-merge-timeline";
 
 const POOL_DRAG_TYPE = "application/x-video-frame-merge-pool";
 const ACCEPT_VIDEO =
   "video/mp4,video/webm,video/quicktime,video/x-m4v,.mp4,.webm,.mov,.m4v";
+const ACCEPT_AUDIO =
+  "audio/mpeg,audio/mp3,audio/wav,audio/x-wav,audio/mp4,audio/aac,audio/ogg,audio/webm,.mp3,.wav,.aac,.ogg,.m4a,.webm";
 const THUMB_CLASS =
   "aspect-[9/16] w-full rounded-md bg-black object-cover ring-1 ring-border";
 const BASE_PPS = 48;
@@ -78,10 +87,13 @@ interface MergeSegment {
   durationSec: number;
 }
 
+type MergeAudioTrack = VideoFrameMergerAudioTrackState;
+
 /** Content fingerprint for autosave — excludes playhead / preview index (ephemeral). */
 function mergerStateFingerprint(state: VideoFrameMergerState): string {
   return JSON.stringify({
     segments: state.segments,
+    audioTracks: state.audioTracks,
     selectedId: state.selectedId,
     zoom: state.zoom,
     stripAudio: state.stripAudio,
@@ -91,13 +103,14 @@ function mergerStateFingerprint(state: VideoFrameMergerState): string {
 
 interface TimelineSnapshot {
   segments: MergeSegment[];
+  audioTracks: MergeAudioTrack[];
   selectedId: string | null;
   playheadSec: number;
   previewSegIndex: number;
 }
 
-function newInstanceId() {
-  return `seg-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+function newInstanceId(prefix = "seg") {
+  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 function reorderList<T>(list: T[], fromIndex: number, toIndex: number): T[] {
@@ -149,8 +162,40 @@ function isVideoFile(file: File): boolean {
   return /\.(mp4|webm|mov|m4v)$/i.test(file.name);
 }
 
+function isAudioFile(file: File): boolean {
+  if (file.type.startsWith("audio/")) return true;
+  return /\.(mp3|wav|aac|ogg|m4a|webm)$/i.test(file.name);
+}
+
 function videoFilesFromList(list: FileList | File[]): File[] {
   return Array.from(list).filter(isVideoFile);
+}
+
+function audioFilesFromList(list: FileList | File[]): File[] {
+  return Array.from(list).filter(isAudioFile);
+}
+
+function loadAudioDuration(url: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const audio = document.createElement("audio");
+    audio.preload = "metadata";
+    audio.onloadedmetadata = () => {
+      const duration = audio.duration;
+      audio.removeAttribute("src");
+      audio.load();
+      if (!Number.isFinite(duration) || duration <= 0) {
+        reject(new Error("Invalid audio duration."));
+        return;
+      }
+      resolve(duration);
+    };
+    audio.onerror = () => {
+      audio.removeAttribute("src");
+      audio.load();
+      reject(new Error("Could not read audio metadata."));
+    };
+    audio.src = url;
+  });
 }
 
 function hasFileDrag(event: DragEvent): boolean {
@@ -197,6 +242,7 @@ function loadVideoMeta(
 interface VideoFrameMergerPanelProps {
   projectId: string;
   clips: VideoFrameProjectAssetDto[];
+  audioAssets: VideoFrameProjectAssetDto[];
   merged: VideoFrameProjectAssetDto[];
   initialMergerState?: VideoFrameMergerState | null;
   onAssetsUpdated: (projectAssets: VideoFrameProjectAssetDto[]) => void;
@@ -206,36 +252,50 @@ interface VideoFrameMergerPanelProps {
 function hydrateMergerState(
   initial: VideoFrameMergerState | null | undefined,
   clipIds: ReadonlySet<string>,
+  audioIds: ReadonlySet<string>,
 ): VideoFrameMergerState {
   return sanitizeVideoFrameMergerState(
     initial ?? emptyVideoFrameMergerState(),
     clipIds,
+    audioIds,
   );
 }
 
 export function VideoFrameMergerPanel({
   projectId,
   clips,
+  audioAssets,
   merged,
   initialMergerState = null,
   onAssetsUpdated,
   onOpenClip,
 }: VideoFrameMergerPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const audioInputRef = useRef<HTMLInputElement>(null);
   const previewVideoRef = useRef<HTMLVideoElement>(null);
+  const previewAudioRef = useRef<HTMLAudioElement>(null);
   const initialClipIds = useMemo(
     () => new Set(clips.map((clip) => clip.id)),
     // Only for first paint hydration — ignore later clip list churn.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
+  const initialAudioIds = useMemo(
+    () => new Set(audioAssets.map((asset) => asset.id)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
   const hydrated = useMemo(
-    () => hydrateMergerState(initialMergerState, initialClipIds),
-    [initialMergerState, initialClipIds],
+    () =>
+      hydrateMergerState(initialMergerState, initialClipIds, initialAudioIds),
+    [initialMergerState, initialClipIds, initialAudioIds],
   );
 
   const [segments, setSegments] = useState<MergeSegment[]>(
     () => hydrated.segments,
+  );
+  const [audioTracks, setAudioTracks] = useState<MergeAudioTrack[]>(
+    () => hydrated.audioTracks ?? [],
   );
   const [selectedId, setSelectedId] = useState<string | null>(
     () => hydrated.selectedId,
@@ -244,6 +304,7 @@ export function VideoFrameMergerPanel({
   const [fileDropOver, setFileDropOver] = useState(false);
   const [merging, setMerging] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [uploadingAudio, setUploadingAudio] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [zoom, setZoom] = useState(() => hydrated.zoom);
   const [stripAudio, setStripAudio] = useState(() => hydrated.stripAudio);
@@ -267,6 +328,7 @@ export function VideoFrameMergerPanel({
   const previewPlayingRef = useRef(false);
   const advancingClipRef = useRef(false);
   const segmentsRef = useRef(segments);
+  const audioTracksRef = useRef(audioTracks);
   const selectedIdRef = useRef(selectedId);
   const playheadSecRef = useRef(playheadSec);
   const previewSegIndexRef = useRef(previewSegIndex);
@@ -282,6 +344,9 @@ export function VideoFrameMergerPanel({
   useEffect(() => {
     segmentsRef.current = segments;
   }, [segments]);
+  useEffect(() => {
+    audioTracksRef.current = audioTracks;
+  }, [audioTracks]);
   useEffect(() => {
     selectedIdRef.current = selectedId;
   }, [selectedId]);
@@ -305,6 +370,7 @@ export function VideoFrameMergerPanel({
   useEffect(() => {
     lastSavedFingerprintRef.current = mergerStateFingerprint({
       segments: hydrated.segments,
+      audioTracks: hydrated.audioTracks ?? [],
       selectedId: hydrated.selectedId,
       playheadSec: hydrated.playheadSec,
       previewSegIndex: hydrated.previewSegIndex,
@@ -325,6 +391,14 @@ export function VideoFrameMergerPanel({
     return map;
   }, [clips]);
 
+  const audioById = useMemo(() => {
+    const map = new Map<string, VideoFrameProjectAssetDto>();
+    for (const asset of audioAssets) {
+      map.set(asset.id, asset);
+    }
+    return map;
+  }, [audioAssets]);
+
   useEffect(() => {
     setSegments((current) => {
       const next = current.filter((segment) => clipById.has(segment.assetId));
@@ -333,16 +407,24 @@ export function VideoFrameMergerPanel({
     });
   }, [clipById]);
 
+  useEffect(() => {
+    setAudioTracks((current) => {
+      const next = current.filter((track) => audioById.has(track.assetId));
+      return next.length === current.length ? current : next;
+    });
+  }, [audioById]);
+
   // Debounced autosave of merger timeline to the project.
   // Do not depend on playheadSec / previewSegIndex — those update continuously while
   // previewing and were causing Saving… / Saved to flicker.
   useEffect(() => {
-    if (!autosaveReady || uploading || merging) {
+    if (!autosaveReady || uploading || uploadingAudio || merging) {
       return;
     }
     const timer = window.setTimeout(() => {
       const state: VideoFrameMergerState = {
         segments: segmentsRef.current.map((segment) => ({ ...segment })),
+        audioTracks: audioTracksRef.current.map((track) => ({ ...track })),
         selectedId: selectedIdRef.current,
         playheadSec: playheadSecRef.current,
         previewSegIndex: previewSegIndexRef.current,
@@ -372,9 +454,11 @@ export function VideoFrameMergerPanel({
   }, [
     autosaveReady,
     uploading,
+    uploadingAudio,
     merging,
     projectId,
     segments,
+    audioTracks,
     selectedId,
     zoom,
     stripAudio,
@@ -427,23 +511,44 @@ export function VideoFrameMergerPanel({
 
   const selected =
     sequenceClips.find((row) => row.segment.instanceId === selectedId) ??
-    sequenceClips[0] ??
     null;
+  const selectedAudioTrack =
+    audioTracks.find((track) => track.instanceId === selectedId) ?? null;
+
+  const timelineAudioTracks = audioTracks
+    .map((track) => {
+      const asset = audioById.get(track.assetId);
+      if (!asset) return null;
+      return { track, asset };
+    })
+    .filter(
+      (
+        row,
+      ): row is { track: MergeAudioTrack; asset: VideoFrameProjectAssetDto } =>
+        row != null,
+    );
 
   useEffect(() => {
-    if (selectedId && sequenceClips.some((row) => row.segment.instanceId === selectedId)) {
+    if (
+      selectedId &&
+      (sequenceClips.some((row) => row.segment.instanceId === selectedId) ||
+        audioTracks.some((track) => track.instanceId === selectedId))
+    ) {
       return;
     }
     const first = sequenceClips[0];
-    setSelectedId(first?.segment.instanceId ?? null);
+    setSelectedId(first?.segment.instanceId ?? audioTracks[0]?.instanceId ?? null);
     if (first) {
       setPreviewSegIndex(0);
       setPlayheadSec(first.segment.trimStartSec);
     }
-  }, [selectedId, sequenceClips]);
+  }, [selectedId, sequenceClips, audioTracks]);
 
   const availableClips = clips.filter(
     (clip) => !segments.some((segment) => segment.assetId === clip.id),
+  );
+  const availableAudio = audioAssets.filter(
+    (asset) => !audioTracks.some((track) => track.assetId === asset.id),
   );
   const savedMerges = useMemo(
     () => [...merged].sort(compareMergedVersions),
@@ -451,15 +556,38 @@ export function VideoFrameMergerPanel({
   );
 
   const maxMb = Math.round(MAX_VIDEO_FRAME_PROJECT_VIDEO_BYTES / (1024 * 1024));
+  const maxAudioMb = Math.round(
+    MAX_VIDEO_FRAME_PROJECT_AUDIO_BYTES / (1024 * 1024),
+  );
   const pixelsPerSecond = BASE_PPS * zoom;
 
   const activePreview = sequenceClips[previewSegIndex] ?? null;
+  const primarySoundtrack = timelineAudioTracks[0] ?? null;
+
+  function compositionSecFromState(): number {
+    const viewSegments = sequenceClips.map(({ segment, clip }) => ({
+      instanceId: segment.instanceId,
+      videoUrl: clip.path,
+      label: clip.fileName,
+      durationSec: segment.durationSec,
+      trimStartSec: segment.trimStartSec,
+      trimEndSec: segment.trimEndSec,
+    }));
+    const active = sequenceClips[previewSegIndexRef.current];
+    if (!active) return 0;
+    return sourceToComposition(
+      viewSegments,
+      active.segment.instanceId,
+      playheadSecRef.current,
+    );
+  }
 
   function pushUndoSnapshot() {
     setUndoStack((stack) => [
       ...stack.slice(-39),
       {
         segments: segmentsRef.current.map((segment) => ({ ...segment })),
+        audioTracks: audioTracksRef.current.map((track) => ({ ...track })),
         selectedId: selectedIdRef.current,
         playheadSec: playheadSecRef.current,
         previewSegIndex: previewSegIndexRef.current,
@@ -473,6 +601,7 @@ export function VideoFrameMergerPanel({
       if (!prev) return stack;
       setPreviewPlaying(false);
       setSegments(prev.segments.map((segment) => ({ ...segment })));
+      setAudioTracks(prev.audioTracks.map((track) => ({ ...track })));
       setSelectedId(prev.selectedId);
       setPlayheadSec(prev.playheadSec);
       setPreviewSegIndex(prev.previewSegIndex);
@@ -570,6 +699,133 @@ export function VideoFrameMergerPanel({
     activePreview?.segment.instanceId,
     activePreview?.clip.path,
     fullPreviewOpen,
+  ]);
+
+  // Soundtrack preview: start once on Play, keep playing across video clip
+  // swaps. Do not reseek on every clip change / timeupdate — that caused a
+  // ~1s frozen audio loop.
+  useEffect(() => {
+    const audio = previewAudioRef.current;
+    if (!audio) return;
+
+    if (!previewPlaying || !primarySoundtrack) {
+      audio.pause();
+      return;
+    }
+
+    const { track, asset } = primarySoundtrack;
+    const video = previewVideoRef.current;
+
+    function compositionFromVideo(): number {
+      if (!video) return compositionSecFromState();
+      const viewSegments = sequenceClips.map(({ segment, clip }) => ({
+        instanceId: segment.instanceId,
+        videoUrl: clip.path,
+        label: clip.fileName,
+        durationSec: segment.durationSec,
+        trimStartSec: segment.trimStartSec,
+        trimEndSec: segment.trimEndSec,
+      }));
+      const active = sequenceClips[previewSegIndexRef.current];
+      if (!active) return compositionSecFromState();
+      return sourceToComposition(
+        viewSegments,
+        active.segment.instanceId,
+        video.currentTime,
+      );
+    }
+
+    function sourceTimeForComposition(compositionSec: number): number | null {
+      const localSec =
+        track.trimStartSec + (compositionSec - track.startAtSec);
+      if (
+        compositionSec < track.startAtSec - 0.05 ||
+        localSec < track.trimStartSec - 0.05 ||
+        localSec > track.trimEndSec + 0.05
+      ) {
+        return null;
+      }
+      return Math.min(
+        track.trimEndSec - 0.02,
+        Math.max(track.trimStartSec, localSec),
+      );
+    }
+
+    let cancelled = false;
+    let started = false;
+
+    const ensureSrc = () => {
+      if (audio.getAttribute("src") !== asset.path) {
+        audio.src = asset.path;
+      }
+    };
+
+    const startAtComposition = () => {
+      if (cancelled || started) return;
+      ensureSrc();
+      const target = sourceTimeForComposition(compositionFromVideo());
+      if (target == null) {
+        audio.pause();
+        return;
+      }
+      const play = () => {
+        if (cancelled || started) return;
+        started = true;
+        audio.currentTime = target;
+        void audio.play().catch(() => {
+          started = false;
+        });
+      };
+      if (audio.readyState >= 1) {
+        play();
+      } else {
+        const onReady = () => {
+          audio.removeEventListener("loadeddata", onReady);
+          play();
+        };
+        audio.addEventListener("loadeddata", onReady);
+      }
+    };
+
+    // Wait a frame so video has applied its seek for this Play press.
+    const startTimer = window.setTimeout(startAtComposition, 40);
+
+    const onTimeUpdate = () => {
+      if (cancelled || !started) return;
+      const target = sourceTimeForComposition(compositionFromVideo());
+      if (target == null) {
+        if (!audio.paused) audio.pause();
+        return;
+      }
+      // Resume if we paused while out of range; only hard-seek on large drift.
+      if (audio.paused) {
+        audio.currentTime = target;
+        void audio.play().catch(() => {});
+        return;
+      }
+      if (Math.abs(audio.currentTime - target) > 0.85) {
+        audio.currentTime = target;
+      }
+    };
+
+    video?.addEventListener("timeupdate", onTimeUpdate);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(startTimer);
+      video?.removeEventListener("timeupdate", onTimeUpdate);
+      audio.pause();
+    };
+    // Intentionally omit activePreview / sequenceClips identity churn — audio
+    // must keep playing across sequential video clip advances.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    previewPlaying,
+    primarySoundtrack?.track.instanceId,
+    primarySoundtrack?.asset.path,
+    primarySoundtrack?.track.trimStartSec,
+    primarySoundtrack?.track.trimEndSec,
+    primarySoundtrack?.track.startAtSec,
   ]);
 
   async function addClipToSequence(assetId: string) {
@@ -712,6 +968,131 @@ export function VideoFrameMergerPanel({
     );
   }
 
+  function updateAudioTrim(
+    instanceId: string,
+    trimStartSec: number,
+    trimEndSec: number,
+  ) {
+    setAudioTracks((current) =>
+      current.map((track) =>
+        track.instanceId === instanceId
+          ? { ...track, trimStartSec, trimEndSec }
+          : track,
+      ),
+    );
+  }
+
+  function updateAudioStartAt(instanceId: string, startAtSec: number) {
+    setAudioTracks((current) =>
+      current.map((track) =>
+        track.instanceId === instanceId
+          ? { ...track, startAtSec: Math.max(0, startAtSec) }
+          : track,
+      ),
+    );
+  }
+
+  function removeAudioTrack(instanceId: string) {
+    pushUndoSnapshot();
+    setAudioTracks((current) =>
+      current.filter((track) => track.instanceId !== instanceId),
+    );
+  }
+
+  async function addAudioToTimeline(assetId: string) {
+    const asset = audioById.get(assetId);
+    if (!asset || audioTracks.some((track) => track.assetId === assetId)) {
+      return;
+    }
+    try {
+      const durationSec = await loadAudioDuration(asset.path);
+      const track: MergeAudioTrack = {
+        instanceId: newInstanceId("aud"),
+        assetId,
+        trimStartSec: 0,
+        trimEndSec: durationSec,
+        durationSec,
+        startAtSec: 0,
+      };
+      pushUndoSnapshot();
+      setAudioTracks((current) => [...current, track]);
+      setSelectedId(track.instanceId);
+      setError(null);
+    } catch {
+      setError(`Could not read duration for ${asset.fileName}.`);
+    }
+  }
+
+  async function uploadLocalAudio(files: File[]) {
+    if (uploadingAudio || files.length === 0) return;
+    setUploadingAudio(true);
+    setError(null);
+    let latestAssets: VideoFrameProjectAssetDto[] | null = null;
+    const newIds: string[] = [];
+    const knownIds = new Set(audioAssets.map((asset) => asset.id));
+
+    try {
+      for (const file of files) {
+        if (file.size > MAX_VIDEO_FRAME_PROJECT_AUDIO_BYTES) {
+          setError(
+            `${file.name} is larger than ${maxAudioMb}MB and was skipped.`,
+          );
+          continue;
+        }
+        const formData = new FormData();
+        formData.set("projectId", projectId);
+        formData.set("audio", file);
+        const result = await uploadVideoFrameLocalAudioAction(formData);
+        if (result.error || !result.project) {
+          setError(result.error ?? `Upload failed for ${file.name}.`);
+          break;
+        }
+        latestAssets = result.project.assets;
+        const uploaded = latestAssets.find(
+          (asset) => asset.kind === "AUDIO" && !knownIds.has(asset.id),
+        );
+        if (uploaded) {
+          newIds.push(uploaded.id);
+          knownIds.add(uploaded.id);
+        }
+      }
+      if (latestAssets) {
+        onAssetsUpdated(latestAssets);
+        if (newIds.length > 0) {
+          pushUndoSnapshot();
+        }
+        for (const id of newIds) {
+          const asset = latestAssets.find((row) => row.id === id);
+          if (!asset) continue;
+          try {
+            const durationSec = await loadAudioDuration(asset.path);
+            const track: MergeAudioTrack = {
+              instanceId: newInstanceId("aud"),
+              assetId: id,
+              trimStartSec: 0,
+              trimEndSec: durationSec,
+              durationSec,
+              startAtSec: 0,
+            };
+            setAudioTracks((current) =>
+              current.some((row) => row.assetId === id)
+                ? current
+                : [...current, track],
+            );
+            setSelectedId(track.instanceId);
+          } catch {
+            setError(`Could not read duration for ${asset.fileName}.`);
+          }
+        }
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Audio upload failed.");
+    } finally {
+      setUploadingAudio(false);
+      if (audioInputRef.current) audioInputRef.current.value = "";
+    }
+  }
+
   async function uploadLocalClips(files: File[]) {
     if (uploading || files.length === 0) return;
     setUploading(true);
@@ -787,6 +1168,13 @@ export function VideoFrameMergerPanel({
       setError("Wait for all clip durations to load before merging.");
       return;
     }
+    const audioNotReady = audioTracks.find(
+      (track) => !(track.durationSec > 0) || !(track.trimEndSec > track.trimStartSec),
+    );
+    if (audioNotReady) {
+      setError("Wait for soundtrack durations to load before merging.");
+      return;
+    }
     setMerging(true);
     setError(null);
     setPreviewPlaying(false);
@@ -799,6 +1187,13 @@ export function VideoFrameMergerPanel({
           assetId: segment.assetId,
           trimStartSec: segment.trimStartSec,
           trimEndSec: segment.trimEndSec,
+        })),
+        audioTracks: audioTracks.map((track) => ({
+          assetId: track.assetId,
+          trimStartSec: track.trimStartSec,
+          trimEndSec: track.trimEndSec,
+          startAtSec: track.startAtSec,
+          volume: track.volume,
         })),
       });
       if (result.error || !result.project) {
@@ -979,8 +1374,72 @@ export function VideoFrameMergerPanel({
         <div className="grid gap-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-xs font-medium text-muted-foreground">
+              Soundtrack
+              {audioAssets.length > 0 ? ` (${audioAssets.length})` : ""}
+            </p>
+            <div className="flex items-center gap-2">
+              <input
+                ref={audioInputRef}
+                type="file"
+                accept={ACCEPT_AUDIO}
+                multiple
+                className="hidden"
+                onChange={(event) => {
+                  const files = audioFilesFromList(event.target.files ?? []);
+                  if (files.length > 0) void uploadLocalAudio(files);
+                }}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                disabled={uploadingAudio || merging || uploading}
+                onClick={() => audioInputRef.current?.click()}
+              >
+                {uploadingAudio ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <Music className="size-3.5" />
+                )}
+                {uploadingAudio ? "Uploading…" : "Add soundtrack"}
+              </Button>
+            </div>
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            MP3, WAV, AAC, OGG, or M4A · max {maxAudioMb}MB. Trim and drag on the
+            blue track under the video timeline — included in Generate merge.
+          </p>
+          {availableAudio.length > 0 ? (
+            <div className="flex flex-wrap gap-2">
+              {availableAudio.map((asset) => (
+                <button
+                  key={asset.id}
+                  type="button"
+                  onClick={() => void addAudioToTimeline(asset.id)}
+                  className="flex max-w-[12rem] items-center gap-2 rounded-lg border bg-background px-2.5 py-2 text-left transition-colors hover:border-sky-500/50"
+                  title={`Add ${asset.fileName} to soundtrack track`}
+                >
+                  <Music className="size-3.5 shrink-0 text-sky-600" />
+                  <span className="truncate text-[11px] font-medium">
+                    {asset.fileName}
+                  </span>
+                </button>
+              ))}
+            </div>
+          ) : audioAssets.length > 0 ? (
+            <p className="text-[11px] text-muted-foreground">
+              All uploaded soundtracks are on the timeline.
+            </p>
+          ) : null}
+        </div>
+
+        <div className="grid gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs font-medium text-muted-foreground">
               Timeline
               {sequenceClips.length > 0 ? ` (${sequenceClips.length})` : ""}
+              {audioTracks.length > 0 ? ` · ${audioTracks.length} audio` : ""}
               {saveState === "saving" ? (
                 <span className="ml-2 text-[10px]">Saving…</span>
               ) : saveState === "saved" ? (
@@ -998,7 +1457,12 @@ export function VideoFrameMergerPanel({
                   variant="outline"
                   size="sm"
                   className="gap-1.5"
-                  disabled={undoStack.length === 0 || merging || uploading}
+                  disabled={
+                    undoStack.length === 0 ||
+                    merging ||
+                    uploading ||
+                    uploadingAudio
+                  }
                   onClick={undoTimeline}
                   title="Undo last timeline edit"
                 >
@@ -1118,6 +1582,32 @@ export function VideoFrameMergerPanel({
                     </div>
                   </div>
                 ) : null}
+                {selectedAudioTrack ? (
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-[11px] font-medium text-sky-700 dark:text-sky-300">
+                      Soundtrack:{" "}
+                      {audioById.get(selectedAudioTrack.assetId)?.fileName ??
+                        "audio"}{" "}
+                      · starts{" "}
+                      {formatMergeTimelineTime(selectedAudioTrack.startAtSec)} ·{" "}
+                      {formatMergeTimelineTime(
+                        selectedAudioTrack.trimEndSec -
+                          selectedAudioTrack.trimStartSec,
+                      )}{" "}
+                      kept
+                    </p>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() =>
+                        removeAudioTrack(selectedAudioTrack.instanceId)
+                      }
+                    >
+                      Remove audio
+                    </Button>
+                  </div>
+                ) : null}
                 <VideoFrameMergeTimeline
                   segments={sequenceClips.map(({ segment, clip }) => ({
                     instanceId: segment.instanceId,
@@ -1128,7 +1618,15 @@ export function VideoFrameMergerPanel({
                     trimStartSec: segment.trimStartSec,
                     trimEndSec: segment.trimEndSec,
                   }))}
-                  selectedId={selected?.segment.instanceId ?? null}
+                  audioTracks={timelineAudioTracks.map(({ track, asset }) => ({
+                    instanceId: track.instanceId,
+                    label: asset.fileName,
+                    durationSec: track.durationSec,
+                    trimStartSec: track.trimStartSec,
+                    trimEndSec: track.trimEndSec,
+                    startAtSec: track.startAtSec,
+                  }))}
+                  selectedId={selectedId}
                   playheadSec={playheadSec}
                   zoom={zoom}
                   pixelsPerSecond={pixelsPerSecond}
@@ -1164,11 +1662,20 @@ export function VideoFrameMergerPanel({
                   onReorder={(instanceId, toIndex) => {
                     applyReorder(instanceId, toIndex);
                   }}
+                  onAudioSelect={(instanceId) => {
+                    setSelectedId(instanceId);
+                    setPreviewPlaying(false);
+                  }}
+                  onAudioTrimChange={updateAudioTrim}
+                  onAudioMove={updateAudioStartAt}
+                  onAudioGestureStart={pushUndoSnapshot}
                 />
               </div>
             )}
           </div>
         </div>
+
+        <audio ref={previewAudioRef} preload="auto" className="hidden" />
 
         {activePreview ? (
           <div className="grid gap-2">
@@ -1433,19 +1940,20 @@ export function VideoFrameMergerPanel({
               htmlFor="merger-strip-audio"
               className="text-sm font-normal text-muted-foreground"
             >
-              Remove audio
+              Remove clip audio
             </Label>
           </div>
-          {sequenceClips.length > 0 ? (
+          {sequenceClips.length > 0 || audioTracks.length > 0 ? (
             <Button
               type="button"
               variant="ghost"
               size="sm"
               className="gap-1.5"
-              disabled={merging || uploading}
+              disabled={merging || uploading || uploadingAudio}
               onClick={() => {
                 pushUndoSnapshot();
                 setSegments([]);
+                setAudioTracks([]);
                 setSelectedId(null);
                 setPreviewPlaying(false);
               }}
@@ -1458,7 +1966,15 @@ export function VideoFrameMergerPanel({
             Needs at least two clips. Output is 9:16{" "}
             {MERGE_EXPORT_QUALITY_SIZES[exportQuality].label}, saved as the next
             version
-            {stripAudio ? " · no audio" : ""}.
+            {audioTracks.length > 0
+              ? " · includes soundtrack"
+              : stripAudio
+                ? " · no audio"
+                : ""}
+            {stripAudio && audioTracks.length > 0
+              ? " (clip audio stripped)"
+              : ""}
+            .
           </p>
         </div>
 

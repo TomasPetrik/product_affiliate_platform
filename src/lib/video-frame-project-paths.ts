@@ -2,6 +2,8 @@ import path from "node:path";
 
 export const LOCAL_VIDEO_FRAME_UPLOAD_PREFIX = "/uploads/video-frames/";
 export const MAX_VIDEO_FRAME_PROJECT_VIDEO_BYTES = 200 * 1024 * 1024;
+/** Soundtrack uploads for the Video merger (mp3/wav/aac/ogg/m4a). */
+export const MAX_VIDEO_FRAME_PROJECT_AUDIO_BYTES = 80 * 1024 * 1024;
 
 /** On-disk root for video-frame project media. */
 export function videoFrameProjectsUploadsDir(): string {

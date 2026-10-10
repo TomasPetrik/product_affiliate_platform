@@ -70,6 +70,7 @@ export default async function AdminVideoFrameProjectPage({ params }: PageProps) 
         thumbnailCount={thumbnailCount}
         editedCount={editedCount}
         clipCount={clipCount}
+        wanCostUsd={project.wanCostUsd}
       />
 
       <VideoFrameExtractPanel

@@ -10,8 +10,10 @@ import {
   DEFAULT_WAN_VIDEO_ASPECT_RATIO,
   DEFAULT_WAN_VIDEO_DURATION,
   DEFAULT_WAN_VIDEO_RESOLUTION,
+  isWanCompleted,
   MAX_WAN_VIDEO_IMAGE_BYTES,
   MAX_WAN_VIDEO_REFERENCE_IMAGES,
+  WAN_REFERENCE_TO_VIDEO_MODEL,
   WAN_VIDEO_ASPECT_RATIOS,
   WAN_VIDEO_RESOLUTIONS,
   type WanVideoAspectRatio,
@@ -26,6 +28,7 @@ import {
 import {
   getWaveSpeedPrediction,
   isWaveSpeedConfigured,
+  resolveWaveSpeedCostUsd,
   submitWanReferenceToVideo,
   uploadWaveSpeedMedia,
   WaveSpeedError,
@@ -59,6 +62,8 @@ export interface WanVideoPollState {
   outputs: string[];
   inferenceMs?: number;
   progress?: number;
+  /** USD charged / estimated for this prediction. */
+  costUsd?: number;
 }
 
 function absoluteFromPublicUpload(publicPath: string): string | null {
@@ -261,12 +266,22 @@ export async function pollWanVideoAction(
 
   try {
     const prediction = await getWaveSpeedPrediction(id);
+    let costUsd: number | undefined;
+    if (isWanCompleted(prediction.status)) {
+      costUsd =
+        (await resolveWaveSpeedCostUsd({
+          predictionId: prediction.id,
+          predictionCostUsd: prediction.costUsd,
+          modelId: prediction.model ?? WAN_REFERENCE_TO_VIDEO_MODEL,
+        })) ?? undefined;
+    }
     return {
       predictionId: prediction.id,
       status: prediction.status,
       outputs: prediction.outputs,
       inferenceMs: prediction.timings?.inference,
       progress: prediction.progress,
+      costUsd,
       error: prediction.error,
     };
   } catch (error) {

@@ -4,13 +4,16 @@ import { requireAdminSession } from "@/lib/auth";
 import {
   DEFAULT_WAN_SIZE,
   extensionForMime,
+  isWanCompleted,
   MAX_WAN_IMAGE_BYTES,
   MAX_WAN_REFERENCE_IMAGES,
   validateWanSize,
+  WAN_IMAGE_EDIT_PRO_MODEL,
 } from "@/lib/wan-image-edit";
 import {
   getWanImageEditResult,
   isWaveSpeedConfigured,
+  resolveWaveSpeedCostUsd,
   submitWanImageEditPro,
   uploadWaveSpeedMedia,
   WaveSpeedError,
@@ -37,6 +40,8 @@ export interface WanImageEditPollState {
   inferenceMs?: number;
   /** 0–100 when WaveSpeed reports it. */
   progress?: number;
+  /** USD charged / estimated for this prediction. */
+  costUsd?: number;
 }
 
 async function fileToUpload(file: File, fallbackName: string) {
@@ -165,12 +170,22 @@ export async function pollWanImageEditAction(
 
   try {
     const prediction = await getWanImageEditResult(id);
+    let costUsd: number | undefined;
+    if (isWanCompleted(prediction.status)) {
+      costUsd =
+        (await resolveWaveSpeedCostUsd({
+          predictionId: prediction.id,
+          predictionCostUsd: prediction.costUsd,
+          modelId: prediction.model ?? WAN_IMAGE_EDIT_PRO_MODEL,
+        })) ?? undefined;
+    }
     return {
       predictionId: prediction.id,
       status: prediction.status,
       outputs: prediction.outputs,
       inferenceMs: prediction.timings?.inference,
       progress: prediction.progress,
+      costUsd,
       error: prediction.error,
     };
   } catch (error) {

@@ -577,7 +577,7 @@ export function WanVideoEditPanel({ configured }: WanVideoEditPanelProps) {
 
       <form
         onSubmit={onSubmit}
-        className="grid gap-6"
+        className="grid gap-6 lg:grid-cols-[1fr_minmax(260px,380px)]"
         onDragOver={(event) => {
           event.preventDefault();
           if (!busy) setDragging(true);
@@ -986,36 +986,6 @@ export function WanVideoEditPanel({ configured }: WanVideoEditPanelProps) {
               </Alert>
             ) : null}
 
-            {outputs[0] ? (
-              <div className="grid gap-3">
-                <video
-                  key={outputs[0]}
-                  src={outputs[0]}
-                  controls
-                  playsInline
-                  className="w-full rounded-lg bg-black ring-1 ring-border"
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="w-fit"
-                  nativeButton={false}
-                  render={
-                    <a
-                      href={outputs[0]}
-                      download
-                      target="_blank"
-                      rel="noreferrer"
-                    />
-                  }
-                >
-                  <Download className="size-3.5" />
-                  Download
-                </Button>
-              </div>
-            ) : null}
-
             <div className="flex flex-wrap items-center gap-2">
               <Button
                 type="submit"
@@ -1040,68 +1010,141 @@ export function WanVideoEditPanel({ configured }: WanVideoEditPanelProps) {
                 </Badge>
               ) : null}
             </div>
+
+            <div className="grid gap-2 border-t pt-5">
+              <div className="flex items-center gap-2">
+                <History className="size-4 text-muted-foreground" />
+                <p className="text-sm font-medium">Generation history</p>
+                <span className="text-xs text-muted-foreground">
+                  This browser · tap to restore · result opens on the right
+                </span>
+              </div>
+
+              {history.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  Completed and failed runs are stored in this browser.
+                </p>
+              ) : (
+                <ul className="grid max-h-80 gap-2 overflow-y-auto pr-1">
+                  {history.map((entry) => {
+                    const selected = activeHistoryId === entry.id;
+                    return (
+                      <li key={entry.id}>
+                        <div
+                          className={cn(
+                            "flex items-stretch gap-2 rounded-xl border p-2 transition",
+                            selected
+                              ? "border-primary bg-primary/5 ring-1 ring-primary/20"
+                              : "border-border bg-muted/20 hover:bg-muted/40",
+                          )}
+                        >
+                          <button
+                            type="button"
+                            className="flex min-w-0 flex-1 items-start gap-3 rounded-lg px-1 py-0.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            disabled={busy}
+                            onClick={() => restoreHistoryEntry(entry)}
+                          >
+                            <WanVideoEditHistoryThumb entry={entry} />
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-sm font-medium">
+                                {truncateWanVideoEditPrompt(entry.prompt)}
+                              </p>
+                              <p className="mt-0.5 flex flex-wrap gap-x-2 text-[11px] text-muted-foreground">
+                                <span>
+                                  {formatWanVideoEditHistoryTime(entry.createdAt)}
+                                </span>
+                                <span>{entry.resolution}</span>
+                                <span>
+                                  {entry.duration == null
+                                    ? "auto"
+                                    : `${entry.duration}s`}
+                                </span>
+                              </p>
+                            </div>
+                            <Badge
+                              variant={
+                                isWanCompleted(entry.status)
+                                  ? "default"
+                                  : isWanTerminalFailure(entry.status)
+                                    ? "destructive"
+                                    : "outline"
+                              }
+                              className="shrink-0"
+                            >
+                              {entry.status}
+                            </Badge>
+                          </button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-sm"
+                            className="shrink-0 self-center"
+                            disabled={busy}
+                            aria-label="Delete history item"
+                            onClick={() => void removeHistoryEntry(entry.id)}
+                          >
+                            <Trash2 className="size-3.5" />
+                          </Button>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <History className="h-4 w-4" />
-              History
-            </CardTitle>
+            <CardTitle className="text-base">Result</CardTitle>
           </CardHeader>
-          <CardContent>
-            {history.length === 0 ? (
+          <CardContent className="grid gap-4">
+            {phase === "idle" && !outputs[0] ? (
               <p className="text-sm text-muted-foreground">
-                Completed and failed runs are stored in this browser.
+                Edited video appears here after the job completes, or when you open
+                a history item.
               </p>
-            ) : (
-              <ul className="grid gap-2">
-                {history.map((entry) => (
-                  <li key={entry.id}>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => restoreHistoryEntry(entry)}
-                      className={cn(
-                        "flex w-full items-start gap-3 rounded-xl border p-2 text-left transition hover:bg-muted/40",
-                        activeHistoryId === entry.id && "ring-1 ring-foreground",
-                      )}
-                    >
-                      <WanVideoEditHistoryThumb entry={entry} />
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium">
-                          {truncateWanVideoEditPrompt(entry.prompt)}
-                        </p>
-                        <p className="mt-0.5 flex flex-wrap gap-x-2 text-[11px] text-muted-foreground">
-                          <span>{formatWanVideoEditHistoryTime(entry.createdAt)}</span>
-                          <span>{entry.resolution}</span>
-                          <span>
-                            {entry.duration == null
-                              ? "auto"
-                              : `${entry.duration}s`}
-                          </span>
-                          <span>{entry.status}</span>
-                        </p>
-                      </div>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        disabled={busy}
-                        aria-label="Delete history item"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          void removeHistoryEntry(entry.id);
-                        }}
-                      >
-                        <Trash2 className="size-3.5" />
-                      </Button>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
+            ) : null}
+
+            {busy ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" />
+                {phase === "submitting"
+                  ? "Uploading assets and submitting…"
+                  : "Polling WaveSpeed…"}
+              </div>
+            ) : null}
+
+            {outputs[0] ? (
+              <>
+                <video
+                  key={outputs[0]}
+                  src={outputs[0]}
+                  controls
+                  playsInline
+                  className="w-full rounded-lg bg-black ring-1 ring-border"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="w-fit"
+                  nativeButton={false}
+                  render={
+                    <a
+                      href={outputs[0]}
+                      download
+                      target="_blank"
+                      rel="noreferrer"
+                    />
+                  }
+                >
+                  <Download className="size-3.5" />
+                  Download video
+                </Button>
+              </>
+            ) : null}
           </CardContent>
         </Card>
       </form>

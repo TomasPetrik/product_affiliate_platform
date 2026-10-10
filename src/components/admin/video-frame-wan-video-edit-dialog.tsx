@@ -102,6 +102,46 @@ const IMAGE_ACCEPT_SET = new Set([
   "image/gif",
 ]);
 
+/** In-session drafts so closing the dialog by accident does not wipe the form. */
+interface WanVideoEditDialogDraft {
+  prompt: string;
+  duration: number | "auto";
+  resolution: WanVideoEditResolution;
+  seed: string;
+  enablePromptExpansion: boolean;
+  generateAudio: boolean;
+  referenceImageFiles: File[];
+  spanAssetIds: string[];
+  showSpanPicker: boolean;
+  audioFiles: File[];
+  cutPreviewPath: string | null;
+}
+
+const wanVideoEditDialogDrafts = new Map<string, WanVideoEditDialogDraft>();
+
+function wanVideoEditDialogDraftKey(projectId: string, spanId: string): string {
+  return `${projectId}:${spanId}`;
+}
+
+function getWanVideoEditDialogDraft(
+  projectId: string,
+  spanId: string,
+): WanVideoEditDialogDraft | null {
+  return wanVideoEditDialogDrafts.get(wanVideoEditDialogDraftKey(projectId, spanId)) ?? null;
+}
+
+function setWanVideoEditDialogDraft(
+  projectId: string,
+  spanId: string,
+  draft: WanVideoEditDialogDraft,
+): void {
+  wanVideoEditDialogDrafts.set(wanVideoEditDialogDraftKey(projectId, spanId), draft);
+}
+
+function clearWanVideoEditDialogDraft(projectId: string, spanId: string): void {
+  wanVideoEditDialogDrafts.delete(wanVideoEditDialogDraftKey(projectId, spanId));
+}
+
 async function urlToFile(url: string, filename: string): Promise<File> {
   const response = await fetch(url);
   if (!response.ok) {
@@ -194,6 +234,8 @@ export function VideoFrameWanVideoEditDialog({
   const [cutPreviewError, setCutPreviewError] = useState<string | null>(null);
   const [rangePlaying, setRangePlaying] = useState(false);
   const [refDragging, setRefDragging] = useState(false);
+  /** Gate draft writes until open/restore has applied initial form state. */
+  const [draftReady, setDraftReady] = useState(false);
   const sourcePreviewRef = useRef<HTMLVideoElement>(null);
   const refInputRef = useRef<HTMLInputElement>(null);
 
@@ -233,7 +275,12 @@ export function VideoFrameWanVideoEditDialog({
         : 0;
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      setDraftReady(false);
+      return;
+    }
+
+    setDraftReady(false);
 
     if (
       job &&
@@ -252,13 +299,44 @@ export function VideoFrameWanVideoEditDialog({
       setEnablePromptExpansion(job.enablePromptExpansion);
       setLocalError(job.error);
       setLocalSubmitting(false);
+      setDraftReady(true);
       return;
     }
     if (job?.phase === "failed" || job?.phase === "completed") {
       setPrompt(job.prompt || DEFAULT_WAN_VIDEO_EDIT_PROMPT);
       setDuration(job.duration == null ? "auto" : job.duration);
+      setResolution(
+        (job.resolution as WanVideoEditResolution) ||
+          DEFAULT_WAN_VIDEO_EDIT_RESOLUTION,
+      );
+      setSeed(job.seed);
+      setGenerateAudio(job.generateAudio);
+      setEnablePromptExpansion(job.enablePromptExpansion);
       setLocalError(job.error);
       setLocalSubmitting(false);
+      setDraftReady(true);
+      return;
+    }
+
+    const draft = getWanVideoEditDialogDraft(projectId, spanId);
+    if (draft) {
+      setPrompt(draft.prompt);
+      setDuration(draft.duration);
+      setResolution(draft.resolution);
+      setSeed(draft.seed);
+      setEnablePromptExpansion(draft.enablePromptExpansion);
+      setGenerateAudio(draft.generateAudio);
+      setReferenceImageFiles(draft.referenceImageFiles);
+      setSpanAssetIds(draft.spanAssetIds);
+      setShowSpanPicker(draft.showSpanPicker);
+      setAudioFiles(draft.audioFiles);
+      setCutPreviewPath(draft.cutPreviewPath);
+      setLocalSubmitting(false);
+      setLocalError(null);
+      setCutPreviewError(null);
+      setRangePlaying(false);
+      setRefDragging(false);
+      setDraftReady(true);
       return;
     }
 
@@ -278,8 +356,54 @@ export function VideoFrameWanVideoEditDialog({
     setCutPreviewError(null);
     setRangePlaying(false);
     setRefDragging(false);
+    setDraftReady(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, spanId, cutStartSec, cutEndSec, job?.phase, job?.predictionId, job?.prompt, job?.error]);
+  }, [open, spanId, projectId, cutStartSec, cutEndSec, job?.phase, job?.predictionId, job?.prompt, job?.error]);
+
+  useEffect(() => {
+    if (!open || !draftReady) return;
+    // Skip overwriting a restored draft while a background job owns the form.
+    if (
+      job &&
+      (job.phase === "polling" ||
+        job.phase === "submitting" ||
+        job.phase === "saving" ||
+        job.phase === "completed" ||
+        job.phase === "failed")
+    ) {
+      return;
+    }
+    setWanVideoEditDialogDraft(projectId, spanId, {
+      prompt,
+      duration,
+      resolution,
+      seed,
+      enablePromptExpansion,
+      generateAudio,
+      referenceImageFiles,
+      spanAssetIds,
+      showSpanPicker,
+      audioFiles,
+      cutPreviewPath,
+    });
+  }, [
+    open,
+    draftReady,
+    projectId,
+    spanId,
+    prompt,
+    duration,
+    resolution,
+    seed,
+    enablePromptExpansion,
+    generateAudio,
+    referenceImageFiles,
+    spanAssetIds,
+    showSpanPicker,
+    audioFiles,
+    cutPreviewPath,
+    job,
+  ]);
 
   useEffect(() => {
     if (!rangePlaying) return;
@@ -481,6 +605,7 @@ export function VideoFrameWanVideoEditDialog({
         status: "cutting",
         progress: 8,
       });
+      clearWanVideoEditDialogDraft(projectId, spanId);
 
       const submitted = await submitWanVideoEditAction(formData);
       if (submitted.error || !submitted.predictionId) {
@@ -529,7 +654,8 @@ export function VideoFrameWanVideoEditDialog({
               <Dialog.Description className="mt-0.5 text-sm text-muted-foreground">
                 Cuts {formatVideoTime(cutStartSec)} – {formatVideoTime(cutEndSec)}{" "}
                 ({cutLength.toFixed(1)}s) from the source, then runs Wan 3.0 video-edit.
-                Close anytime — the run keeps going on the span.
+                Close anytime — your form is kept for this span, and runs continue in the
+                background.
               </Dialog.Description>
             </div>
             <Dialog.Close

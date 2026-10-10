@@ -78,6 +78,17 @@ interface MergeSegment {
   durationSec: number;
 }
 
+/** Content fingerprint for autosave — excludes playhead / preview index (ephemeral). */
+function mergerStateFingerprint(state: VideoFrameMergerState): string {
+  return JSON.stringify({
+    segments: state.segments,
+    selectedId: state.selectedId,
+    zoom: state.zoom,
+    stripAudio: state.stripAudio,
+    exportQuality: state.exportQuality,
+  });
+}
+
 interface TimelineSnapshot {
   segments: MergeSegment[];
   selectedId: string | null;
@@ -262,6 +273,8 @@ export function VideoFrameMergerPanel({
   const zoomRef = useRef(zoom);
   const stripAudioRef = useRef(stripAudio);
   const exportQualityRef = useRef(exportQuality);
+  const lastSavedFingerprintRef = useRef<string | null>(null);
+  const saveRequestIdRef = useRef(0);
 
   useEffect(() => {
     previewPlayingRef.current = previewPlaying;
@@ -290,8 +303,18 @@ export function VideoFrameMergerPanel({
 
   // Allow one paint with restored state before autosave starts.
   useEffect(() => {
+    lastSavedFingerprintRef.current = mergerStateFingerprint({
+      segments: hydrated.segments,
+      selectedId: hydrated.selectedId,
+      playheadSec: hydrated.playheadSec,
+      previewSegIndex: hydrated.previewSegIndex,
+      zoom: hydrated.zoom,
+      stripAudio: hydrated.stripAudio,
+      exportQuality: hydrated.exportQuality,
+    });
     const timer = window.setTimeout(() => setAutosaveReady(true), 50);
     return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- hydrate once on mount
   }, []);
 
   const clipById = useMemo(() => {
@@ -303,12 +326,16 @@ export function VideoFrameMergerPanel({
   }, [clips]);
 
   useEffect(() => {
-    setSegments((current) =>
-      current.filter((segment) => clipById.has(segment.assetId)),
-    );
+    setSegments((current) => {
+      const next = current.filter((segment) => clipById.has(segment.assetId));
+      // Keep the same array reference when nothing was removed — avoids autosave loops.
+      return next.length === current.length ? current : next;
+    });
   }, [clipById]);
 
   // Debounced autosave of merger timeline to the project.
+  // Do not depend on playheadSec / previewSegIndex — those update continuously while
+  // previewing and were causing Saving… / Saved to flicker.
   useEffect(() => {
     if (!autosaveReady || uploading || merging) {
       return;
@@ -323,13 +350,20 @@ export function VideoFrameMergerPanel({
         stripAudio: stripAudioRef.current,
         exportQuality: exportQualityRef.current,
       };
+      const fingerprint = mergerStateFingerprint(state);
+      if (fingerprint === lastSavedFingerprintRef.current) {
+        return;
+      }
+      const requestId = ++saveRequestIdRef.current;
       setSaveState("saving");
       void saveVideoFrameMergerStateAction({ projectId, state }).then(
         (result) => {
+          if (requestId !== saveRequestIdRef.current) return;
           if (result.error) {
             setSaveState("error");
             return;
           }
+          lastSavedFingerprintRef.current = fingerprint;
           setSaveState("saved");
         },
       );
@@ -342,8 +376,6 @@ export function VideoFrameMergerPanel({
     projectId,
     segments,
     selectedId,
-    playheadSec,
-    previewSegIndex,
     zoom,
     stripAudio,
     exportQuality,

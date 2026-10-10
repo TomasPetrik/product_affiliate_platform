@@ -102,6 +102,7 @@ import {
   VideoFrameClipPromptDialog,
   type ClipPromptDetails,
 } from "@/components/admin/video-frame-clip-prompt-dialog";
+import { VideoFrameClipCompareDialog } from "@/components/admin/video-frame-clip-compare-dialog";
 import { VideoFrameMergerPanel } from "@/components/admin/video-frame-merger-panel";
 import {
   deleteVideoFrameEditAction,
@@ -598,6 +599,11 @@ export function VideoFrameExtractPanel({
   const [clipLightbox, setClipLightbox] = useState<VideoFrameProjectAssetDto | null>(
     null,
   );
+
+  function openClipLightbox(clip: VideoFrameProjectAssetDto) {
+    setClipLightbox(clip);
+  }
+
   const [clipPromptByFileName, setClipPromptByFileName] = useState<
     Map<string, ClipPromptDetails>
   >(() => new Map());
@@ -605,6 +611,24 @@ export function VideoFrameExtractPanel({
     fileName: string;
     details: ClipPromptDetails | null;
   } | null>(null);
+
+  const clipCompareRange = (() => {
+    if (!clipLightbox) return null;
+    const fromHistory = clipPromptByFileName.get(clipLightbox.fileName);
+    if (
+      fromHistory?.cutStartSec != null &&
+      fromHistory.cutEndSec != null &&
+      fromHistory.cutEndSec > fromHistory.cutStartSec
+    ) {
+      return {
+        start: fromHistory.cutStartSec,
+        end: fromHistory.cutEndSec,
+      };
+    }
+    if (!clipLightbox.spanId) return null;
+    const span = committedSpans.find((item) => item.id === clipLightbox.spanId);
+    return span ? { start: span.start, end: span.end } : null;
+  })();
 
   useEffect(() => {
     setSpanClips(clipsFromProject(project));
@@ -3094,7 +3118,7 @@ export function VideoFrameExtractPanel({
                                           type="button"
                                           variant="outline"
                                           size="sm"
-                                          onClick={() => setClipLightbox(clip)}
+                                          onClick={() => openClipLightbox(clip)}
                                         >
                                           Open
                                         </Button>
@@ -3169,7 +3193,7 @@ export function VideoFrameExtractPanel({
           );
           setMergedClips(mergesFromProject({ assets }));
         }}
-        onOpenClip={setClipLightbox}
+        onOpenClip={openClipLightbox}
       />
 
       <Dialog.Root
@@ -3305,69 +3329,16 @@ export function VideoFrameExtractPanel({
         details={clipPromptView?.details ?? null}
       />
 
-      <Dialog.Root
+      <VideoFrameClipCompareDialog
         open={clipLightbox != null}
         onOpenChange={(open) => {
           if (!open) setClipLightbox(null);
         }}
-      >
-        <Dialog.Portal>
-          <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/60" />
-          <Dialog.Popup className="fixed inset-x-4 top-[8vh] z-50 mx-auto flex max-h-[84vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border bg-background shadow-lg outline-none">
-            <div className="flex items-center justify-between gap-3 border-b px-4 py-3">
-              <div className="min-w-0">
-                <Dialog.Title className="truncate text-sm font-medium">
-                  {clipLightbox?.kind === "MERGED" && clipLightbox.label
-                    ? `Version ${clipLightbox.label} · ${clipLightbox.fileName}`
-                    : (clipLightbox?.fileName ?? "Clip")}
-                </Dialog.Title>
-                <Dialog.Description className="text-xs text-muted-foreground">
-                  {clipLightbox?.kind === "MERGED"
-                    ? "Merged video · open or download"
-                    : "Generated clip · open or download"}
-                </Dialog.Description>
-              </div>
-              <Dialog.Close
-                render={<Button type="button" variant="ghost" size="icon-sm" />}
-              >
-                <X className="size-4" />
-                <span className="sr-only">Close</span>
-              </Dialog.Close>
-            </div>
-            <div className="flex min-h-0 flex-1 flex-col items-center gap-3 overflow-auto bg-muted/40 p-4">
-              {clipLightbox ? (
-                <>
-                  <video
-                    key={clipLightbox.path}
-                    src={clipLightbox.path}
-                    controls
-                    playsInline
-                    className="max-h-[min(70vh,40rem)] w-full rounded-lg bg-black"
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="w-fit"
-                    nativeButton={false}
-                    render={
-                      <a
-                        href={clipLightbox.path}
-                        download={clipLightbox.fileName}
-                        target="_blank"
-                        rel="noreferrer"
-                      />
-                    }
-                  >
-                    <Download className="size-3.5" />
-                    Download
-                  </Button>
-                </>
-              ) : null}
-            </div>
-          </Dialog.Popup>
-        </Dialog.Portal>
-      </Dialog.Root>
+        clip={clipLightbox}
+        sourceVideoUrl={videoUrl}
+        compareStartSec={clipCompareRange?.start ?? null}
+        compareEndSec={clipCompareRange?.end ?? null}
+      />
     </div>
   );
 }

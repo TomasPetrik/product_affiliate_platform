@@ -22,14 +22,19 @@ const MAX_ZOOM = 8;
 const LONG_PRESS_MS = 320;
 const LONG_PRESS_MOVE_CANCEL_PX = 16;
 
+/** Timeline clock: `12.32` under 1 min, otherwise `m:ss.ss`. */
 function formatTimelineTime(sec: number): string {
-  if (!Number.isFinite(sec) || sec < 0) return "00:00.00";
-  const totalMs = Math.round(sec * 100);
-  const centis = totalMs % 100;
-  const totalSec = Math.floor(totalMs / 100);
+  if (!Number.isFinite(sec) || sec < 0) return "0.00";
+  const totalCentis = Math.round(sec * 100);
+  const centis = totalCentis % 100;
+  const totalSec = Math.floor(totalCentis / 100);
   const s = totalSec % 60;
   const m = Math.floor(totalSec / 60);
-  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${String(centis).padStart(2, "0")}`;
+  const frac = String(centis).padStart(2, "0");
+  if (m <= 0) {
+    return `${s}.${frac}`;
+  }
+  return `${m}:${String(s).padStart(2, "0")}.${frac}`;
 }
 
 async function seekVideo(video: HTMLVideoElement, time: number): Promise<void> {
@@ -1399,7 +1404,10 @@ export function VideoFrameMergeTimeline({
           </span>
         </p>
         <div className="relative shrink-0">
-          <div className="rounded-md bg-[#f5d000] px-2 py-0.5 text-[11px] font-semibold tabular-nums text-zinc-900 shadow">
+          <div
+            className="rounded-md bg-[#f5d000] px-2 py-0.5 text-[11px] font-semibold tabular-nums text-zinc-900 shadow"
+            title="Playhead time"
+          >
             {formatTimelineTime(compositionSec)}
           </div>
           <div className="absolute left-1/2 top-full h-0 w-0 -translate-x-1/2 border-x-4 border-t-4 border-x-transparent border-t-[#f5d000]" />
@@ -1548,6 +1556,7 @@ export function VideoFrameMergeTimeline({
               aria-valuemin={0}
               aria-valuemax={timelineDurationSec}
               aria-valuenow={compositionSec}
+              aria-valuetext={formatTimelineTime(compositionSec)}
               tabIndex={0}
               onKeyDown={(event) => {
                 const step = event.shiftKey ? 0.25 : 0.05;
@@ -1579,6 +1588,11 @@ export function VideoFrameMergeTimeline({
               }}
             >
               <Scissors className="size-3.5 shrink-0 text-white drop-shadow" />
+              {draggingPlayhead ? (
+                <div className="pointer-events-none absolute top-5 left-1/2 z-50 -translate-x-1/2 whitespace-nowrap rounded-md bg-[#f5d000] px-2 py-1 text-[12px] font-bold tabular-nums leading-none text-zinc-900 shadow-lg ring-1 ring-black/20">
+                  {formatTimelineTime(compositionSec)}
+                </div>
+              ) : null}
               <div className="w-0 flex-1 border-l-2 border-dashed border-white/95" />
               <div className="mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full bg-[#f5d000] ring-2 ring-black/40" />
             </div>
@@ -1629,7 +1643,7 @@ export function VideoFrameMergeTimeline({
             className="mt-1 flex justify-between text-[10px] tabular-nums text-zinc-500"
             style={{ width: totalWidth }}
           >
-            <span>00:00.00</span>
+            <span>0.00</span>
             <span>{formatTimelineTime(timelineDurationSec)}</span>
           </div>
         </div>

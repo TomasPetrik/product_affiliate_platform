@@ -2999,7 +2999,18 @@ export function VideoFrameExtractPanel({
   }
 
   async function importCustomSpanImages(spanId: string, files: File[]) {
-    const images = files.filter(isImageFile).slice(0, CUSTOM_SPAN_MAX_IMAGES);
+    const existingCount = customSpanClipCandidates(
+      spanId,
+      projectAssets,
+    ).length;
+    const remaining = CUSTOM_SPAN_MAX_IMAGES - existingCount;
+    if (remaining <= 0) {
+      setError(
+        `This custom span already has ${CUSTOM_SPAN_MAX_IMAGES} images.`,
+      );
+      return;
+    }
+    const images = files.filter(isImageFile).slice(0, remaining);
     if (images.length === 0) {
       setError("Choose JPG, PNG, WebP, GIF, or AVIF images.");
       return;
@@ -3010,11 +3021,12 @@ export function VideoFrameExtractPanel({
       const formData = new FormData();
       formData.set("projectId", project.id);
       formData.set("spanId", spanId);
+      formData.set("append", "true");
       const meta = images.map((file, index) => ({
         spanId,
-        frameIndex: index,
-        timeSec: index,
-        fileName: file.name || `custom-${index + 1}.jpg`,
+        frameIndex: existingCount + index,
+        timeSec: existingCount + index,
+        fileName: file.name || `custom-${existingCount + index + 1}.jpg`,
       }));
       formData.set("framesMeta", JSON.stringify(meta));
       for (const file of images) {

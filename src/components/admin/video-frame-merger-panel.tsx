@@ -10,6 +10,7 @@ import {
 import {
   ChevronLeft,
   ChevronRight,
+  Copy,
   Download,
   Layers,
   Loader2,
@@ -18,6 +19,7 @@ import {
   Music,
   Pause,
   Play,
+  Redo2,
   Scissors,
   SkipBack,
   SkipForward,
@@ -33,7 +35,7 @@ import {
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -343,6 +345,13 @@ export function VideoFrameMergerPanel({
     () => hydrated.previewSegIndex,
   );
   const [undoStack, setUndoStack] = useState<TimelineSnapshot[]>([]);
+  const [redoStack, setRedoStack] = useState<TimelineSnapshot[]>([]);
+  /** Local speed while dragging the slider — commit on pointer up so the timeline stays steady. */
+  const [speedDrag, setSpeedDrag] = useState<{
+    instanceId: string;
+    speed: number;
+  } | null>(null);
+  const speedDragActiveRef = useRef(false);
   const [autosaveReady, setAutosaveReady] = useState(false);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">(
     "idle",
@@ -578,9 +587,8 @@ export function VideoFrameMergerPanel({
     }
   }, [selectedId, sequenceClips, audioTracks]);
 
-  const availableClips = clips.filter(
-    (clip) => !segments.some((segment) => segment.assetId === clip.id),
-  );
+  // Keep all project clips in the pool so the same source can be added multiple times.
+  const availableClips = clips;
   const availableAudio = audioAssets.filter(
     (asset) => !audioTracks.some((track) => track.assetId === asset.id),
   );
@@ -653,30 +661,47 @@ export function VideoFrameMergerPanel({
     return base + Math.max(0, blackPadSecRef.current);
   }
 
+  function captureTimelineSnapshot(): TimelineSnapshot {
+    return {
+      segments: segmentsRef.current.map((segment) => ({ ...segment })),
+      audioTracks: audioTracksRef.current.map((track) => ({ ...track })),
+      selectedId: selectedIdRef.current,
+      playheadSec: playheadSecRef.current,
+      previewSegIndex: previewSegIndexRef.current,
+    };
+  }
+
+  function applyTimelineSnapshot(snapshot: TimelineSnapshot) {
+    setPreviewPlaying(false);
+    setBlackPadSec(0);
+    setSegments(snapshot.segments.map((segment) => ({ ...segment })));
+    setAudioTracks(snapshot.audioTracks.map((track) => ({ ...track })));
+    setSelectedId(snapshot.selectedId);
+    setPlayheadSec(snapshot.playheadSec);
+    setPreviewSegIndex(snapshot.previewSegIndex);
+  }
+
   function pushUndoSnapshot() {
-    setUndoStack((stack) => [
-      ...stack.slice(-39),
-      {
-        segments: segmentsRef.current.map((segment) => ({ ...segment })),
-        audioTracks: audioTracksRef.current.map((track) => ({ ...track })),
-        selectedId: selectedIdRef.current,
-        playheadSec: playheadSecRef.current,
-        previewSegIndex: previewSegIndexRef.current,
-      },
-    ]);
+    setUndoStack((stack) => [...stack.slice(-39), captureTimelineSnapshot()]);
+    setRedoStack([]);
   }
 
   function undoTimeline() {
     setUndoStack((stack) => {
       const prev = stack[stack.length - 1];
       if (!prev) return stack;
-      setPreviewPlaying(false);
-      setBlackPadSec(0);
-      setSegments(prev.segments.map((segment) => ({ ...segment })));
-      setAudioTracks(prev.audioTracks.map((track) => ({ ...track })));
-      setSelectedId(prev.selectedId);
-      setPlayheadSec(prev.playheadSec);
-      setPreviewSegIndex(prev.previewSegIndex);
+      setRedoStack((redo) => [...redo.slice(-39), captureTimelineSnapshot()]);
+      applyTimelineSnapshot(prev);
+      return stack.slice(0, -1);
+    });
+  }
+
+  function redoTimeline() {
+    setRedoStack((stack) => {
+      const next = stack[stack.length - 1];
+      if (!next) return stack;
+      setUndoStack((undo) => [...undo.slice(-39), captureTimelineSnapshot()]);
+      applyTimelineSnapshot(next);
       return stack.slice(0, -1);
     });
   }
@@ -697,7 +722,7 @@ export function VideoFrameMergerPanel({
     };
   }, [fullPreviewOpen]);
 
-  // Space (and Backspace) toggle play/pause when a timeline clip is selected.
+  // Space/Backspace play-pause; Cmd/Ctrl+Z undo; Cmd/Ctrl+Shift+Z or Ctrl+Y redo.
   useEffect(() => {
     function isTypingTarget(target: EventTarget | null): boolean {
       if (!(target instanceof HTMLElement)) return false;
@@ -707,14 +732,32 @@ export function VideoFrameMergerPanel({
     }
 
     function onKeyDown(event: KeyboardEvent) {
+      if (isTypingTarget(event.target)) return;
+      if (merging || uploading || uploadingAudio) return;
+
+      const mod = event.metaKey || event.ctrlKey;
+      const key = event.key.toLowerCase();
+      if (mod && key === "z" && !event.altKey) {
+        event.preventDefault();
+        if (event.shiftKey) {
+          redoTimeline();
+        } else {
+          undoTimeline();
+        }
+        return;
+      }
+      if (mod && key === "y" && !event.altKey && !event.shiftKey) {
+        event.preventDefault();
+        redoTimeline();
+        return;
+      }
+
       const isPlayPauseKey =
         event.code === "Space" ||
         event.key === " " ||
         event.key === "Backspace";
       if (!isPlayPauseKey) return;
       if (event.metaKey || event.ctrlKey || event.altKey) return;
-      if (isTypingTarget(event.target)) return;
-      if (merging || uploading || uploadingAudio) return;
 
       const id = selectedIdRef.current;
       if (!id) return;
@@ -973,9 +1016,7 @@ export function VideoFrameMergerPanel({
 
   async function addClipToSequence(assetId: string) {
     const clip = clipById.get(assetId);
-    if (!clip || segments.some((segment) => segment.assetId === assetId)) {
-      return;
-    }
+    if (!clip) return;
     try {
       const durationSec = await loadVideoDuration(clip.path);
       const segment: MergeSegment = {
@@ -991,10 +1032,41 @@ export function VideoFrameMergerPanel({
       setSelectedId(segment.instanceId);
       setPreviewSegIndex(segments.length);
       setPlayheadSec(0);
+      setBlackPadSec(0);
+      setPreviewPlaying(false);
       setError(null);
     } catch {
       setError(`Could not read duration for ${clip.fileName}.`);
     }
+  }
+
+  function duplicateSelectedVideo() {
+    if (!selected) return;
+    const index = sequenceClips.findIndex(
+      (row) => row.segment.instanceId === selected.segment.instanceId,
+    );
+    if (index < 0) return;
+
+    const copy: MergeSegment = {
+      ...selected.segment,
+      instanceId: newInstanceId("seg"),
+    };
+
+    pushUndoSnapshot();
+    setSegments((current) => {
+      const from = current.findIndex(
+        (segment) => segment.instanceId === selected.segment.instanceId,
+      );
+      if (from < 0) return current;
+      const next = [...current];
+      next.splice(from + 1, 0, copy);
+      return next;
+    });
+    setSelectedId(copy.instanceId);
+    setPreviewSegIndex(index + 1);
+    setPlayheadSec(copy.trimStartSec);
+    setBlackPadSec(0);
+    setPreviewPlaying(false);
   }
 
   function updateClipSpeed(instanceId: string, speed: number) {
@@ -1006,6 +1078,32 @@ export function VideoFrameMergerPanel({
           : segment,
       ),
     );
+  }
+
+  const selectedDisplaySpeed = selected
+    ? speedDrag?.instanceId === selected.segment.instanceId
+      ? speedDrag.speed
+      : clampMergeClipSpeed(selected.segment.speed)
+    : DEFAULT_MERGE_CLIP_SPEED;
+
+  useEffect(() => {
+    if (
+      speedDrag &&
+      (!selected || speedDrag.instanceId !== selected.segment.instanceId)
+    ) {
+      setSpeedDrag(null);
+      speedDragActiveRef.current = false;
+    }
+  }, [selected, speedDrag]);
+
+  function commitSpeedDrag() {
+    if (!speedDrag) {
+      speedDragActiveRef.current = false;
+      return;
+    }
+    updateClipSpeed(speedDrag.instanceId, speedDrag.speed);
+    setSpeedDrag(null);
+    speedDragActiveRef.current = false;
   }
 
   function onPoolDragStart(event: DragEvent<HTMLButtonElement>, id: string) {
@@ -1685,20 +1783,23 @@ export function VideoFrameMergerPanel({
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle className="text-base">Video merger</CardTitle>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Build a sequence, trim each clip on the timeline (zoom for precision),
-          preview from any frame, then generate a versioned merge.
-        </p>
-      </CardHeader>
-      <CardContent className="grid gap-3">
+      <CardContent className="grid gap-3 p-6">
         {error ? (
           <Alert variant="destructive">
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         ) : null}
 
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(16rem,24rem)] lg:items-stretch">
+          <div className="grid min-w-0 content-start gap-2">
+            <div>
+              <CardTitle className="text-base">Video merger</CardTitle>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Build a sequence, trim each clip on the timeline (zoom for
+                precision), preview from any frame, then generate a versioned
+                merge.
+              </p>
+            </div>
         <div
           className={cn(
             "grid gap-2 rounded-xl transition-colors",
@@ -1745,7 +1846,7 @@ export function VideoFrameMergerPanel({
           </div>
           <p className="text-[11px] text-muted-foreground">
             MP4, WebM, or MOV · max {maxMb}MB. Drop files here or click a clip
-            to add it to the timeline.
+            to add it (same clip can be added more than once).
           </p>
           {availableClips.length === 0 ? (
             <p
@@ -1754,9 +1855,7 @@ export function VideoFrameMergerPanel({
                 fileDropOver && "border-primary bg-primary/5",
               )}
             >
-              {clips.length === 0
-                ? "Drop local videos here, or generate span clips."
-                : "All clips are on the timeline. Drop more local videos here."}
+              Drop local videos here, or generate span clips.
             </p>
           ) : (
             <div className="flex flex-wrap gap-2">
@@ -1871,107 +1970,113 @@ export function VideoFrameMergerPanel({
             </p>
           )}
         </div>
+          </div>
 
-        <div className="mx-auto flex w-full max-w-[14rem] flex-col gap-1.5">
-          {!fullPreviewOpen && activePreview ? (
-            <div className="relative w-full overflow-hidden rounded-xl border bg-black ring-1 ring-border">
-              <video
-                ref={previewVideoRef}
-                muted={stripAudio || activePreview.segment.muted === true}
-                playsInline
-                controls={false}
-                preload="metadata"
-                onTimeUpdate={onPreviewTimeUpdate}
-                onEnded={() => {
-                  if (previewPlayingRef.current) {
-                    advanceToNextClip();
-                  }
-                }}
-                className={cn(
-                  "aspect-[9/16] w-full object-contain",
-                  inBlackPad && "opacity-0",
+          <div className="flex min-h-[22rem] w-full flex-col gap-1.5 lg:h-full lg:min-h-0">
+            <div className="relative mx-auto min-h-0 w-full flex-1">
+              <div className="absolute inset-0 flex justify-center">
+                {!fullPreviewOpen && activePreview ? (
+                  <div className="relative h-full max-w-full aspect-[9/16] overflow-hidden rounded-xl border bg-black ring-1 ring-border">
+                    <video
+                      ref={previewVideoRef}
+                      muted={stripAudio || activePreview.segment.muted === true}
+                      playsInline
+                      controls={false}
+                      preload="metadata"
+                      onTimeUpdate={onPreviewTimeUpdate}
+                      onEnded={() => {
+                        if (previewPlayingRef.current) {
+                          advanceToNextClip();
+                        }
+                      }}
+                      className={cn(
+                        "h-full w-full object-contain",
+                        inBlackPad && "opacity-0",
+                      )}
+                    />
+                    {inBlackPad ? (
+                      <div className="absolute inset-0 flex items-center justify-center bg-black text-xs font-medium uppercase tracking-wide text-zinc-500">
+                        Black pad
+                      </div>
+                    ) : null}
+                  </div>
+                ) : (
+                  <div className="flex h-full max-w-full aspect-[9/16] items-center justify-center rounded-xl border border-dashed border-border bg-muted/40 px-4 text-center text-xs text-muted-foreground">
+                    {fullPreviewOpen && activePreview
+                      ? "Open in full preview"
+                      : "Add a clip to the timeline to preview."}
+                  </div>
                 )}
-              />
-              {inBlackPad ? (
-                <div className="absolute inset-0 flex items-center justify-center bg-black text-xs font-medium uppercase tracking-wide text-zinc-500">
-                  Black pad
-                </div>
-              ) : null}
+              </div>
             </div>
-          ) : (
-            <div className="flex aspect-[9/16] w-full items-center justify-center rounded-xl border border-dashed border-border bg-muted/40 px-4 text-center text-xs text-muted-foreground">
-              {fullPreviewOpen && activePreview
-                ? "Open in full preview"
-                : "Add a clip to the timeline to preview."}
+            <div className="flex shrink-0 items-center justify-center gap-1">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                disabled={!activePreview || previewSegIndex <= 0 || merging}
+                title="Previous clip"
+                aria-label="Previous clip"
+                onClick={() => {
+                  const prev = sequenceClips[previewSegIndex - 1]!;
+                  seekPreviewTo(
+                    previewSegIndex - 1,
+                    prev.segment.trimStartSec,
+                  );
+                  setPreviewPlaying(false);
+                }}
+              >
+                <SkipBack className="size-3.5" />
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon-sm"
+                disabled={!activePreview || uploading || merging}
+                title={previewPlaying ? "Pause" : "Play sequence"}
+                aria-label={previewPlaying ? "Pause" : "Play sequence"}
+                onClick={togglePreviewPlayback}
+              >
+                {previewPlaying ? (
+                  <Pause className="size-3.5" />
+                ) : (
+                  <Play className="size-3.5" />
+                )}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                disabled={
+                  !activePreview ||
+                  previewSegIndex >= sequenceClips.length - 1 ||
+                  merging
+                }
+                title="Next clip"
+                aria-label="Next clip"
+                onClick={() => {
+                  const next = sequenceClips[previewSegIndex + 1]!;
+                  seekPreviewTo(
+                    previewSegIndex + 1,
+                    next.segment.trimStartSec,
+                  );
+                  setPreviewPlaying(false);
+                }}
+              >
+                <SkipForward className="size-3.5" />
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon-sm"
+                disabled={!activePreview || uploading || merging}
+                title="Full preview"
+                aria-label="Full preview"
+                onClick={() => setFullPreviewOpen(true)}
+              >
+                <Maximize2 className="size-3.5" />
+              </Button>
             </div>
-          )}
-          <div className="flex items-center justify-center gap-1">
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              disabled={!activePreview || previewSegIndex <= 0 || merging}
-              title="Previous clip"
-              aria-label="Previous clip"
-              onClick={() => {
-                const prev = sequenceClips[previewSegIndex - 1]!;
-                seekPreviewTo(
-                  previewSegIndex - 1,
-                  prev.segment.trimStartSec,
-                );
-                setPreviewPlaying(false);
-              }}
-            >
-              <SkipBack className="size-3.5" />
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="icon-sm"
-              disabled={!activePreview || uploading || merging}
-              title={previewPlaying ? "Pause" : "Play sequence"}
-              aria-label={previewPlaying ? "Pause" : "Play sequence"}
-              onClick={togglePreviewPlayback}
-            >
-              {previewPlaying ? (
-                <Pause className="size-3.5" />
-              ) : (
-                <Play className="size-3.5" />
-              )}
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              disabled={
-                !activePreview ||
-                previewSegIndex >= sequenceClips.length - 1 ||
-                merging
-              }
-              title="Next clip"
-              aria-label="Next clip"
-              onClick={() => {
-                const next = sequenceClips[previewSegIndex + 1]!;
-                seekPreviewTo(
-                  previewSegIndex + 1,
-                  next.segment.trimStartSec,
-                );
-                setPreviewPlaying(false);
-              }}
-            >
-              <SkipForward className="size-3.5" />
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="icon-sm"
-              disabled={!activePreview || uploading || merging}
-              title="Full preview"
-              aria-label="Full preview"
-              onClick={() => setFullPreviewOpen(true)}
-            >
-              <Maximize2 className="size-3.5" />
-            </Button>
           </div>
         </div>
 
@@ -1990,10 +2095,26 @@ export function VideoFrameMergerPanel({
                     uploadingAudio
                   }
                   onClick={undoTimeline}
-                  title="Undo last timeline edit"
+                  title="Undo (⌘Z / Ctrl+Z)"
                   aria-label="Undo"
                 >
                   <Undo2 className="size-3.5" />
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon-sm"
+                  disabled={
+                    redoStack.length === 0 ||
+                    merging ||
+                    uploading ||
+                    uploadingAudio
+                  }
+                  onClick={redoTimeline}
+                  title="Redo (⌘⇧Z / Ctrl+Y)"
+                  aria-label="Redo"
+                >
+                  <Redo2 className="size-3.5" />
                 </Button>
                 <Button
                   type="button"
@@ -2053,6 +2174,16 @@ export function VideoFrameMergerPanel({
                       onClick={splitSelectedVideo}
                     >
                       <Scissors className="size-3.5" />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      title="Duplicate clip"
+                      aria-label="Duplicate clip"
+                      onClick={duplicateSelectedVideo}
+                    >
+                      <Copy className="size-3.5" />
                     </Button>
                     <Button
                       type="button"
@@ -2153,71 +2284,91 @@ export function VideoFrameMergerPanel({
                 ) : null}
               </div>
             ) : null}
-            <p className="text-xs font-medium text-muted-foreground">
-              Timeline
-              {sequenceClips.length > 0 ? ` (${sequenceClips.length})` : ""}
-              {audioTracks.length > 0 ? ` · ${audioTracks.length} audio` : ""}
+            <p className="flex min-h-4 flex-wrap items-center gap-x-1 text-xs font-medium text-muted-foreground">
+              <span>
+                Timeline
+                {sequenceClips.length > 0 ? ` (${sequenceClips.length})` : ""}
+                {audioTracks.length > 0 ? ` · ${audioTracks.length} audio` : ""}
+              </span>
               {selected ? (
-                <span className="font-normal">
-                  {" "}
-                  · {clipProviderLabel(selected.clip.fileName)} ·{" "}
-                  {formatMergeTimelineTime(
-                    mergeClipTimelineDurationSec(
-                      selected.segment.trimStartSec,
-                      selected.segment.trimEndSec,
-                      selected.segment.speed,
-                    ),
-                  )}
-                  {Math.abs(
-                    clampMergeClipSpeed(selected.segment.speed) - 1,
-                  ) > 0.001
-                    ? ` · ${clampMergeClipSpeed(selected.segment.speed).toFixed(2)}×`
-                    : ""}
-                  {selected.segment.muted ? " · muted" : ""}
+                <span className="inline-flex items-center gap-1 font-normal">
+                  <span>· {clipProviderLabel(selected.clip.fileName)}</span>
+                  <span className="inline-block w-[4.25rem] tabular-nums">
+                    ·{" "}
+                    {formatMergeTimelineTime(
+                      mergeClipTimelineDurationSec(
+                        selected.segment.trimStartSec,
+                        selected.segment.trimEndSec,
+                        selectedDisplaySpeed,
+                      ),
+                    )}
+                  </span>
+                  <span className="inline-block w-12 tabular-nums">
+                    · {selectedDisplaySpeed.toFixed(2)}×
+                  </span>
+                  {selected.segment.muted ? <span>· muted</span> : null}
                 </span>
               ) : null}
               {selectedAudioTrack ? (
                 <span className="font-normal text-sky-700 dark:text-sky-300">
-                  {" "}
                   ·{" "}
                   {audioById.get(selectedAudioTrack.assetId)?.fileName ??
                     "audio"}
                 </span>
               ) : null}
               {saveState === "saving" ? (
-                <span className="ml-2 text-[10px]">Saving…</span>
+                <span className="text-[10px]">Saving…</span>
               ) : saveState === "saved" ? (
-                <span className="ml-2 text-[10px]">Saved</span>
+                <span className="text-[10px]">Saved</span>
               ) : saveState === "error" ? (
-                <span className="ml-2 text-[10px] text-destructive">
-                  Save failed
-                </span>
+                <span className="text-[10px] text-destructive">Save failed</span>
               ) : null}
             </p>
             {selected ? (
-              <label className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-                <span className="font-medium text-foreground">Speed</span>
+              <label className="flex flex-nowrap items-center gap-2 text-[11px] text-muted-foreground">
+                <span className="shrink-0 font-medium text-foreground">
+                  Speed
+                </span>
                 <input
                   type="range"
                   min={MIN_MERGE_CLIP_SPEED}
                   max={MAX_MERGE_CLIP_SPEED}
                   step={0.05}
-                  value={clampMergeClipSpeed(selected.segment.speed)}
+                  value={selectedDisplaySpeed}
                   aria-label="Clip playback speed"
-                  className="w-36 accent-[#f5d000]"
+                  className="w-36 shrink-0 accent-[#f5d000]"
                   disabled={merging || uploading}
-                  onPointerDown={() => pushUndoSnapshot()}
-                  onChange={(event) =>
-                    updateClipSpeed(
-                      selected.segment.instanceId,
+                  onPointerDown={(event) => {
+                    speedDragActiveRef.current = true;
+                    pushUndoSnapshot();
+                    event.currentTarget.setPointerCapture(event.pointerId);
+                    setSpeedDrag({
+                      instanceId: selected.segment.instanceId,
+                      speed: selectedDisplaySpeed,
+                    });
+                  }}
+                  onChange={(event) => {
+                    const nextSpeed = clampMergeClipSpeed(
                       Number(event.target.value),
-                    )
-                  }
+                    );
+                    if (speedDragActiveRef.current) {
+                      setSpeedDrag({
+                        instanceId: selected.segment.instanceId,
+                        speed: nextSpeed,
+                      });
+                      return;
+                    }
+                    pushUndoSnapshot();
+                    updateClipSpeed(selected.segment.instanceId, nextSpeed);
+                  }}
+                  onPointerUp={commitSpeedDrag}
+                  onPointerCancel={commitSpeedDrag}
+                  onLostPointerCapture={commitSpeedDrag}
                 />
-                <span className="min-w-12 tabular-nums text-foreground">
-                  {clampMergeClipSpeed(selected.segment.speed).toFixed(2)}×
+                <span className="inline-block w-12 shrink-0 tabular-nums text-foreground">
+                  {selectedDisplaySpeed.toFixed(2)}×
                 </span>
-                <span className="text-[10px]">
+                <span className="shrink-0 text-[10px]">
                   {MIN_MERGE_CLIP_SPEED}–{MAX_MERGE_CLIP_SPEED}×
                 </span>
               </label>

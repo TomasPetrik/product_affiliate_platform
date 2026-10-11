@@ -1173,6 +1173,8 @@ export async function deleteSourceSpanReferenceFrame(input: {
   return detail ?? { error: "Project not found after deleting reference photo." };
 }
 
+const CUSTOM_SPAN_MAX_FRAME_IMAGES = 10;
+
 /**
  * Replace FRAME/THUMBNAIL assets for one custom span (imported images / sampled video).
  * Updates that span's frameCount in spansJson.
@@ -1197,8 +1199,10 @@ export async function replaceCustomSpanFrames(input: {
   if (input.frames.length === 0) {
     return { error: "Add at least one image." };
   }
-  if (input.frames.length > 20) {
-    return { error: "At most 20 images per custom span." };
+  if (input.frames.length > CUSTOM_SPAN_MAX_FRAME_IMAGES) {
+    return {
+      error: `At most ${CUSTOM_SPAN_MAX_FRAME_IMAGES} images per custom span.`,
+    };
   }
 
   const existing = await prisma.videoFrameProject.findUnique({
@@ -1239,6 +1243,108 @@ export async function replaceCustomSpanFrames(input: {
           frameCount: input.frames.length,
           start: 0,
           end: Math.max(0, input.frames.length - 1),
+        }
+      : item,
+  );
+
+  await prisma.videoFrameProject.update({
+    where: { id: projectId },
+    data: { spansJson: nextSpans as unknown as Prisma.InputJsonValue },
+  });
+
+  await recalculateProjectSizes(projectId);
+  const detail = await getVideoFrameProject(projectId);
+  return detail ?? { error: "Project not found after saving custom frames." };
+}
+
+/**
+ * Append images to a custom span without removing existing FRAME/THUMBNAIL assets.
+ */
+export async function appendCustomSpanFrames(input: {
+  projectId: string;
+  spanId: string;
+  frames: Array<{
+    file: File;
+    fileName: string;
+    width?: number;
+    height?: number;
+  }>;
+}): Promise<VideoFrameProjectDetail | { error: string }> {
+  const projectId = input.projectId.trim();
+  const spanId = input.spanId.trim();
+  if (!projectId || !spanId) {
+    return { error: "Missing project or span." };
+  }
+  if (input.frames.length === 0) {
+    return { error: "Add at least one image." };
+  }
+
+  const existing = await prisma.videoFrameProject.findUnique({
+    where: { id: projectId },
+  });
+  if (!existing) {
+    return { error: "Project not found." };
+  }
+
+  const spans = parseSpans(existing.spansJson);
+  const span = spans.find((item) => item.id === spanId);
+  if (!span || !isCustomSpan(span)) {
+    return { error: "Custom span not found." };
+  }
+
+  const existingCount = await prisma.videoFrameAsset.count({
+    where: { projectId, spanId, kind: "FRAME" },
+  });
+  if (existingCount >= CUSTOM_SPAN_MAX_FRAME_IMAGES) {
+    return {
+      error: `This custom span already has ${CUSTOM_SPAN_MAX_FRAME_IMAGES} images.`,
+    };
+  }
+  if (existingCount + input.frames.length > CUSTOM_SPAN_MAX_FRAME_IMAGES) {
+    return {
+      error: `At most ${CUSTOM_SPAN_MAX_FRAME_IMAGES} images per custom span (${existingCount} already added).`,
+    };
+  }
+
+  const maxIndexRow = await prisma.videoFrameAsset.findFirst({
+    where: { projectId, spanId, kind: "FRAME" },
+    orderBy: { frameIndex: "desc" },
+    select: { frameIndex: true },
+  });
+  const nextIndex = (maxIndexRow?.frameIndex ?? -1) + 1;
+
+  const assetRows = await writeFrameAndThumbAssets({
+    projectId,
+    frames: input.frames.map((frame, offset) => {
+      const frameIndex = nextIndex + offset;
+      return {
+        file: frame.file,
+        spanId,
+        frameIndex,
+        timeSec: frameIndex,
+        fileName: frame.fileName || `custom-${frameIndex + 1}.jpg`,
+        width: frame.width,
+        height: frame.height,
+      };
+    }),
+  });
+  if ("error" in assetRows) {
+    return { error: assetRows.error };
+  }
+
+  if (assetRows.length > 0) {
+    await prisma.videoFrameAsset.createMany({ data: assetRows });
+  }
+
+  const totalCount = existingCount + input.frames.length;
+  const nextSpans = spans.map((item) =>
+    item.id === spanId
+      ? {
+          ...item,
+          kind: "custom" as const,
+          frameCount: totalCount,
+          start: 0,
+          end: Math.max(0, totalCount - 1),
         }
       : item,
   );

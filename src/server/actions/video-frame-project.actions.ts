@@ -6,6 +6,7 @@ import { requireAdminSession } from "@/lib/auth";
 import { writeAuditLog } from "@/server/services/audit.service";
 import {
   addVideoFrameProjectVideos,
+  appendCustomSpanFrames,
   appendSourceSpanReferenceFrames,
   createVideoFrameProject,
   deleteVideoFrameEdit,
@@ -374,6 +375,8 @@ export async function saveCustomSpanFramesAction(
     return { error: "Frame files and metadata count do not match." };
   }
 
+  const append = String(formData.get("append") ?? "").trim() === "true";
+
   const frames = metaParsed.data.map((meta, index) => ({
     file: files[index]!,
     frameIndex: meta.frameIndex,
@@ -383,18 +386,32 @@ export async function saveCustomSpanFramesAction(
     height: meta.height,
   }));
 
-  const result = await replaceCustomSpanFrames({ projectId, spanId, frames });
+  const result = append
+    ? await appendCustomSpanFrames({
+        projectId,
+        spanId,
+        frames: frames.map((frame) => ({
+          file: frame.file,
+          fileName: frame.fileName,
+          width: frame.width,
+          height: frame.height,
+        })),
+      })
+    : await replaceCustomSpanFrames({ projectId, spanId, frames });
   if ("error" in result) {
     return { error: result.error };
   }
 
   await writeAuditLog({
     actor: session,
-    action: "video_frame_project.save_custom_span_frames",
+    action: append
+      ? "video_frame_project.append_custom_span_frames"
+      : "video_frame_project.save_custom_span_frames",
     entityType: "VideoFrameProject",
     entityId: result.id,
     after: {
       spanId,
+      append,
       frameCount: frames.length,
       framesBytes: result.framesBytes,
       totalBytes: result.totalBytes,

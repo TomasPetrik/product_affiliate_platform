@@ -661,6 +661,7 @@ export async function saveVideoFrameMergerStateAction(input: {
       trimEndSec: number;
       durationSec: number;
       muted?: boolean;
+      speed?: number;
     }>;
     audioTracks?: Array<{
       instanceId: string;
@@ -712,6 +713,7 @@ export async function mergeVideoFrameClipsAction(input: {
     trimStartSec: number;
     trimEndSec?: number;
     muted?: boolean;
+    speed?: number;
   }>;
   audioTracks?: Array<{
     assetId: string;

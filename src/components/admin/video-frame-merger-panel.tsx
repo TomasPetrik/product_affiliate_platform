@@ -48,6 +48,13 @@ import {
   formatMergeTimelineTime,
 } from "@/components/admin/video-frame-merge-timeline";
 import {
+  clampMergeClipSpeed,
+  DEFAULT_MERGE_CLIP_SPEED,
+  MAX_MERGE_CLIP_SPEED,
+  mergeClipTimelineDurationSec,
+  MIN_MERGE_CLIP_SPEED,
+} from "@/lib/video-frame-merge-speed";
+import {
   MERGE_EXPORT_QUALITIES,
   MERGE_EXPORT_QUALITY_SIZES,
   classifyClipQualityLabel,
@@ -95,6 +102,8 @@ interface MergeSegment {
   trimEndSec: number;
   durationSec: number;
   muted?: boolean;
+  /** Playback / export speed (0.5–4). Defaults to 1. */
+  speed?: number;
 }
 
 type MergeAudioTrack = VideoFrameMergerAudioTrackState;
@@ -599,7 +608,11 @@ export function VideoFrameMergerPanel({
       sequenceClips.reduce(
         (sum, row) =>
           sum +
-          Math.max(0, row.segment.trimEndSec - row.segment.trimStartSec),
+          mergeClipTimelineDurationSec(
+            row.segment.trimStartSec,
+            row.segment.trimEndSec,
+            row.segment.speed,
+          ),
         0,
       ),
     [sequenceClips],
@@ -628,6 +641,7 @@ export function VideoFrameMergerPanel({
       durationSec: segment.durationSec,
       trimStartSec: segment.trimStartSec,
       trimEndSec: segment.trimEndSec,
+      speed: segment.speed,
     }));
     const active = sequenceClips[previewSegIndexRef.current];
     if (!active) return Math.max(0, blackPadSecRef.current);
@@ -724,6 +738,7 @@ export function VideoFrameMergerPanel({
   useEffect(() => {
     const video = previewVideoRef.current;
     if (!video || !activePreview || previewPlaying) return;
+    video.playbackRate = clampMergeClipSpeed(activePreview.segment.speed);
     if (blackPadSec > 0.02) {
       // Hold last frame of the last clip under the black pad.
       if (video.getAttribute("src") !== activePreview.clip.path) {
@@ -748,6 +763,7 @@ export function VideoFrameMergerPanel({
       Math.max(activePreview.segment.trimStartSec, playheadSec),
     );
     const apply = () => {
+      video.playbackRate = clampMergeClipSpeed(activePreview.segment.speed);
       if (Math.abs(video.currentTime - target) > 0.05) {
         video.currentTime = target;
       }
@@ -767,6 +783,8 @@ export function VideoFrameMergerPanel({
     const video = previewVideoRef.current;
     if (!video || !activePreview) return;
 
+    video.playbackRate = clampMergeClipSpeed(activePreview.segment.speed);
+
     if (!previewPlaying) {
       video.pause();
       advancingClipRef.current = false;
@@ -785,6 +803,7 @@ export function VideoFrameMergerPanel({
     );
 
     const playAt = () => {
+      video.playbackRate = clampMergeClipSpeed(activePreview.segment.speed);
       video.currentTime = startAt;
       void video.play().catch(() => setPreviewPlaying(false));
       // Keep advancingClipRef true until timeupdate confirms we're inside
@@ -810,6 +829,7 @@ export function VideoFrameMergerPanel({
       playAt();
     } else {
       advancingClipRef.current = false;
+      video.playbackRate = clampMergeClipSpeed(activePreview.segment.speed);
       void video.play().catch(() => setPreviewPlaying(false));
     }
     // playheadSec read from ref; fullPreviewOpen remounts the video element
@@ -817,6 +837,7 @@ export function VideoFrameMergerPanel({
   }, [
     previewPlaying,
     activePreview?.segment.instanceId,
+    activePreview?.segment.speed,
     activePreview?.clip.path,
     fullPreviewOpen,
   ]);
@@ -847,6 +868,7 @@ export function VideoFrameMergerPanel({
         durationSec: segment.durationSec,
         trimStartSec: segment.trimStartSec,
         trimEndSec: segment.trimEndSec,
+        speed: segment.speed,
       }));
       const active = clips[previewSegIndexRef.current];
       if (!active) return compositionSecFromState();
@@ -962,6 +984,7 @@ export function VideoFrameMergerPanel({
         trimStartSec: 0,
         trimEndSec: durationSec,
         durationSec,
+        speed: DEFAULT_MERGE_CLIP_SPEED,
       };
       pushUndoSnapshot();
       setSegments((current) => [...current, segment]);
@@ -972,6 +995,17 @@ export function VideoFrameMergerPanel({
     } catch {
       setError(`Could not read duration for ${clip.fileName}.`);
     }
+  }
+
+  function updateClipSpeed(instanceId: string, speed: number) {
+    const nextSpeed = clampMergeClipSpeed(speed);
+    setSegments((current) =>
+      current.map((segment) =>
+        segment.instanceId === instanceId
+          ? { ...segment, speed: nextSpeed }
+          : segment,
+      ),
+    );
   }
 
   function onPoolDragStart(event: DragEvent<HTMLButtonElement>, id: string) {
@@ -1422,6 +1456,7 @@ export function VideoFrameMergerPanel({
               trimStartSec: 0,
               trimEndSec: durationSec,
               durationSec,
+              speed: DEFAULT_MERGE_CLIP_SPEED,
             };
             setSegments((current) =>
               current.some((row) => row.assetId === id)
@@ -1470,6 +1505,7 @@ export function VideoFrameMergerPanel({
           trimStartSec: segment.trimStartSec,
           trimEndSec: segment.trimEndSec,
           muted: segment.muted === true,
+          speed: clampMergeClipSpeed(segment.speed),
         })),
         audioTracks: audioTracks.map((track) => ({
           assetId: track.assetId,
@@ -1501,7 +1537,12 @@ export function VideoFrameMergerPanel({
   ): number {
     return clips.reduce(
       (sum, row) =>
-        sum + Math.max(0, row.segment.trimEndSec - row.segment.trimStartSec),
+        sum +
+        mergeClipTimelineDurationSec(
+          row.segment.trimStartSec,
+          row.segment.trimEndSec,
+          row.segment.speed,
+        ),
       0,
     );
   }
@@ -1658,17 +1699,15 @@ export function VideoFrameMergerPanel({
           </Alert>
         ) : null}
 
-        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-start">
-          <div className="grid min-w-0 gap-2">
-            <div
-              className={cn(
-                "grid gap-2 rounded-xl transition-colors",
-                fileDropOver && "ring-2 ring-primary/40 ring-offset-2",
-              )}
-              onDragOver={onAvailableDragOver}
-              onDragLeave={onAvailableDragLeave}
-              onDrop={onAvailableDrop}
-            >
+        <div
+          className={cn(
+            "grid gap-2 rounded-xl transition-colors",
+            fileDropOver && "ring-2 ring-primary/40 ring-offset-2",
+          )}
+          onDragOver={onAvailableDragOver}
+          onDragLeave={onAvailableDragLeave}
+          onDrop={onAvailableDrop}
+        >
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-xs font-medium text-muted-foreground">
               Available clips
@@ -1833,7 +1872,110 @@ export function VideoFrameMergerPanel({
           )}
         </div>
 
-            <div className="grid gap-1.5">
+        <div className="mx-auto flex w-full max-w-[14rem] flex-col gap-1.5">
+          {!fullPreviewOpen && activePreview ? (
+            <div className="relative w-full overflow-hidden rounded-xl border bg-black ring-1 ring-border">
+              <video
+                ref={previewVideoRef}
+                muted={stripAudio || activePreview.segment.muted === true}
+                playsInline
+                controls={false}
+                preload="metadata"
+                onTimeUpdate={onPreviewTimeUpdate}
+                onEnded={() => {
+                  if (previewPlayingRef.current) {
+                    advanceToNextClip();
+                  }
+                }}
+                className={cn(
+                  "aspect-[9/16] w-full object-contain",
+                  inBlackPad && "opacity-0",
+                )}
+              />
+              {inBlackPad ? (
+                <div className="absolute inset-0 flex items-center justify-center bg-black text-xs font-medium uppercase tracking-wide text-zinc-500">
+                  Black pad
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <div className="flex aspect-[9/16] w-full items-center justify-center rounded-xl border border-dashed border-border bg-muted/40 px-4 text-center text-xs text-muted-foreground">
+              {fullPreviewOpen && activePreview
+                ? "Open in full preview"
+                : "Add a clip to the timeline to preview."}
+            </div>
+          )}
+          <div className="flex items-center justify-center gap-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              disabled={!activePreview || previewSegIndex <= 0 || merging}
+              title="Previous clip"
+              aria-label="Previous clip"
+              onClick={() => {
+                const prev = sequenceClips[previewSegIndex - 1]!;
+                seekPreviewTo(
+                  previewSegIndex - 1,
+                  prev.segment.trimStartSec,
+                );
+                setPreviewPlaying(false);
+              }}
+            >
+              <SkipBack className="size-3.5" />
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon-sm"
+              disabled={!activePreview || uploading || merging}
+              title={previewPlaying ? "Pause" : "Play sequence"}
+              aria-label={previewPlaying ? "Pause" : "Play sequence"}
+              onClick={togglePreviewPlayback}
+            >
+              {previewPlaying ? (
+                <Pause className="size-3.5" />
+              ) : (
+                <Play className="size-3.5" />
+              )}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              disabled={
+                !activePreview ||
+                previewSegIndex >= sequenceClips.length - 1 ||
+                merging
+              }
+              title="Next clip"
+              aria-label="Next clip"
+              onClick={() => {
+                const next = sequenceClips[previewSegIndex + 1]!;
+                seekPreviewTo(
+                  previewSegIndex + 1,
+                  next.segment.trimStartSec,
+                );
+                setPreviewPlaying(false);
+              }}
+            >
+              <SkipForward className="size-3.5" />
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon-sm"
+              disabled={!activePreview || uploading || merging}
+              title="Full preview"
+              aria-label="Full preview"
+              onClick={() => setFullPreviewOpen(true)}
+            >
+              <Maximize2 className="size-3.5" />
+            </Button>
+          </div>
+        </div>
+
+        <div className="grid min-w-0 gap-1.5">
           <div className="flex flex-wrap items-center gap-1.5">
             {sequenceClips.length > 0 ? (
               <div className="flex flex-wrap items-center gap-1">
@@ -2020,8 +2162,17 @@ export function VideoFrameMergerPanel({
                   {" "}
                   · {clipProviderLabel(selected.clip.fileName)} ·{" "}
                   {formatMergeTimelineTime(
-                    selected.segment.trimEndSec - selected.segment.trimStartSec,
+                    mergeClipTimelineDurationSec(
+                      selected.segment.trimStartSec,
+                      selected.segment.trimEndSec,
+                      selected.segment.speed,
+                    ),
                   )}
+                  {Math.abs(
+                    clampMergeClipSpeed(selected.segment.speed) - 1,
+                  ) > 0.001
+                    ? ` · ${clampMergeClipSpeed(selected.segment.speed).toFixed(2)}×`
+                    : ""}
                   {selected.segment.muted ? " · muted" : ""}
                 </span>
               ) : null}
@@ -2043,6 +2194,34 @@ export function VideoFrameMergerPanel({
                 </span>
               ) : null}
             </p>
+            {selected ? (
+              <label className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                <span className="font-medium text-foreground">Speed</span>
+                <input
+                  type="range"
+                  min={MIN_MERGE_CLIP_SPEED}
+                  max={MAX_MERGE_CLIP_SPEED}
+                  step={0.05}
+                  value={clampMergeClipSpeed(selected.segment.speed)}
+                  aria-label="Clip playback speed"
+                  className="w-36 accent-[#f5d000]"
+                  disabled={merging || uploading}
+                  onPointerDown={() => pushUndoSnapshot()}
+                  onChange={(event) =>
+                    updateClipSpeed(
+                      selected.segment.instanceId,
+                      Number(event.target.value),
+                    )
+                  }
+                />
+                <span className="min-w-12 tabular-nums text-foreground">
+                  {clampMergeClipSpeed(selected.segment.speed).toFixed(2)}×
+                </span>
+                <span className="text-[10px]">
+                  {MIN_MERGE_CLIP_SPEED}–{MAX_MERGE_CLIP_SPEED}×
+                </span>
+              </label>
+            ) : null}
           </div>
 
           <div
@@ -2072,6 +2251,7 @@ export function VideoFrameMergerPanel({
                     trimStartSec: segment.trimStartSec,
                     trimEndSec: segment.trimEndSec,
                     muted: segment.muted === true || stripAudio,
+                    speed: segment.speed,
                   }))}
                   audioTracks={timelineAudioTracks.map(({ track, asset }) => ({
                     instanceId: track.instanceId,
@@ -2153,126 +2333,6 @@ export function VideoFrameMergerPanel({
                 />
               </div>
             )}
-          </div>
-            </div>
-          </div>
-
-          <div className="flex w-full max-w-[22rem] flex-col gap-1.5 justify-self-center lg:sticky lg:top-4 lg:justify-self-end">
-            <p className="text-xs font-medium text-muted-foreground">
-              {activePreview ? (
-                <>
-                  Live preview ·{" "}
-                  {inBlackPad
-                    ? `black pad · ${formatMergeTimelineTime(videoCompositionSec + blackPadSec)}`
-                    : `part ${previewSegIndex + 1} of ${sequenceClips.length} · ${formatMergeTimelineTime(playheadSec)}`}
-                  {timelineDurationSec > videoCompositionSec + 0.04
-                    ? ` · timeline ${formatMergeTimelineTime(timelineDurationSec)}`
-                    : ""}
-                </>
-              ) : (
-                "Live preview"
-              )}
-            </p>
-            {!fullPreviewOpen && activePreview ? (
-              <div className="relative w-full overflow-hidden rounded-xl border bg-black ring-1 ring-border">
-                <video
-                  ref={previewVideoRef}
-                  muted={stripAudio || activePreview.segment.muted === true}
-                  playsInline
-                  controls={false}
-                  preload="metadata"
-                  onTimeUpdate={onPreviewTimeUpdate}
-                  onEnded={() => {
-                    if (previewPlayingRef.current) {
-                      advanceToNextClip();
-                    }
-                  }}
-                  className={cn(
-                    "aspect-[9/16] w-full object-contain",
-                    inBlackPad && "opacity-0",
-                  )}
-                />
-                {inBlackPad ? (
-                  <div className="absolute inset-0 flex items-center justify-center bg-black text-xs font-medium uppercase tracking-wide text-zinc-500">
-                    Black pad
-                  </div>
-                ) : null}
-              </div>
-            ) : (
-              <div className="flex aspect-[9/16] w-full items-center justify-center rounded-xl border border-dashed border-border bg-muted/40 px-4 text-center text-xs text-muted-foreground">
-                {fullPreviewOpen && activePreview
-                  ? "Open in full preview"
-                  : "Add a clip to the timeline to preview."}
-              </div>
-            )}
-            <div className="flex items-center justify-center gap-1">
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                disabled={!activePreview || previewSegIndex <= 0 || merging}
-                title="Previous clip"
-                aria-label="Previous clip"
-                onClick={() => {
-                  const prev = sequenceClips[previewSegIndex - 1]!;
-                  seekPreviewTo(
-                    previewSegIndex - 1,
-                    prev.segment.trimStartSec,
-                  );
-                  setPreviewPlaying(false);
-                }}
-              >
-                <SkipBack className="size-3.5" />
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="icon-sm"
-                disabled={!activePreview || uploading || merging}
-                title={previewPlaying ? "Pause" : "Play sequence"}
-                aria-label={previewPlaying ? "Pause" : "Play sequence"}
-                onClick={togglePreviewPlayback}
-              >
-                {previewPlaying ? (
-                  <Pause className="size-3.5" />
-                ) : (
-                  <Play className="size-3.5" />
-                )}
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                disabled={
-                  !activePreview ||
-                  previewSegIndex >= sequenceClips.length - 1 ||
-                  merging
-                }
-                title="Next clip"
-                aria-label="Next clip"
-                onClick={() => {
-                  const next = sequenceClips[previewSegIndex + 1]!;
-                  seekPreviewTo(
-                    previewSegIndex + 1,
-                    next.segment.trimStartSec,
-                  );
-                  setPreviewPlaying(false);
-                }}
-              >
-                <SkipForward className="size-3.5" />
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="icon-sm"
-                disabled={!activePreview || uploading || merging}
-                title="Full preview"
-                aria-label="Full preview"
-                onClick={() => setFullPreviewOpen(true)}
-              >
-                <Maximize2 className="size-3.5" />
-              </Button>
-            </div>
           </div>
         </div>
 

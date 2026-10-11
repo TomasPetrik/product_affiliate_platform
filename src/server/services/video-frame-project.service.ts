@@ -32,6 +32,7 @@ import {
   parseMergeExportQuality,
   type MergeExportQuality,
 } from "@/lib/video-frame-merge-quality";
+import { mergeClipTimelineDurationSec } from "@/lib/video-frame-merge-speed";
 import {
   findProjectSourceVideo,
   MAX_VIDEO_FRAME_PROJECT_VIDEOS,
@@ -1845,6 +1846,8 @@ export interface MergeVideoFrameSegmentInput {
   trimEndSec?: number;
   /** Silence this clip's audio; soundtrack may still overlay. */
   muted?: boolean;
+  /** Playback / export speed (0.5–4). */
+  speed?: number;
 }
 
 export interface MergeVideoFrameAudioTrackInput {
@@ -1881,6 +1884,7 @@ export async function mergeVideoFrameClips(input: {
       trimStartSec: segment.trimStartSec,
       trimEndSec: segment.trimEndSec,
       muted: segment.muted === true,
+      speed: segment.speed,
     })) ??
     (input.assetIds ?? []).map((assetId) => ({
       assetId: assetId.trim(),
@@ -1975,6 +1979,7 @@ export async function mergeVideoFrameClips(input: {
     trimStartSec?: number;
     trimEndSec?: number;
     muted?: boolean;
+    speed?: number;
   }> = [];
   let videoCompositionSec = 0;
   for (const segment of segments) {
@@ -1991,11 +1996,13 @@ export async function mergeVideoFrameClips(input: {
       trimStartSec: segment.trimStartSec,
       trimEndSec: segment.trimEndSec,
       muted: segment.muted === true,
+      speed: segment.speed,
     });
     if (segment.trimEndSec != null) {
-      videoCompositionSec += Math.max(
-        0,
-        segment.trimEndSec - segment.trimStartSec,
+      videoCompositionSec += mergeClipTimelineDurationSec(
+        segment.trimStartSec,
+        segment.trimEndSec,
+        segment.speed,
       );
     }
   }

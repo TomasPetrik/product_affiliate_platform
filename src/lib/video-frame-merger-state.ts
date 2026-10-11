@@ -5,6 +5,10 @@ import {
   parseMergeExportQuality,
   type MergeExportQuality,
 } from "@/lib/video-frame-merge-quality";
+import {
+  clampMergeClipSpeed,
+  DEFAULT_MERGE_CLIP_SPEED,
+} from "@/lib/video-frame-merge-speed";
 
 export interface VideoFrameMergerSegmentState {
   instanceId: string;
@@ -14,6 +18,8 @@ export interface VideoFrameMergerSegmentState {
   durationSec: number;
   /** When true, this clip's audio is silenced in the merge (soundtrack can still overlay). */
   muted?: boolean;
+  /** Playback / export speed (0.5–4). Defaults to 1. */
+  speed?: number;
 }
 
 /** Soundtrack placed on composition time (move via startAtSec, trim like video). */
@@ -73,6 +79,11 @@ function parseSegment(value: unknown): VideoFrameMergerSegmentState | null {
   ) {
     return null;
   }
+  const speedRaw =
+    typeof value.speed === "number" && Number.isFinite(value.speed)
+      ? value.speed
+      : DEFAULT_MERGE_CLIP_SPEED;
+  const speed = clampMergeClipSpeed(speedRaw);
   return {
     instanceId,
     assetId,
@@ -80,6 +91,7 @@ function parseSegment(value: unknown): VideoFrameMergerSegmentState | null {
     trimEndSec: Math.min(durationSec, Math.max(trimStartSec + MIN_TRIM_SEC, trimEndSec)),
     durationSec,
     ...(value.muted === true ? { muted: true } : {}),
+    ...(Math.abs(speed - DEFAULT_MERGE_CLIP_SPEED) > 0.001 ? { speed } : {}),
   };
 }
 

@@ -9,6 +9,12 @@ import {
   parseMergeExportQuality,
   type MergeExportQuality,
 } from "@/lib/video-frame-merge-quality";
+import {
+  clampMergeClipSpeed,
+  DEFAULT_MERGE_CLIP_SPEED,
+  ffmpegAtempoFilter,
+  mergeClipTimelineDurationSec,
+} from "@/lib/video-frame-merge-speed";
 import { WAN_VIDEO_EDIT_INPUT_MAX_SEC } from "@/lib/wan-video-edit";
 
 export class VideoCutError extends Error {
@@ -68,6 +74,21 @@ export interface ConcatSegmentInput {
   trimEndSec?: number;
   /** Silence this clip's audio (keeps an AAC stream so concat + soundtrack mix stay aligned). */
   muted?: boolean;
+  /** Playback speed 0.5–4 (timeline + export). Defaults to 1. */
+  speed?: number;
+}
+
+function segmentSpeed(segment: ConcatSegmentInput): number {
+  return clampMergeClipSpeed(segment.speed ?? DEFAULT_MERGE_CLIP_SPEED);
+}
+
+function videoFilterForSegment(
+  normalizeVf: string,
+  segment: ConcatSegmentInput,
+): string {
+  const speed = segmentSpeed(segment);
+  if (Math.abs(speed - 1) < 0.001) return normalizeVf;
+  return `${normalizeVf},setpts=PTS/${speed.toFixed(4)}`;
 }
 
 function trimArgs(segment: ConcatSegmentInput): string[] {
@@ -112,7 +133,7 @@ async function normalizeClipWithSilentAudio(
     "anullsrc=channel_layout=stereo:sample_rate=44100",
     ...trim,
     "-vf",
-    normalizeVf,
+    videoFilterForSegment(normalizeVf, segment),
     "-c:v",
     "libx264",
     "-preset",
@@ -159,6 +180,9 @@ async function normalizeClipForConcat(
   const normalizeVf = normalizeVfForQuality(quality);
   const keepSilentAudio = options?.keepSilentAudio === true;
 
+  const vf = videoFilterForSegment(normalizeVf, segment);
+  const atempo = ffmpegAtempoFilter(segment.speed);
+
   if (stripAudio && !keepSilentAudio) {
     await runFfmpeg([
       "-hide_banner",
@@ -169,7 +193,7 @@ async function normalizeClipForConcat(
       segment.absoluteSourcePath,
       ...trim,
       "-vf",
-      normalizeVf,
+      vf,
       "-c:v",
       "libx264",
       "-preset",
@@ -202,7 +226,7 @@ async function normalizeClipForConcat(
     segment.absoluteSourcePath,
     ...trim,
     "-vf",
-    normalizeVf,
+    vf,
     "-c:v",
     "libx264",
     "-preset",
@@ -217,6 +241,7 @@ async function normalizeClipForConcat(
     "2",
     "-ar",
     "44100",
+    ...(atempo ? (["-af", atempo] as string[]) : []),
     "-movflags",
     "+faststart",
     "-avoid_negative_ts",
@@ -416,7 +441,7 @@ function keptSegmentDurationSec(segment: ConcatSegmentInput): number {
   const start = Math.max(0, segment.trimStartSec ?? 0);
   const end = segment.trimEndSec;
   if (end != null && Number.isFinite(end) && end > start) {
-    return end - start;
+    return mergeClipTimelineDurationSec(start, end, segment.speed);
   }
   return 0;
 }

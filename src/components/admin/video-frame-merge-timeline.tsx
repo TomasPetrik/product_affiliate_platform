@@ -133,10 +133,24 @@ export interface MergeTimelineSegmentView {
   trimEndSec: number;
   /** Clip audio silenced for this segment. */
   muted?: boolean;
+  /** Playback / export speed (0.5–4). Defaults to 1. */
+  speed?: number;
 }
 
-function keptDuration(segment: MergeTimelineSegmentView): number {
+function clipSpeed(segment: MergeTimelineSegmentView): number {
+  const speed = segment.speed;
+  if (speed == null || !Number.isFinite(speed)) return 1;
+  return Math.min(4, Math.max(0.5, speed));
+}
+
+/** Source trim length (seconds of original media kept). */
+function sourceKeptDuration(segment: MergeTimelineSegmentView): number {
   return Math.max(MIN_TRIM_SEC, segment.trimEndSec - segment.trimStartSec);
+}
+
+/** How long the clip occupies on the composition timeline. */
+function keptDuration(segment: MergeTimelineSegmentView): number {
+  return sourceKeptDuration(segment) / clipSpeed(segment);
 }
 
 function segmentWidthPx(
@@ -159,7 +173,10 @@ export function compositionToSource(
     if (remaining <= kept || i === segments.length - 1) {
       const sourceSec = Math.min(
         segment.trimEndSec,
-        Math.max(segment.trimStartSec, segment.trimStartSec + remaining),
+        Math.max(
+          segment.trimStartSec,
+          segment.trimStartSec + remaining * clipSpeed(segment),
+        ),
       );
       return { instanceId: segment.instanceId, sourceSec, index: i };
     }
@@ -186,7 +203,7 @@ export function sourceToComposition(
         segment.trimEndSec,
         Math.max(segment.trimStartSec, sourceSec),
       );
-      return offset + (clamped - segment.trimStartSec);
+      return offset + (clamped - segment.trimStartSec) / clipSpeed(segment);
     }
     offset += keptDuration(segment);
   }
@@ -280,7 +297,7 @@ function layoutPxToSource(
       const rel = Math.min(item.width, Math.max(0, clampedX - item.left));
       const ratio = item.width > 0 ? rel / item.width : 0;
       const sourceSec =
-        item.segment.trimStartSec + ratio * keptDuration(item.segment);
+        item.segment.trimStartSec + ratio * sourceKeptDuration(item.segment);
       const compositionSec = sourceToComposition(
         layout.map((row) => row.segment),
         item.segment.instanceId,

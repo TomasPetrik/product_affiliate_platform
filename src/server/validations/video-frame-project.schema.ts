@@ -54,6 +54,8 @@ export const mergeVideoFrameSegmentSchema = z
     trimEndSec: z.number().finite().positive().optional(),
     /** Silence this clip's audio; soundtrack may still overlay. */
     muted: z.boolean().optional(),
+    /** Playback / export speed (0.5–4). */
+    speed: z.number().finite().min(0.5).max(4).optional(),
   })
   .refine(
     (value) =>
@@ -112,6 +114,7 @@ export const videoFrameMergerSegmentStateSchema = z.object({
   trimEndSec: z.number().finite().positive(),
   durationSec: z.number().finite().positive(),
   muted: z.boolean().optional(),
+  speed: z.number().finite().min(0.5).max(4).optional(),
 });
 
 export const videoFrameMergerAudioTrackStateSchema = z.object({

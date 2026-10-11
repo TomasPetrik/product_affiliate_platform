@@ -66,6 +66,7 @@ export async function getDashboardAnalytics(
     clickDays,
     viewsByProduct,
     clicksByProduct,
+    hopBreakdownByProduct,
     categoryViewRows,
     viewsByCategoryFallback,
     clicksByCategory,
@@ -137,6 +138,31 @@ export async function getDashboardAnalytics(
       where: { createdAt },
       _count: { id: true },
     }),
+    prisma.$queryRaw<Array<{ productId: string; checkPrice: number; socialHops: number }>>`
+      SELECT e."productId" AS "productId",
+        COUNT(*) FILTER (
+          WHERE NOT (
+            e.metadata->>'hopSource' = 'social'
+            OR (
+              e.metadata->>'hopSource' IS NULL
+              AND l."socialPlatform" IS NOT NULL
+            )
+          )
+        )::int AS "checkPrice",
+        COUNT(*) FILTER (
+          WHERE e.metadata->>'hopSource' = 'social'
+            OR (
+              e.metadata->>'hopSource' IS NULL
+              AND l."socialPlatform" IS NOT NULL
+            )
+        )::int AS "socialHops"
+      FROM "analytics_events" e
+      LEFT JOIN "affiliate_links" l ON l.id = e."affiliateLinkId"
+      WHERE e.type = 'AFFILIATE_CLICK'
+        AND e."productId" IS NOT NULL
+        AND e."createdAt" >= ${range.start} AND e."createdAt" <= ${range.end}
+      GROUP BY e."productId"
+    `,
     prisma.$queryRaw<Array<{ categoryId: string; count: number }>>`
       SELECT "categoryId", COUNT(*)::int AS count
       FROM "analytics_events"
@@ -240,6 +266,7 @@ export async function getDashboardAnalytics(
   const activityProductIds = [
     ...viewsByProduct.map((row) => row.productId),
     ...clicksByProduct.map((row) => row.productId),
+    ...hopBreakdownByProduct.map((row) => row.productId),
   ];
   const categoryIds = [...new Set([...viewsByCategory.map((row) => row.categoryId), ...clicksByCategory.map((row) => row.categoryId)])];
 
@@ -281,18 +308,31 @@ export async function getDashboardAnalytics(
   const categoryById = new Map(categories.map((category) => [category.id, category]));
   const viewsByProductId = new Map(viewsByProduct.map((row) => [row.productId, row._count.id]));
   const clicksByProductId = new Map(clicksByProduct.map((row) => [row.productId, row._count.id]));
+  const hopBreakdownByProductId = new Map(
+    hopBreakdownByProduct.map((row) => [
+      row.productId,
+      { checkPrice: Number(row.checkPrice), socialHops: Number(row.socialHops) },
+    ]),
+  );
   const clicksByCategoryId = new Map(clicksByCategory.map((row) => [row.categoryId, row.count]));
 
   const topProducts = productIds
     .map((productId) => {
       const product = productById.get(productId);
       const marketing = marketingViewsByProduct.get(productId);
+      const hops = hopBreakdownByProductId.get(productId);
+      const totalClicks = clicksByProductId.get(productId) ?? 0;
+      // Event breakdown tags site Check Price vs social `?p=` hops. Untagged
+      // legacy rows count as Check price; social Link hops starts after tagging.
+      const checkPriceClicks = hops?.checkPrice ?? totalClicks;
+      const socialHops = hops?.socialHops ?? 0;
       return {
         id: productId,
         label: product?.title ?? "Deleted product",
         href: `/admin/products/${productId}/analytics`,
         views: viewsByProductId.get(productId) ?? 0,
-        clicks: clicksByProductId.get(productId) ?? 0,
+        checkPriceClicks,
+        clicks: socialHops,
         marketingViews: marketing?.total ?? 0,
         platformViews: {
           INSTAGRAM: marketing?.INSTAGRAM ?? 0,
@@ -305,7 +345,10 @@ export async function getDashboardAnalytics(
     })
     .sort(
       (a, b) =>
-        b.marketingViews - a.marketingViews || b.views - a.views || b.clicks - a.clicks,
+        b.marketingViews - a.marketingViews ||
+        b.views - a.views ||
+        (b.checkPriceClicks ?? 0) - (a.checkPriceClicks ?? 0) ||
+        b.clicks - a.clicks,
     );
 
   const topCategories = viewsByCategory

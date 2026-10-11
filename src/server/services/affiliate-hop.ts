@@ -7,7 +7,10 @@ import { env } from "@/lib/env";
 import { visitorContextFromHeaders } from "@/lib/geo";
 import { shouldOmitAnalytics } from "@/server/analytics-omit";
 import { readRequestConsent } from "@/server/consent";
-import { sanitizeAffiliateDestination } from "@/server/services/affiliate-redirect.service";
+import {
+  sanitizeAffiliateDestination,
+  socialPlatformFromRequest,
+} from "@/server/services/affiliate-redirect.service";
 import {
   applyAnalyticsCookies,
   languageFromHeaders,
@@ -42,7 +45,9 @@ export async function redirectAfterAffiliateClick(input: {
 
   const cookieStore = await cookies();
   const headerStore = await headers();
-  const campaign = collectCampaignParams(new URL(input.request.url).searchParams);
+  const requestUrl = new URL(input.request.url);
+  const campaign = collectCampaignParams(requestUrl.searchParams);
+  const socialPlatform = socialPlatformFromRequest(requestUrl.searchParams);
   const { allowAnalytics } = await readRequestConsent();
   const geo = visitorContextFromHeaders(headerStore);
   if (await shouldOmitAnalytics(geo)) {
@@ -68,6 +73,11 @@ export async function redirectAfterAffiliateClick(input: {
     campaign: campaign.campaign,
     term: campaign.term,
     content: campaign.content,
+    // Site Check Price CTAs omit `?p=`; social bio/caption/DM hops include it.
+    metadata: {
+      hopSource: socialPlatform ? "social" : "site",
+      ...(socialPlatform ? { socialPlatform } : {}),
+    },
   });
 
   const destination = sanitizeAffiliateDestination(recorded?.destinationUrl ?? "");

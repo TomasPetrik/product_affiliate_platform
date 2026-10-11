@@ -1,11 +1,13 @@
 import { Prisma } from "@/generated/prisma/client";
+import type { SocialPlatform } from "@/generated/prisma/enums";
 
 import { ctr } from "@/lib/analytics-attribution";
 import { deviceLabel } from "@/lib/analytics-device";
 import type { AnalyticsQueryFilters } from "@/lib/analytics-query";
+import { eachUtcDay, formatIsoDate, type ResolvedDateRange } from "@/lib/date-range";
 import { cityDisplayName, countryDisplayName } from "@/lib/geo";
 import { prisma } from "@/lib/prisma";
-import { eachUtcDay, formatIsoDate, type ResolvedDateRange } from "@/lib/date-range";
+import { SOCIAL_PLATFORM_LABELS, SOCIAL_PLATFORMS } from "@/lib/social-external-id";
 import type { RankedRow, SeriesPoint } from "@/server/services/analytics-types";
 
 export interface ReportRow {
@@ -29,12 +31,25 @@ export interface ProductOfferAnalytics {
   ctr: number | null;
 }
 
+export interface ProductLinkHopPlatform {
+  platform: SocialPlatform;
+  label: string;
+  hops: number;
+}
+
 export interface ProductAnalytics {
   productId: string;
   views: number;
   uniqueVisitors: number;
   sessions: number;
+  /** All outbound affiliate /go clicks (Check price + social link hops). */
   affiliateClicks: number;
+  /** Product-page Check Price /go clicks (no social platform hop). */
+  checkPriceClicks: number;
+  /** Total social affiliate hops across Instagram / Facebook / YouTube / TikTok. */
+  linkHops: number;
+  /** Per-platform social hop counts (always includes all four platforms). */
+  linkHopsByPlatform: ProductLinkHopPlatform[];
   ctr: number | null;
   countries: ReportRow[];
   sources: ReportRow[];
@@ -42,6 +57,10 @@ export interface ProductAnalytics {
   offers: ProductOfferAnalytics[];
   searchQueries: ReportRow[];
   series: SeriesPoint[];
+}
+
+function isSocialPlatform(value: string | null | undefined): value is SocialPlatform {
+  return SOCIAL_PLATFORMS.includes(value as SocialPlatform);
 }
 
 function countryEqualsSql(country: string | null | undefined) {
@@ -518,7 +537,8 @@ export async function getProductAnalytics(
 ): Promise<ProductAnalytics> {
   const where = eventSql(range, filters, productId);
 
-  const [kpis, countries, sources, campaigns, offers, searchQueries, series] = await Promise.all([
+  const [kpis, hopTotals, hopPlatforms, countries, sources, campaigns, offers, searchQueries, series] =
+    await Promise.all([
     prisma.$queryRaw<Array<{ views: number; visitors: number; sessions: number; clicks: number }>>`
       SELECT
         COUNT(*) FILTER (WHERE type = 'PRODUCT_VIEW')::int AS views,
@@ -527,6 +547,41 @@ export async function getProductAnalytics(
         COUNT(*) FILTER (WHERE type = 'AFFILIATE_CLICK')::int AS clicks
       FROM "analytics_events" e
       WHERE ${where}
+    `,
+    prisma.$queryRaw<Array<{ checkPrice: number; linkHops: number }>>`
+      SELECT
+        COUNT(*) FILTER (
+          WHERE e.type = 'AFFILIATE_CLICK'
+            AND NOT (
+              e.metadata->>'hopSource' = 'social'
+              OR (e.metadata->>'hopSource' IS NULL AND l."socialPlatform" IS NOT NULL)
+            )
+        )::int AS "checkPrice",
+        COUNT(*) FILTER (
+          WHERE e.type = 'AFFILIATE_CLICK'
+            AND (
+              e.metadata->>'hopSource' = 'social'
+              OR (e.metadata->>'hopSource' IS NULL AND l."socialPlatform" IS NOT NULL)
+            )
+        )::int AS "linkHops"
+      FROM "analytics_events" e
+      LEFT JOIN "affiliate_links" l ON l.id = e."affiliateLinkId"
+      WHERE ${where}
+    `,
+    prisma.$queryRaw<Array<{ platform: string | null; hops: number }>>`
+      SELECT
+        COALESCE(e.metadata->>'socialPlatform', l."socialPlatform"::text) AS platform,
+        COUNT(*)::int AS hops
+      FROM "analytics_events" e
+      LEFT JOIN "affiliate_links" l ON l.id = e."affiliateLinkId"
+      WHERE ${where}
+        AND e.type = 'AFFILIATE_CLICK'
+        AND (
+          e.metadata->>'hopSource' = 'social'
+          OR (e.metadata->>'hopSource' IS NULL AND l."socialPlatform" IS NOT NULL)
+        )
+      GROUP BY 1
+      ORDER BY hops DESC
     `,
     prisma.$queryRaw<Array<{ key: string | null; visitors: number; sessions: number; views: number; clicks: number }>>`
       SELECT "country" AS key,
@@ -565,8 +620,8 @@ export async function getProductAnalytics(
       ORDER BY visitors DESC
       LIMIT 20
     `,
-    prisma.$queryRaw<Array<{ id: string; name: string; views: number; clicks: number }>>`
-      SELECT l.id, m.name,
+    prisma.$queryRaw<Array<{ id: string; name: string; socialPlatform: string | null; views: number; clicks: number }>>`
+      SELECT l.id, m.name, l."socialPlatform"::text AS "socialPlatform",
         COUNT(*) FILTER (WHERE e.type = 'RETAILER_OFFER_VIEW')::int AS views,
         COUNT(*) FILTER (WHERE e.type = 'AFFILIATE_CLICK')::int AS clicks
       FROM "affiliate_links" l
@@ -575,7 +630,7 @@ export async function getProductAnalytics(
         ON e."affiliateLinkId" = l.id
         AND e."createdAt" >= ${range.start} AND e."createdAt" <= ${range.end}
       WHERE l."productId" = ${productId}
-      GROUP BY l.id, m.name
+      GROUP BY l.id, m.name, l."socialPlatform"
       ORDER BY clicks DESC, views DESC
     `,
     prisma.$queryRaw<Array<{ query: string; views: number; clicks: number }>>`
@@ -593,6 +648,19 @@ export async function getProductAnalytics(
   ]);
 
   const kpi = kpis[0] ?? { views: 0, visitors: 0, sessions: 0, clicks: 0 };
+  const hopTotal = hopTotals[0] ?? { checkPrice: 0, linkHops: 0 };
+  const checkPriceClicks = Number(hopTotal.checkPrice);
+  const linkHops = Number(hopTotal.linkHops);
+  const hopsByPlatform = new Map<SocialPlatform, number>();
+  for (const row of hopPlatforms) {
+    if (!isSocialPlatform(row.platform)) continue;
+    hopsByPlatform.set(row.platform, Number(row.hops));
+  }
+  const linkHopsByPlatform: ProductLinkHopPlatform[] = SOCIAL_PLATFORMS.map((platform) => ({
+    platform,
+    label: SOCIAL_PLATFORM_LABELS[platform],
+    hops: hopsByPlatform.get(platform) ?? 0,
+  }));
 
   return {
     productId,
@@ -600,6 +668,9 @@ export async function getProductAnalytics(
     uniqueVisitors: Number(kpi.visitors),
     sessions: Number(kpi.sessions),
     affiliateClicks: Number(kpi.clicks),
+    checkPriceClicks,
+    linkHops,
+    linkHopsByPlatform,
     ctr: ctr(Number(kpi.clicks), Number(kpi.views)),
     countries: toReport(
       countries.map((row) => ({
@@ -631,13 +702,18 @@ export async function getProductAnalytics(
         clicks: row.clicks,
       })),
     ),
-    offers: offers.map((row) => ({
-      id: row.id,
-      retailer: row.name,
-      views: Number(row.views),
-      clicks: Number(row.clicks),
-      ctr: ctr(Number(row.clicks), Number(row.views)),
-    })),
+    offers: offers.map((row) => {
+      const platformLabel = isSocialPlatform(row.socialPlatform)
+        ? SOCIAL_PLATFORM_LABELS[row.socialPlatform]
+        : null;
+      return {
+        id: row.id,
+        retailer: platformLabel ? `${row.name} · ${platformLabel}` : row.name,
+        views: Number(row.views),
+        clicks: Number(row.clicks),
+        ctr: ctr(Number(row.clicks), Number(row.views)),
+      };
+    }),
     searchQueries: toReport(
       searchQueries.map((row) => ({
         id: row.query,

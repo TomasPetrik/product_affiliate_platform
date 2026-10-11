@@ -24,8 +24,9 @@ import type { RankedRow } from "@/server/services/analytics.service";
 
 const PRODUCT_SORT_OPTIONS = [
   { value: "videoViews", label: "Video views" },
-  { value: "siteViews", label: "Site views" },
-  { value: "clicks", label: "Clicks" },
+  { value: "visits", label: "Visits" },
+  { value: "checkPrice", label: "Check price" },
+  { value: "linkHops", label: "Link hops" },
   { value: "lastAdded", label: "Last added" },
 ] as const;
 
@@ -33,6 +34,12 @@ type ProductSort = (typeof PRODUCT_SORT_OPTIONS)[number]["value"];
 
 const TOP_PRODUCTS_SORT_STORAGE_KEY = "admin.analytics.topProductsSort";
 const DEFAULT_PRODUCT_SORT: ProductSort = "videoViews";
+
+/** Older localStorage values from before the funnel columns were renamed. */
+const LEGACY_PRODUCT_SORT: Record<string, ProductSort> = {
+  siteViews: "visits",
+  clicks: "linkHops",
+};
 
 function isProductSort(value: string | null | undefined): value is ProductSort {
   return PRODUCT_SORT_OPTIONS.some((option) => option.value === value);
@@ -43,6 +50,7 @@ function readStoredProductSort(): ProductSort {
   try {
     const raw = window.localStorage.getItem(TOP_PRODUCTS_SORT_STORAGE_KEY);
     if (isProductSort(raw)) return raw;
+    if (raw && raw in LEGACY_PRODUCT_SORT) return LEGACY_PRODUCT_SORT[raw]!;
   } catch {
     // ignore quota / privacy mode
   }
@@ -75,18 +83,30 @@ function sortProductRows(rows: RankedRow[], sortBy: ProductSort): RankedRow[] {
   return [...rows].sort((a, b) => {
     const videoA = a.marketingViews ?? 0;
     const videoB = b.marketingViews ?? 0;
+    const checkA = a.checkPriceClicks ?? 0;
+    const checkB = b.checkPriceClicks ?? 0;
     if (sortBy === "videoViews") {
-      return videoB - videoA || b.views - a.views || b.clicks - a.clicks;
+      return videoB - videoA || b.views - a.views || checkB - checkA || b.clicks - a.clicks;
     }
-    if (sortBy === "clicks") {
-      return b.clicks - a.clicks || b.views - a.views || videoB - videoA;
+    if (sortBy === "checkPrice") {
+      return checkB - checkA || b.clicks - a.clicks || b.views - a.views || videoB - videoA;
+    }
+    if (sortBy === "linkHops") {
+      return b.clicks - a.clicks || checkB - checkA || b.views - a.views || videoB - videoA;
     }
     if (sortBy === "lastAdded") {
       const addedA = a.addedAt ? Date.parse(a.addedAt) : 0;
       const addedB = b.addedAt ? Date.parse(b.addedAt) : 0;
-      return addedB - addedA || videoB - videoA || b.views - a.views || b.clicks - a.clicks;
+      return (
+        addedB - addedA ||
+        videoB - videoA ||
+        b.views - a.views ||
+        checkB - checkA ||
+        b.clicks - a.clicks
+      );
     }
-    return b.views - a.views || b.clicks - a.clicks || videoB - videoA;
+    // visits
+    return b.views - a.views || checkB - checkA || b.clicks - a.clicks || videoB - videoA;
   });
 }
 
@@ -113,7 +133,8 @@ export function RankedTable({
   const colCount =
     1 + // name
     (showMarketingFunnel ? 5 : 0) +
-    1 + // metric
+    1 + // visits / metric
+    (showMarketingFunnel ? 1 : 0) + // check price
     (showClicks ? 1 : 0);
 
   return (
@@ -161,8 +182,36 @@ export function RankedTable({
                   <TableHead className="text-right">TikTok</TableHead>
                 </>
               ) : null}
-              <TableHead className="text-right">{metricLabel}</TableHead>
-              {showClicks ? <TableHead className="text-right">Clicks</TableHead> : null}
+              <TableHead
+                className="text-right"
+                title={
+                  showMarketingFunnel
+                    ? "Product page visits in the selected date range"
+                    : undefined
+                }
+              >
+                {showMarketingFunnel ? "Visits" : metricLabel}
+              </TableHead>
+              {showMarketingFunnel ? (
+                <TableHead
+                  className="text-right"
+                  title="Check Price button clicks on the product page (site /go, no social platform param)"
+                >
+                  Check price
+                </TableHead>
+              ) : null}
+              {showClicks ? (
+                <TableHead
+                  className="text-right"
+                  title={
+                    showMarketingFunnel
+                      ? "Total social affiliate hops across Instagram, Facebook, YouTube, and TikTok. Open a product for the per-platform breakdown."
+                      : undefined
+                  }
+                >
+                  {showMarketingFunnel ? "Link hops" : "Clicks"}
+                </TableHead>
+              ) : null}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -197,6 +246,11 @@ export function RankedTable({
                   </>
                 ) : null}
                 <TableCell className="text-right tabular-nums">{row.views.toLocaleString()}</TableCell>
+                {showMarketingFunnel ? (
+                  <TableCell className="text-right tabular-nums">
+                    {formatCount(row.checkPriceClicks)}
+                  </TableCell>
+                ) : null}
                 {showClicks ? (
                   <TableCell className="text-right tabular-nums">{row.clicks.toLocaleString()}</TableCell>
                 ) : null}

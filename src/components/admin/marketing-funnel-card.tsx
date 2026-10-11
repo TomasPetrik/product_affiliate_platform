@@ -97,7 +97,7 @@ export function MarketingFunnelCard({ funnel, editHref }: MarketingFunnelCardPro
             <ArrowDown className="h-4 w-4" />
           </div>
           <Step
-            label="4 · Affiliate clicks"
+            label="4 · Link hops"
             value={totals.affiliateClicks.toLocaleString()}
             hint={`Product view → click: ${rate(totals.affiliateClicks, totals.productViews)}`}
           />

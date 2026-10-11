@@ -21,6 +21,11 @@ export interface RankedRow {
   visitors?: number;
   sessions?: number;
   ctr?: number | null;
+  /**
+   * Check Price / on-site `/go` clicks (no social `?p=`), when hopSource is
+   * tagged. Falls back to total affiliate clicks for older untagged rows.
+   */
+  checkPriceClicks?: number;
   /** Latest synced lifetime marketing-video views (all platforms). */
   marketingViews?: number;
   /** Per-platform lifetime views for marketing posts linked to this product. */

@@ -43,16 +43,20 @@ export function AnalyticsOverview({ data, basePath }: AnalyticsOverviewProps) {
           hint="Deduped PDP impressions"
         />
         <StatCard
-          label="Affiliate clicks"
+          label="Link hops"
           value={kpis.affiliateClicks.toLocaleString()}
           icon={MousePointerClick}
-          hint="Outbound marketplace clicks"
+          hint="Affiliate /go redirects to marketplaces"
         />
         <StatCard
           label="Affiliate CTR"
           value={formatCtr(kpis.affiliateCtr)}
           icon={Percent}
-          hint={kpis.affiliateCtr === null ? "Needs at least one view" : "Clicks ÷ product views"}
+          hint={
+            kpis.affiliateCtr === null
+              ? "Needs at least one view"
+              : "Link hops ÷ product views"
+          }
         />
         <StatCard
           label="Unique visitors"
@@ -109,11 +113,11 @@ export function AnalyticsOverview({ data, basePath }: AnalyticsOverviewProps) {
             </Card>
             <Card>
               <CardHeader>
-                <CardTitle className="text-sm">Clicks over time</CardTitle>
+                <CardTitle className="text-sm">Link hops over time</CardTitle>
               </CardHeader>
               <CardContent>
                 {kpis.affiliateClicks === 0 ? (
-                  <p className="py-10 text-center text-sm text-muted-foreground">No affiliate clicks yet.</p>
+                  <p className="py-10 text-center text-sm text-muted-foreground">No link hops yet.</p>
                 ) : (
                   <TimeSeriesChart data={data.series} dataKey="clicks" color="var(--chart-3)" />
                 )}
@@ -128,9 +132,11 @@ export function AnalyticsOverview({ data, basePath }: AnalyticsOverviewProps) {
                   <CardTitle className="text-sm">Top products</CardTitle>
                   <p className="mt-1 text-xs text-muted-foreground">
                     Video views are the latest synced lifetime totals from linked Instagram,
-                    Facebook, YouTube, and TikTok posts. Site Views / Clicks are first-party
-                    analytics for the selected date range. Last added includes recent products
-                    even with no site traffic yet.
+                    Facebook, YouTube, and TikTok posts. Visits, Check price (product-page
+                    button), and link hops (total social /go hops across all platforms) are
+                    first-party analytics for the selected date range. Open a product for the
+                    per-platform hop breakdown. Last added includes recent products even with
+                    no site traffic yet.
                   </p>
                 </div>
                 <RefreshMarketingViewsButton />
@@ -139,7 +145,6 @@ export function AnalyticsOverview({ data, basePath }: AnalyticsOverviewProps) {
                 <RankedTable
                   rows={data.topProducts}
                   emptyLabel="No product activity in this range."
-                  metricLabel="Site views"
                   showMarketingFunnel
                   previewLimit={8}
                 />

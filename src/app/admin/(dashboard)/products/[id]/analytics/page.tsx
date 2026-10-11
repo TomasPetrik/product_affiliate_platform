@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Eye, MousePointerClick, Percent, Users } from "lucide-react";
+import { Eye, MousePointerClick, Percent, Route, Users } from "lucide-react";
 
 import { AnalyticsMetricTable } from "@/components/admin/analytics-metric-table";
 import { DateRangeFilter } from "@/components/admin/date-range-filter";
@@ -10,6 +10,14 @@ import { StatCard } from "@/components/admin/stat-card";
 import { TimeSeriesChart } from "@/components/admin/time-series-chart";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { formatCtr } from "@/lib/analytics-attribution";
 import { countryDetailHref, parseAnalyticsFilters } from "@/lib/analytics-query";
 import { resolveDateRange, type DateRangeSearchParams } from "@/lib/date-range";
@@ -59,11 +67,27 @@ export default async function AdminProductAnalyticsPage({ params, searchParams }
         editHref={`/admin/products/${product.id}/edit`}
       />
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Views" value={analytics.views.toLocaleString()} icon={Eye} />
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        <StatCard label="Visits" value={analytics.views.toLocaleString()} icon={Eye} hint="Product page views" />
+        <StatCard
+          label="Check price"
+          value={analytics.checkPriceClicks.toLocaleString()}
+          icon={MousePointerClick}
+          hint="Product-page Check Price /go clicks"
+        />
+        <StatCard
+          label="Link hops"
+          value={analytics.linkHops.toLocaleString()}
+          icon={Route}
+          hint="Total social hops (IG + FB + YT + TikTok)"
+        />
         <StatCard label="Unique visitors" value={analytics.uniqueVisitors.toLocaleString()} icon={Users} />
-        <StatCard label="Affiliate clicks" value={analytics.affiliateClicks.toLocaleString()} icon={MousePointerClick} />
-        <StatCard label="CTR" value={formatCtr(analytics.ctr)} icon={Percent} hint="Clicks ÷ product views" />
+        <StatCard
+          label="CTR"
+          value={formatCtr(analytics.ctr)}
+          icon={Percent}
+          hint="All affiliate clicks ÷ visits"
+        />
       </div>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
@@ -84,6 +108,40 @@ export default async function AdminProductAnalyticsPage({ params, searchParams }
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm">Link hops by platform</CardTitle>
+          <p className="text-xs text-muted-foreground">
+            Amazon (and other) social hop links tagged with Instagram, Facebook, YouTube, or TikTok.
+            Total link hops: {analytics.linkHops.toLocaleString()}.
+          </p>
+        </CardHeader>
+        <CardContent className="px-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Platform</TableHead>
+                <TableHead className="text-right">Link hops</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {analytics.linkHopsByPlatform.map((row) => (
+                <TableRow key={row.platform}>
+                  <TableCell className="font-medium">{row.label}</TableCell>
+                  <TableCell className="text-right tabular-nums">{row.hops.toLocaleString()}</TableCell>
+                </TableRow>
+              ))}
+              <TableRow>
+                <TableCell className="font-medium">Total</TableCell>
+                <TableCell className="text-right tabular-nums font-medium">
+                  {analytics.linkHops.toLocaleString()}
+                </TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <Card>

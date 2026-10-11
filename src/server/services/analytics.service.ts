@@ -138,24 +138,12 @@ export async function getDashboardAnalytics(
       where: { createdAt },
       _count: { id: true },
     }),
-    prisma.$queryRaw<Array<{ productId: string; checkPrice: number; socialHops: number }>>`
+    prisma.$queryRaw<Array<{ productId: string; checkPrice: number; linkHops: number }>>`
       SELECT e."productId" AS "productId",
         COUNT(*) FILTER (
-          WHERE NOT (
-            e.metadata->>'hopSource' = 'social'
-            OR (
-              e.metadata->>'hopSource' IS NULL
-              AND l."socialPlatform" IS NOT NULL
-            )
-          )
+          WHERE COALESCE(e.metadata->>'socialPlatform', l."socialPlatform"::text) IS NULL
         )::int AS "checkPrice",
-        COUNT(*) FILTER (
-          WHERE e.metadata->>'hopSource' = 'social'
-            OR (
-              e.metadata->>'hopSource' IS NULL
-              AND l."socialPlatform" IS NOT NULL
-            )
-        )::int AS "socialHops"
+        COUNT(*)::int AS "linkHops"
       FROM "analytics_events" e
       LEFT JOIN "affiliate_links" l ON l.id = e."affiliateLinkId"
       WHERE e.type = 'AFFILIATE_CLICK'
@@ -311,7 +299,7 @@ export async function getDashboardAnalytics(
   const hopBreakdownByProductId = new Map(
     hopBreakdownByProduct.map((row) => [
       row.productId,
-      { checkPrice: Number(row.checkPrice), socialHops: Number(row.socialHops) },
+      { checkPrice: Number(row.checkPrice), linkHops: Number(row.linkHops) },
     ]),
   );
   const clicksByCategoryId = new Map(clicksByCategory.map((row) => [row.categoryId, row.count]));
@@ -322,17 +310,16 @@ export async function getDashboardAnalytics(
       const marketing = marketingViewsByProduct.get(productId);
       const hops = hopBreakdownByProductId.get(productId);
       const totalClicks = clicksByProductId.get(productId) ?? 0;
-      // Event breakdown tags site Check Price vs social `?p=` hops. Untagged
-      // legacy rows count as Check price; social Link hops starts after tagging.
+      // Default (no platform) vs total link hops (Default + IG/FB/YT/TikTok).
       const checkPriceClicks = hops?.checkPrice ?? totalClicks;
-      const socialHops = hops?.socialHops ?? 0;
+      const linkHops = hops?.linkHops ?? totalClicks;
       return {
         id: productId,
         label: product?.title ?? "Deleted product",
         href: `/admin/products/${productId}/analytics`,
         views: viewsByProductId.get(productId) ?? 0,
         checkPriceClicks,
-        clicks: socialHops,
+        clicks: linkHops,
         marketingViews: marketing?.total ?? 0,
         platformViews: {
           INSTAGRAM: marketing?.INSTAGRAM ?? 0,

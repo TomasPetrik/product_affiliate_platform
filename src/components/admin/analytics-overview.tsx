@@ -132,11 +132,11 @@ export function AnalyticsOverview({ data, basePath }: AnalyticsOverviewProps) {
                   <CardTitle className="text-sm">Top products</CardTitle>
                   <p className="mt-1 text-xs text-muted-foreground">
                     Video views are the latest synced lifetime totals from linked Instagram,
-                    Facebook, YouTube, and TikTok posts. Visits, Check price (product-page
-                    button), and link hops (total social /go hops across all platforms) are
-                    first-party analytics for the selected date range. Open a product for the
-                    per-platform hop breakdown. Last added includes recent products even with
-                    no site traffic yet.
+                    Facebook, YouTube, and TikTok posts. Visits, Check price (default /go with
+                    no platform tag), and link hops (Default + IG/FB/YT/TikTok) are first-party
+                    analytics for the selected date range. Open a product for the per-platform
+                    hop breakdown. Last added includes recent products even with no site
+                    traffic yet.
                   </p>
                 </div>
                 <RefreshMarketingViewsButton />

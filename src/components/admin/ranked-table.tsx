@@ -195,7 +195,7 @@ export function RankedTable({
               {showMarketingFunnel ? (
                 <TableHead
                   className="text-right"
-                  title="Check Price button clicks on the product page (site /go, no social platform param)"
+                  title="Default /go hops with no social platform tag (includes product-page Check Price)"
                 >
                   Check price
                 </TableHead>
@@ -205,7 +205,7 @@ export function RankedTable({
                   className="text-right"
                   title={
                     showMarketingFunnel
-                      ? "Total social affiliate hops across Instagram, Facebook, YouTube, and TikTok. Open a product for the per-platform breakdown."
+                      ? "Total affiliate hops: Default (no platform) + Instagram, Facebook, YouTube, and TikTok. Open a product for the per-platform breakdown."
                       : undefined
                   }
                 >

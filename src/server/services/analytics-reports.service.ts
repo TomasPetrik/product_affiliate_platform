@@ -31,8 +31,10 @@ export interface ProductOfferAnalytics {
   ctr: number | null;
 }
 
+export type LinkHopPlatformKey = SocialPlatform | "DEFAULT";
+
 export interface ProductLinkHopPlatform {
-  platform: SocialPlatform;
+  platform: LinkHopPlatformKey;
   label: string;
   hops: number;
 }
@@ -46,9 +48,9 @@ export interface ProductAnalytics {
   affiliateClicks: number;
   /** Product-page Check Price /go clicks (no social platform hop). */
   checkPriceClicks: number;
-  /** Total social affiliate hops across Instagram / Facebook / YouTube / TikTok. */
+  /** Total link hops: Default (no platform) + Instagram / Facebook / YouTube / TikTok. */
   linkHops: number;
-  /** Per-platform social hop counts (always includes all four platforms). */
+  /** Per-platform hop counts, including Default (no platform). */
   linkHopsByPlatform: ProductLinkHopPlatform[];
   ctr: number | null;
   countries: ReportRow[];
@@ -552,18 +554,9 @@ export async function getProductAnalytics(
       SELECT
         COUNT(*) FILTER (
           WHERE e.type = 'AFFILIATE_CLICK'
-            AND NOT (
-              e.metadata->>'hopSource' = 'social'
-              OR (e.metadata->>'hopSource' IS NULL AND l."socialPlatform" IS NOT NULL)
-            )
+            AND COALESCE(e.metadata->>'socialPlatform', l."socialPlatform"::text) IS NULL
         )::int AS "checkPrice",
-        COUNT(*) FILTER (
-          WHERE e.type = 'AFFILIATE_CLICK'
-            AND (
-              e.metadata->>'hopSource' = 'social'
-              OR (e.metadata->>'hopSource' IS NULL AND l."socialPlatform" IS NOT NULL)
-            )
-        )::int AS "linkHops"
+        COUNT(*) FILTER (WHERE e.type = 'AFFILIATE_CLICK')::int AS "linkHops"
       FROM "analytics_events" e
       LEFT JOIN "affiliate_links" l ON l.id = e."affiliateLinkId"
       WHERE ${where}
@@ -576,10 +569,6 @@ export async function getProductAnalytics(
       LEFT JOIN "affiliate_links" l ON l.id = e."affiliateLinkId"
       WHERE ${where}
         AND e.type = 'AFFILIATE_CLICK'
-        AND (
-          e.metadata->>'hopSource' = 'social'
-          OR (e.metadata->>'hopSource' IS NULL AND l."socialPlatform" IS NOT NULL)
-        )
       GROUP BY 1
       ORDER BY hops DESC
     `,
@@ -652,15 +641,27 @@ export async function getProductAnalytics(
   const checkPriceClicks = Number(hopTotal.checkPrice);
   const linkHops = Number(hopTotal.linkHops);
   const hopsByPlatform = new Map<SocialPlatform, number>();
+  let defaultHops = 0;
   for (const row of hopPlatforms) {
-    if (!isSocialPlatform(row.platform)) continue;
-    hopsByPlatform.set(row.platform, Number(row.hops));
+    const count = Number(row.hops);
+    if (isSocialPlatform(row.platform)) {
+      hopsByPlatform.set(row.platform, count);
+      continue;
+    }
+    defaultHops += count;
   }
-  const linkHopsByPlatform: ProductLinkHopPlatform[] = SOCIAL_PLATFORMS.map((platform) => ({
-    platform,
-    label: SOCIAL_PLATFORM_LABELS[platform],
-    hops: hopsByPlatform.get(platform) ?? 0,
-  }));
+  const linkHopsByPlatform: ProductLinkHopPlatform[] = [
+    {
+      platform: "DEFAULT",
+      label: "Default",
+      hops: defaultHops,
+    },
+    ...SOCIAL_PLATFORMS.map((platform) => ({
+      platform,
+      label: SOCIAL_PLATFORM_LABELS[platform],
+      hops: hopsByPlatform.get(platform) ?? 0,
+    })),
+  ];
 
   return {
     productId,

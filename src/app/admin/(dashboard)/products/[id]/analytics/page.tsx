@@ -79,7 +79,7 @@ export default async function AdminProductAnalyticsPage({ params, searchParams }
           label="Link hops"
           value={analytics.linkHops.toLocaleString()}
           icon={Route}
-          hint="Total social hops (IG + FB + YT + TikTok)"
+          hint="Default + Instagram + Facebook + YouTube + TikTok"
         />
         <StatCard label="Unique visitors" value={analytics.uniqueVisitors.toLocaleString()} icon={Users} />
         <StatCard
@@ -113,8 +113,9 @@ export default async function AdminProductAnalyticsPage({ params, searchParams }
         <CardHeader>
           <CardTitle className="text-sm">Link hops by platform</CardTitle>
           <p className="text-xs text-muted-foreground">
-            Amazon (and other) social hop links tagged with Instagram, Facebook, YouTube, or TikTok.
-            Total link hops: {analytics.linkHops.toLocaleString()}.
+            Default is any /go hop without a social platform tag. Platform rows are Amazon (and
+            other) hops tagged for Instagram, Facebook, YouTube, or TikTok. Total link hops:{" "}
+            {analytics.linkHops.toLocaleString()}.
           </p>
         </CardHeader>
         <CardContent className="px-0">

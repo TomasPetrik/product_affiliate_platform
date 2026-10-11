@@ -325,14 +325,18 @@ async function main() {
       const marketplaceId = marketplaceByCode.get(marketplaceCode);
       if (!marketplaceId) continue;
 
-      await prisma.affiliateLink.upsert({
+      const existingOffer = await prisma.affiliateLink.findFirst({
         where: {
-          marketplaceId_externalProductId: {
-            marketplaceId,
-            externalProductId: seed.slug,
-          },
+          marketplaceId,
+          externalProductId: seed.slug,
+          socialPlatform: null,
         },
-        create: {
+      });
+      if (existingOffer) {
+        continue;
+      }
+      await prisma.affiliateLink.create({
+        data: {
           productId: product.id,
           marketplaceId,
           externalProductId: seed.slug,
@@ -345,7 +349,6 @@ async function main() {
           lastKnownPriceCurrency: seed.currency,
           lastKnownAvailability: "IN_STOCK",
         },
-        update: {},
       });
     }
   }

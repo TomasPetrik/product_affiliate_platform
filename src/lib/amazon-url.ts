@@ -94,7 +94,7 @@ export function applyAmazonTrackingTag(input: {
  * Resolves a tracked Amazon affiliate URL from whatever the admin pasted
  * (affiliate URL, raw product URL, or bare ASIN).
  *
- * - `tag` comes from AMAZON_ASSOCIATES_TAG (account-level; same for every link)
+ * - `tag` comes from the platform Associates store ID (or AMAZON_ASSOCIATES_TAG fallback)
  * - `trackingTag` / `ascsubtag` is unique per product for attribution
  */
 export function generateAmazonTrackedAffiliate(input: {

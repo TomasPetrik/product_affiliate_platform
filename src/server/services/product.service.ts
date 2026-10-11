@@ -1,6 +1,7 @@
 import type { Prisma } from "@/generated/prisma/client";
-import type { MarketplaceCode, ProductStatus } from "@/generated/prisma/enums";
+import type { MarketplaceCode, ProductStatus, SocialPlatform } from "@/generated/prisma/enums";
 import { affiliateGoHref } from "@/lib/affiliate-go";
+import { AMAZON_HOP_PLATFORMS } from "@/lib/amazon-platform-tags";
 import { categoryCoverImage } from "@/lib/category-images";
 import { computeDiscountPercentage } from "@/lib/format";
 import { pickLowestPricedOffer } from "@/lib/lowest-offer-price";
@@ -66,7 +67,9 @@ function toAdminRow(
     currency: product.currency,
     displayPrice: product.displayPrice ? Number(product.displayPrice) : null,
     categoryName: product.category?.name ?? null,
-    marketplaceLabels: product.affiliateLinks.map((link) => link.marketplace.name),
+    marketplaceLabels: [
+      ...new Set(product.affiliateLinks.map((link) => link.marketplace.name)),
+    ],
     imageUrl: product.images[0]?.url ?? product.ogImageUrl ?? null,
     updatedAt: product.updatedAt.toISOString(),
   };
@@ -218,6 +221,7 @@ export interface AffiliateLinkInput {
   rawProductUrl: string;
   externalProductId: string;
   trackingTag: string | null;
+  socialPlatform?: SocialPlatform | null;
   lastKnownPrice: number | null;
   lastKnownOriginalPrice: number | null;
   lastKnownPriceCurrency: string | null;
@@ -268,19 +272,51 @@ export async function saveProduct(
         });
 
     if (links) {
-      for (const link of links) {
+      const amazonLinks = links.filter(
+        (link) => link.marketplaceCode === "AMAZON" && link.affiliateUrl.trim().length > 0,
+      );
+      const nonAmazonLinks = links.filter((link) => link.marketplaceCode !== "AMAZON");
+
+      if (amazonLinks.length > 0) {
+        // Replace legacy unscoped Amazon rows when saving the 4 platform hops.
+        await tx.affiliateLink.deleteMany({
+          where: {
+            productId: product.id,
+            marketplaceId: amazonLinks[0]!.marketplaceId,
+            socialPlatform: null,
+          },
+        });
+
+        const keptPlatforms = new Set(
+          amazonLinks
+            .map((link) => link.socialPlatform)
+            .filter((platform): platform is SocialPlatform => platform != null),
+        );
+        if (keptPlatforms.size > 0) {
+          await tx.affiliateLink.deleteMany({
+            where: {
+              productId: product.id,
+              marketplaceId: amazonLinks[0]!.marketplaceId,
+              socialPlatform: { notIn: [...keptPlatforms] },
+            },
+          });
+        }
+      }
+
+      for (const link of [...nonAmazonLinks, ...amazonLinks]) {
         const hasUrl = link.affiliateUrl.trim().length > 0;
         if (!hasUrl) {
           continue;
         }
 
         const externalProductId = link.externalProductId.trim() || product.slug;
-        const existingLink = await tx.affiliateLink.findUnique({
+        const socialPlatform = link.socialPlatform ?? null;
+
+        const existingLink = await tx.affiliateLink.findFirst({
           where: {
-            marketplaceId_externalProductId: {
-              marketplaceId: link.marketplaceId,
-              externalProductId,
-            },
+            marketplaceId: link.marketplaceId,
+            externalProductId,
+            socialPlatform,
           },
         });
 
@@ -289,6 +325,7 @@ export async function saveProduct(
           rawProductUrl: link.rawProductUrl.trim() || link.affiliateUrl.trim(),
           externalProductId,
           trackingTag: link.trackingTag?.trim() || null,
+          socialPlatform,
           lastKnownPrice: link.lastKnownPrice,
           lastKnownOriginalPrice: link.lastKnownOriginalPrice,
           lastKnownPriceCurrency: link.lastKnownPriceCurrency,
@@ -304,9 +341,32 @@ export async function saveProduct(
             );
           }
           await tx.affiliateLink.update({ where: { id: existingLink.id }, data });
-        } else {
-          // Product form has one slot per marketplace. Prefer updating that offer
-          // (including ASIN changes) over creating a second Amazon/eBay row.
+          continue;
+        }
+
+        if (link.marketplaceCode === "AMAZON" && socialPlatform) {
+          const samePlatform = await tx.affiliateLink.findFirst({
+            where: {
+              productId: product.id,
+              marketplaceId: link.marketplaceId,
+              socialPlatform,
+            },
+          });
+          if (samePlatform) {
+            try {
+              await tx.affiliateLink.update({ where: { id: samePlatform.id }, data });
+            } catch (error) {
+              if (isUniqueConstraintError(error)) {
+                throw new Error(
+                  `${link.marketplaceCode} listing “${externalProductId}” is already linked to another product. Use a different ASIN/item ID, or remove it from the other product first.`,
+                );
+              }
+              throw error;
+            }
+            continue;
+          }
+        } else if (link.marketplaceCode !== "AMAZON") {
+          // One slot per non-Amazon marketplace on the product form.
           const firstForMarketplace = await tx.affiliateLink.findFirst({
             where: { productId: product.id, marketplaceId: link.marketplaceId },
             orderBy: { createdAt: "asc" },
@@ -322,23 +382,59 @@ export async function saveProduct(
               }
               throw error;
             }
-          } else {
-            try {
-              await tx.affiliateLink.create({
-                data: {
-                  productId: product.id,
-                  marketplaceId: link.marketplaceId,
-                  ...data,
-                },
-              });
-            } catch (error) {
-              if (isUniqueConstraintError(error)) {
-                throw new Error(
-                  `${link.marketplaceCode} listing “${externalProductId}” is already linked to another product. Use a different ASIN/item ID, or remove it from the other product first.`,
-                );
-              }
-              throw error;
-            }
+            continue;
+          }
+        }
+
+        try {
+          await tx.affiliateLink.create({
+            data: {
+              productId: product.id,
+              marketplaceId: link.marketplaceId,
+              ...data,
+            },
+          });
+        } catch (error) {
+          if (isUniqueConstraintError(error)) {
+            throw new Error(
+              `${link.marketplaceCode} listing “${externalProductId}” is already linked to another product. Use a different ASIN/item ID, or remove it from the other product first.`,
+            );
+          }
+          throw error;
+        }
+      }
+
+      // Ensure only one Amazon row is primary when multiple platform hops exist.
+      if (amazonLinks.length > 0) {
+        const amazonMarketplaceId = amazonLinks[0]!.marketplaceId;
+        const primaryAmazon = await tx.affiliateLink.findFirst({
+          where: {
+            productId: product.id,
+            marketplaceId: amazonMarketplaceId,
+            isPrimary: true,
+          },
+          select: { id: true },
+        });
+        if (!primaryAmazon) {
+          const preferred =
+            (await tx.affiliateLink.findFirst({
+              where: {
+                productId: product.id,
+                marketplaceId: amazonMarketplaceId,
+                socialPlatform: AMAZON_HOP_PLATFORMS[0],
+              },
+              select: { id: true },
+            })) ??
+            (await tx.affiliateLink.findFirst({
+              where: { productId: product.id, marketplaceId: amazonMarketplaceId },
+              orderBy: { createdAt: "asc" },
+              select: { id: true },
+            }));
+          if (preferred) {
+            await tx.affiliateLink.update({
+              where: { id: preferred.id },
+              data: { isPrimary: true },
+            });
           }
         }
       }
@@ -540,16 +636,23 @@ export async function getProductPreviewById(id: string): Promise<ProductDetail |
     imageUrl: categoryCoverImage(product.category.slug, product.category.imageUrl),
   };
 
+  const seenMarketplaces = new Set<string>();
   const marketplaces: MarketplaceLink[] = product.affiliateLinks
-    .map((link) => ({
-      id: link.id,
-      marketplace: link.marketplace.code,
-      label: link.marketplace.name,
-      href: affiliateGoHref(product.slug, link.marketplace.code, link.id),
-      price: link.lastKnownPrice ? Number(link.lastKnownPrice) : null,
-      currency: link.lastKnownPriceCurrency ?? product.currency,
-      availability: link.lastKnownAvailability,
-    }))
+    .flatMap((link) => {
+      if (seenMarketplaces.has(link.marketplace.code)) return [];
+      seenMarketplaces.add(link.marketplace.code);
+      return [
+        {
+          id: link.id,
+          marketplace: link.marketplace.code,
+          label: link.marketplace.name,
+          href: affiliateGoHref(product.slug, link.marketplace.code),
+          price: link.lastKnownPrice ? Number(link.lastKnownPrice) : null,
+          currency: link.lastKnownPriceCurrency ?? product.currency,
+          availability: link.lastKnownAvailability,
+        },
+      ];
+    })
     .sort((a, b) => {
       if (a.price == null && b.price == null) return 0;
       if (a.price == null) return 1;

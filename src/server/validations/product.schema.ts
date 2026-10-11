@@ -62,6 +62,8 @@ const optionalMoney = z.preprocess((value) => {
   return value;
 }, z.coerce.number().min(0).max(999999).nullable());
 
+export const socialPlatformSchema = z.enum(["INSTAGRAM", "FACEBOOK", "YOUTUBE", "TIKTOK"]);
+
 export const affiliateLinkSchema = z
   .object({
     marketplaceId: z.string().min(1),
@@ -74,6 +76,7 @@ export const affiliateLinkSchema = z
       .optional()
       .or(z.literal("")),
     trackingTag: z.string().trim().max(256, "Tracking tag must be at most 256 characters").optional().or(z.literal("")),
+    socialPlatform: socialPlatformSchema.optional().nullable(),
     lastKnownPrice: optionalMoney,
     lastKnownOriginalPrice: optionalMoney,
     lastKnownPriceCurrency: z

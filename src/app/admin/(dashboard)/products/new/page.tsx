@@ -28,6 +28,12 @@ export default async function NewProductPage() {
         categories={categories}
         marketplaces={marketplaces}
         amazonAssociatesTag={env.AMAZON_ASSOCIATES_TAG ?? null}
+        amazonAssociatesTags={{
+          INSTAGRAM: env.AMAZON_ASSOCIATES_TAG_INSTAGRAM ?? null,
+          FACEBOOK: env.AMAZON_ASSOCIATES_TAG_FACEBOOK ?? null,
+          YOUTUBE: env.AMAZON_ASSOCIATES_TAG_YOUTUBE ?? null,
+          TIKTOK: env.AMAZON_ASSOCIATES_TAG_TIKTOK ?? null,
+        }}
       />
     </div>
   );

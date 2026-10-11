@@ -7,6 +7,8 @@ import {
 } from "@/components/admin/marketing-videos-panel";
 import { ProductForm, type ProductFormValues } from "@/components/admin/product-form";
 import { ReplaceHeroImagePanel } from "@/components/admin/replace-hero-image-panel";
+import type { AmazonAssociatesTagsByPlatform } from "@/lib/amazon-platform-tags";
+import type { SocialPlatform } from "@/generated/prisma/enums";
 
 interface EditProductPanelsProps {
   productId: string;
@@ -16,6 +18,7 @@ interface EditProductPanelsProps {
   currentHeroUrl: string | null;
   highlightHero?: boolean;
   marketingVideos: MarketingVideoView[];
+  platformHopUrls: Partial<Record<SocialPlatform, string>>;
   defaultReplyUrl: string;
   autoReplyRules: Array<{
     id: string;
@@ -33,6 +36,7 @@ interface EditProductPanelsProps {
   categories: Array<{ id: string; name: string; parent: { name: string } | null }>;
   marketplaces: Array<{ id: string; code: string; name: string }>;
   amazonAssociatesTag: string | null;
+  amazonAssociatesTags: AmazonAssociatesTagsByPlatform;
   defaultValues: ProductFormValues;
 }
 
@@ -44,11 +48,13 @@ export function EditProductPanels({
   currentHeroUrl,
   highlightHero = false,
   marketingVideos,
+  platformHopUrls,
   defaultReplyUrl,
   autoReplyRules,
   categories,
   marketplaces,
   amazonAssociatesTag,
+  amazonAssociatesTags,
   defaultValues,
 }: EditProductPanelsProps) {
   return (
@@ -56,6 +62,7 @@ export function EditProductPanels({
       categories={categories}
       marketplaces={marketplaces}
       amazonAssociatesTag={amazonAssociatesTag}
+      amazonAssociatesTags={amazonAssociatesTags}
       defaultValues={defaultValues}
     >
       {({ basics, fields }) => (
@@ -76,6 +83,7 @@ export function EditProductPanels({
               className="min-w-0"
               productId={productId}
               videos={marketingVideos}
+              platformHopUrls={platformHopUrls}
             />
           </div>
           <CommentAutoReplyPanel

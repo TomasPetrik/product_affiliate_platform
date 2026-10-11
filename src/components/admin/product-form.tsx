@@ -30,7 +30,14 @@ import { ProductImagesField, type ProductImageFieldValue } from "@/components/ad
 import { saveProductAction, type ProductActionState } from "@/server/actions/product.actions";
 import { cn } from "@/lib/utils";
 
+import type { SocialPlatform } from "@/generated/prisma/enums";
+import {
+  AMAZON_HOP_PLATFORMS,
+  resolveAmazonAssociatesTagForPlatform,
+  type AmazonAssociatesTagsByPlatform,
+} from "@/lib/amazon-platform-tags";
 import { generateAmazonTrackedAffiliate } from "@/lib/amazon-url";
+import { SOCIAL_PLATFORM_LABELS } from "@/lib/social-external-id";
 import { slugify } from "@/lib/slug";
 
 export interface ProductFormLinkValues {
@@ -44,6 +51,8 @@ export interface ProductFormLinkValues {
   lastKnownAvailability: string;
   isActive: boolean;
 }
+
+export type ProductFormAmazonPlatformLinks = Record<SocialPlatform, string>;
 
 export interface ProductFormValues {
   id?: string;
@@ -69,7 +78,18 @@ export interface ProductFormValues {
   ogImageUrl: string;
   images: ProductImageFieldValue[];
   links: Record<string, ProductFormLinkValues>;
+  /** Amazon marketplace id → per-platform affiliate URLs. */
+  amazonPlatformLinks?: Record<string, ProductFormAmazonPlatformLinks>;
   primaryMarketplaceId: string;
+}
+
+function emptyAmazonPlatformLinks(): ProductFormAmazonPlatformLinks {
+  return {
+    INSTAGRAM: "",
+    FACEBOOK: "",
+    YOUTUBE: "",
+    TIKTOK: "",
+  };
 }
 
 const emptyLink: ProductFormLinkValues = {
@@ -105,6 +125,7 @@ export const emptyProductFormValues: ProductFormValues = {
   ogImageUrl: "",
   images: [],
   links: {},
+  amazonPlatformLinks: {},
   primaryMarketplaceId: "",
 };
 
@@ -115,7 +136,9 @@ interface ProductFormProps {
   defaultValues?: ProductFormValues;
   categories: Array<{ id: string; name: string; parent: { name: string } | null }>;
   marketplaces: Array<{ id: string; code: string; name: string }>;
-  /** Associates account tag from AMAZON_ASSOCIATES_TAG; enables Generate tracking ID. */
+  /** Per-platform Associates store tags; enables Generate platform links. */
+  amazonAssociatesTags?: AmazonAssociatesTagsByPlatform | null;
+  /** Legacy fallback when a platform-specific tag is missing. */
   amazonAssociatesTag?: string | null;
   /**
    * Custom layout. Use `basics` beside other panels and `fields` for the rest of the form.
@@ -127,16 +150,17 @@ interface ProductFormProps {
 const initialState: ProductActionState = {};
 
 type AmazonLinkDraft = {
-  affiliateUrl: string;
   rawProductUrl: string;
   externalProductId: string;
   trackingTag: string;
+  platforms: ProductFormAmazonPlatformLinks;
 };
 
 export function ProductForm({
   defaultValues = emptyProductFormValues,
   categories,
   marketplaces,
+  amazonAssociatesTags = null,
   amazonAssociatesTag = null,
   children,
 }: ProductFormProps) {
@@ -145,16 +169,25 @@ export function ProductForm({
   const [slugTouched, setSlugTouched] = useState(Boolean(defaultValues.id));
   const [status, setStatus] = useState(defaultValues.status);
   const [categoryId, setCategoryId] = useState(defaultValues.categoryId || categories[0]?.id || "");
+  const platformTags: AmazonAssociatesTagsByPlatform = amazonAssociatesTags ?? {
+    INSTAGRAM: null,
+    FACEBOOK: null,
+    YOUTUBE: null,
+    TIKTOK: null,
+  };
   const [amazonDrafts, setAmazonDrafts] = useState<Record<string, AmazonLinkDraft>>(() => {
     const drafts: Record<string, AmazonLinkDraft> = {};
     for (const marketplace of marketplaces) {
       if (marketplace.code !== "AMAZON") continue;
       const link = defaultValues.links[marketplace.id] ?? emptyLink;
       drafts[marketplace.id] = {
-        affiliateUrl: link.affiliateUrl,
         rawProductUrl: link.rawProductUrl,
         externalProductId: link.externalProductId,
         trackingTag: link.trackingTag,
+        platforms: {
+          ...emptyAmazonPlatformLinks(),
+          ...(defaultValues.amazonPlatformLinks?.[marketplace.id] ?? {}),
+        },
       };
     }
     return drafts;
@@ -178,45 +211,86 @@ export function ProductForm({
       ...prev,
       [marketplaceId]: {
         ...(prev[marketplaceId] ?? {
-          affiliateUrl: "",
           rawProductUrl: "",
           externalProductId: "",
           trackingTag: "",
+          platforms: emptyAmazonPlatformLinks(),
         }),
         ...patch,
       },
     }));
   }
 
+  function updateAmazonPlatformUrl(
+    marketplaceId: string,
+    platform: SocialPlatform,
+    affiliateUrl: string,
+  ) {
+    const draft = amazonDrafts[marketplaceId];
+    updateAmazonDraft(marketplaceId, {
+      platforms: {
+        ...(draft?.platforms ?? emptyAmazonPlatformLinks()),
+        [platform]: affiliateUrl,
+      },
+    });
+  }
+
   function applyAmazonTracking(marketplaceId: string) {
     setAmazonTagError(null);
-    if (!amazonAssociatesTag) {
-      setAmazonTagError("Set AMAZON_ASSOCIATES_TAG in .env, then restart the app.");
-      return;
-    }
     const draft = amazonDrafts[marketplaceId] ?? {
-      affiliateUrl: "",
       rawProductUrl: "",
       externalProductId: "",
       trackingTag: "",
+      platforms: emptyAmazonPlatformLinks(),
     };
+    const sourceUrl =
+      AMAZON_HOP_PLATFORMS.map((platform) => draft.platforms[platform]).find((url) => url.trim()) ??
+      draft.rawProductUrl;
+
+    const missing = AMAZON_HOP_PLATFORMS.filter(
+      (platform) => !resolveAmazonAssociatesTagForPlatform(platform, platformTags, amazonAssociatesTag),
+    );
+    if (missing.length > 0) {
+      setAmazonTagError(
+        `Set AMAZON_ASSOCIATES_TAG_${missing.join(" / AMAZON_ASSOCIATES_TAG_")} in .env (or AMAZON_ASSOCIATES_TAG fallback), then restart the app.`,
+      );
+      return;
+    }
+
     try {
-      const generated = generateAmazonTrackedAffiliate({
-        affiliateUrl: draft.affiliateUrl,
-        rawProductUrl: draft.rawProductUrl,
-        asin: draft.externalProductId,
-        partnerTag: amazonAssociatesTag,
-        productId: defaultValues.id,
-        customId: draft.trackingTag,
-      });
+      let trackingTag = draft.trackingTag;
+      const platforms = { ...draft.platforms };
+      let externalProductId = draft.externalProductId;
+      let rawProductUrl = draft.rawProductUrl;
+
+      for (const platform of AMAZON_HOP_PLATFORMS) {
+        const partnerTag = resolveAmazonAssociatesTagForPlatform(
+          platform,
+          platformTags,
+          amazonAssociatesTag,
+        )!;
+        const generated = generateAmazonTrackedAffiliate({
+          affiliateUrl: platforms[platform] || sourceUrl,
+          rawProductUrl: draft.rawProductUrl || sourceUrl,
+          asin: draft.externalProductId,
+          partnerTag,
+          productId: defaultValues.id,
+          customId: trackingTag,
+        });
+        platforms[platform] = generated.affiliateUrl;
+        trackingTag = generated.trackingTag;
+        externalProductId = generated.asin ?? externalProductId;
+        rawProductUrl = rawProductUrl || generated.affiliateUrl.split("?")[0] || rawProductUrl;
+      }
+
       updateAmazonDraft(marketplaceId, {
-        affiliateUrl: generated.affiliateUrl,
-        trackingTag: generated.trackingTag,
-        externalProductId: generated.asin ?? draft.externalProductId,
-        rawProductUrl: draft.rawProductUrl || generated.affiliateUrl.split("?")[0] || draft.rawProductUrl,
+        platforms,
+        trackingTag,
+        externalProductId,
+        rawProductUrl,
       });
     } catch (error) {
-      setAmazonTagError(error instanceof Error ? error.message : "Could not apply tracking tag.");
+      setAmazonTagError(error instanceof Error ? error.message : "Could not apply tracking tags.");
     }
   }
 
@@ -455,9 +529,9 @@ export function ProductForm({
         </CardHeader>
         <CardContent className="flex flex-col gap-6">
           <p className="text-xs text-muted-foreground">
-            Use this for Amazon (and other retailers without import yet). Set a per-retailer price so “Where to buy”
-            can show Amazon separately from the product/eBay price. Prefer Import / Add eBay offer for eBay so seller
-            and tracking stay in sync.
+            Amazon needs four hop affiliate URLs (Instagram, Facebook, YouTube, TikTok) — one Associates
+            tracking ID per platform. Prefer Import / Add eBay offer for eBay so seller and tracking stay in
+            sync.
           </p>
           {amazonTagError ? (
             <Alert variant="destructive">
@@ -500,101 +574,148 @@ export function ProductForm({
                   </div>
                 </div>
 
-                <div className="flex flex-col gap-1.5">
-                  <Label htmlFor={`link_${marketplace.id}_affiliateUrl`} className="text-xs">
-                    Affiliate URL
-                    {isAmazon ? " (account tag + product id applied)" : " (leave blank to skip)"}
-                  </Label>
-                  <Input
-                    id={`link_${marketplace.id}_affiliateUrl`}
-                    name={`link_${marketplace.id}_affiliateUrl`}
-                    placeholder={
-                      isAmazon
-                        ? "https://www.amazon.com/dp/B0… or paste then Apply tracking tag"
-                        : `https://www.${marketplace.code.toLowerCase()}.com/...`
-                    }
-                    {...(isAmazon && amazonDraft
-                      ? {
-                          value: amazonDraft.affiliateUrl,
-                          onChange: (event: ChangeEvent<HTMLInputElement>) =>
-                            updateAmazonDraft(marketplace.id, { affiliateUrl: event.target.value }),
-                        }
-                      : { defaultValue: link.affiliateUrl })}
-                  />
-                </div>
+                {isAmazon && amazonDraft ? (
+                  <>
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      <div className="flex flex-col gap-1.5">
+                        <Label htmlFor={`link_${marketplace.id}_rawProductUrl`} className="text-xs">
+                          Raw product URL
+                        </Label>
+                        <Input
+                          id={`link_${marketplace.id}_rawProductUrl`}
+                          name={`link_${marketplace.id}_rawProductUrl`}
+                          value={amazonDraft.rawProductUrl}
+                          onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                            updateAmazonDraft(marketplace.id, { rawProductUrl: event.target.value })
+                          }
+                          placeholder="https://www.amazon.com/dp/B0…"
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        <Label htmlFor={`link_${marketplace.id}_externalProductId`} className="text-xs">
+                          ASIN (auto from URL if blank)
+                        </Label>
+                        <Input
+                          id={`link_${marketplace.id}_externalProductId`}
+                          name={`link_${marketplace.id}_externalProductId`}
+                          placeholder="B0XXXXXXXX"
+                          value={amazonDraft.externalProductId}
+                          onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                            updateAmazonDraft(marketplace.id, {
+                              externalProductId: event.target.value,
+                            })
+                          }
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        <Label htmlFor={`link_${marketplace.id}_trackingTag`} className="text-xs">
+                          Product tracking ID (ascsubtag)
+                        </Label>
+                        <Input
+                          id={`link_${marketplace.id}_trackingTag`}
+                          name={`link_${marketplace.id}_trackingTag`}
+                          placeholder="radarcut-product-… (unique per product)"
+                          value={amazonDraft.trackingTag}
+                          onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                            updateAmazonDraft(marketplace.id, { trackingTag: event.target.value })
+                          }
+                        />
+                      </div>
+                    </div>
 
-                <div className="grid gap-3 sm:grid-cols-3">
-                  <div className="flex flex-col gap-1.5">
-                    <Label htmlFor={`link_${marketplace.id}_rawProductUrl`} className="text-xs">
-                      Raw product URL
-                    </Label>
-                    <Input
-                      id={`link_${marketplace.id}_rawProductUrl`}
-                      name={`link_${marketplace.id}_rawProductUrl`}
-                      {...(isAmazon && amazonDraft
-                        ? {
-                            value: amazonDraft.rawProductUrl,
-                            onChange: (event: ChangeEvent<HTMLInputElement>) =>
-                              updateAmazonDraft(marketplace.id, { rawProductUrl: event.target.value }),
-                          }
-                        : { defaultValue: link.rawProductUrl })}
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1.5">
-                    <Label htmlFor={`link_${marketplace.id}_externalProductId`} className="text-xs">
-                      {isAmazon ? "ASIN (auto from URL if blank)" : "External product ID"}
-                    </Label>
-                    <Input
-                      id={`link_${marketplace.id}_externalProductId`}
-                      name={`link_${marketplace.id}_externalProductId`}
-                      placeholder={isAmazon ? "B0XXXXXXXX" : undefined}
-                      {...(isAmazon && amazonDraft
-                        ? {
-                            value: amazonDraft.externalProductId,
-                            onChange: (event: ChangeEvent<HTMLInputElement>) =>
-                              updateAmazonDraft(marketplace.id, { externalProductId: event.target.value }),
-                          }
-                        : { defaultValue: link.externalProductId })}
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1.5">
-                    <Label htmlFor={`link_${marketplace.id}_trackingTag`} className="text-xs">
-                      {isAmazon ? "Product tracking ID (ascsubtag)" : "Tracking tag"}
-                    </Label>
-                    <Input
-                      id={`link_${marketplace.id}_trackingTag`}
-                      name={`link_${marketplace.id}_trackingTag`}
-                      placeholder={
-                        isAmazon ? "radarcut-product-… (unique per product)" : undefined
-                      }
-                      {...(isAmazon && amazonDraft
-                        ? {
-                            value: amazonDraft.trackingTag,
-                            onChange: (event: ChangeEvent<HTMLInputElement>) =>
-                              updateAmazonDraft(marketplace.id, { trackingTag: event.target.value }),
-                          }
-                        : { defaultValue: link.trackingTag })}
-                    />
-                  </div>
-                </div>
+                    <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between">
+                      <p className="text-xs text-muted-foreground">
+                        Each platform URL uses its Associates store tag (e.g. radarcut-ig-20); the product
+                        tracking ID is shared for reports.
+                      </p>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => applyAmazonTracking(marketplace.id)}
+                      >
+                        Generate platform links
+                      </Button>
+                    </div>
 
-                {isAmazon ? (
-                  <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between">
-                    <p className="text-xs text-muted-foreground">
-                      {amazonAssociatesTag
-                        ? `Account tag “${amazonAssociatesTag}” is added to the URL; this field is a unique product id for reports.`
-                        : "Configure AMAZON_ASSOCIATES_TAG in .env to enable one-click tagging."}
-                    </p>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => applyAmazonTracking(marketplace.id)}
-                    >
-                      Generate tracking ID
-                    </Button>
-                  </div>
-                ) : null}
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {AMAZON_HOP_PLATFORMS.map((platform) => {
+                        const tag = resolveAmazonAssociatesTagForPlatform(
+                          platform,
+                          platformTags,
+                          amazonAssociatesTag,
+                        );
+                        return (
+                          <div key={platform} className="flex flex-col gap-1.5">
+                            <Label
+                              htmlFor={`link_${marketplace.id}_${platform}_affiliateUrl`}
+                              className="text-xs"
+                            >
+                              {SOCIAL_PLATFORM_LABELS[platform]} hop URL
+                              {tag ? ` (tag=${tag})` : ""}
+                            </Label>
+                            <Input
+                              id={`link_${marketplace.id}_${platform}_affiliateUrl`}
+                              name={`link_${marketplace.id}_${platform}_affiliateUrl`}
+                              value={amazonDraft.platforms[platform]}
+                              onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                                updateAmazonPlatformUrl(marketplace.id, platform, event.target.value)
+                              }
+                              placeholder="https://www.amazon.com/dp/B0…?tag=…"
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex flex-col gap-1.5">
+                      <Label htmlFor={`link_${marketplace.id}_affiliateUrl`} className="text-xs">
+                        Affiliate URL (leave blank to skip)
+                      </Label>
+                      <Input
+                        id={`link_${marketplace.id}_affiliateUrl`}
+                        name={`link_${marketplace.id}_affiliateUrl`}
+                        placeholder={`https://www.${marketplace.code.toLowerCase()}.com/...`}
+                        defaultValue={link.affiliateUrl}
+                      />
+                    </div>
+
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      <div className="flex flex-col gap-1.5">
+                        <Label htmlFor={`link_${marketplace.id}_rawProductUrl`} className="text-xs">
+                          Raw product URL
+                        </Label>
+                        <Input
+                          id={`link_${marketplace.id}_rawProductUrl`}
+                          name={`link_${marketplace.id}_rawProductUrl`}
+                          defaultValue={link.rawProductUrl}
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        <Label htmlFor={`link_${marketplace.id}_externalProductId`} className="text-xs">
+                          External product ID
+                        </Label>
+                        <Input
+                          id={`link_${marketplace.id}_externalProductId`}
+                          name={`link_${marketplace.id}_externalProductId`}
+                          defaultValue={link.externalProductId}
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        <Label htmlFor={`link_${marketplace.id}_trackingTag`} className="text-xs">
+                          Tracking tag
+                        </Label>
+                        <Input
+                          id={`link_${marketplace.id}_trackingTag`}
+                          name={`link_${marketplace.id}_trackingTag`}
+                          defaultValue={link.trackingTag}
+                        />
+                      </div>
+                    </div>
+                  </>
+                )}
 
                 <div className="grid gap-3 sm:grid-cols-4">
                   <div className="flex flex-col gap-1.5">

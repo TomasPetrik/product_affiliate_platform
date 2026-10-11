@@ -102,8 +102,8 @@ export async function getRetailerOfferById(id: string) {
 }
 
 export async function findOfferByRetailerProductId(marketplaceId: string, externalProductId: string) {
-  return prisma.affiliateLink.findUnique({
-    where: { marketplaceId_externalProductId: { marketplaceId, externalProductId } },
+  return prisma.affiliateLink.findFirst({
+    where: { marketplaceId, externalProductId, socialPlatform: null },
     include: {
       marketplace: true,
       product: { select: { id: true, slug: true, title: true } },
@@ -149,12 +149,11 @@ export async function upsertEbayOffer(productId: string, listing: EbayListingWit
     throw new RetailerOfferError("The eBay marketplace record is missing. Re-run the database seed.");
   }
 
-  const existing = await prisma.affiliateLink.findUnique({
+  const existing = await prisma.affiliateLink.findFirst({
     where: {
-      marketplaceId_externalProductId: {
-        marketplaceId: marketplace.id,
-        externalProductId: listing.itemId,
-      },
+      marketplaceId: marketplace.id,
+      externalProductId: listing.itemId,
+      socialPlatform: null,
     },
   });
 

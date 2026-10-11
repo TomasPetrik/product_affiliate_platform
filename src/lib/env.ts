@@ -79,12 +79,19 @@ const envSchema = z.object({
   CRON_SECRET: z.string().min(16).optional(),
 
   /**
-   * Amazon Associates store ID / partner tag (e.g. radarcut-20). Added as `tag=` on
-   * every Amazon affiliate URL for commissions. Per-product attribution uses a
-   * unique `ascsubtag` stored on AffiliateLink.trackingTag. Optional so the public
-   * site boots without it; the admin “Generate tracking ID” CTA explains when missing.
+   * Legacy / fallback Amazon Associates store ID. Prefer the per-platform tags
+   * below for Instagram / Facebook / YouTube / TikTok hop links.
    */
   AMAZON_ASSOCIATES_TAG: z.string().min(1).optional(),
+
+  /** Associates store ID for Instagram hop links (`tag=`, e.g. radarcut-ig-20). */
+  AMAZON_ASSOCIATES_TAG_INSTAGRAM: z.string().min(1).optional(),
+  /** Associates store ID for Facebook hop links (`tag=`, e.g. radarcut-fb-20). */
+  AMAZON_ASSOCIATES_TAG_FACEBOOK: z.string().min(1).optional(),
+  /** Associates store ID for YouTube hop links (`tag=`, e.g. radarcut-yt-20). */
+  AMAZON_ASSOCIATES_TAG_YOUTUBE: z.string().min(1).optional(),
+  /** Associates store ID for TikTok hop links (`tag=`, e.g. radarcut-tt-20). */
+  AMAZON_ASSOCIATES_TAG_TIKTOK: z.string().min(1).optional(),
 
   /**
    * Days to keep raw analytics_events / product_views. Aggregated daily metrics
@@ -217,6 +224,10 @@ function loadEnv(): Env {
     EBAY_NOTIFICATION_ENDPOINT: blankToUndefined(process.env.EBAY_NOTIFICATION_ENDPOINT),
     CRON_SECRET: blankToUndefined(process.env.CRON_SECRET),
     AMAZON_ASSOCIATES_TAG: blankToUndefined(process.env.AMAZON_ASSOCIATES_TAG),
+    AMAZON_ASSOCIATES_TAG_INSTAGRAM: blankToUndefined(process.env.AMAZON_ASSOCIATES_TAG_INSTAGRAM),
+    AMAZON_ASSOCIATES_TAG_FACEBOOK: blankToUndefined(process.env.AMAZON_ASSOCIATES_TAG_FACEBOOK),
+    AMAZON_ASSOCIATES_TAG_YOUTUBE: blankToUndefined(process.env.AMAZON_ASSOCIATES_TAG_YOUTUBE),
+    AMAZON_ASSOCIATES_TAG_TIKTOK: blankToUndefined(process.env.AMAZON_ASSOCIATES_TAG_TIKTOK),
     ANALYTICS_RETENTION_DAYS: blankToUndefined(process.env.ANALYTICS_RETENTION_DAYS),
     ANALYTICS_EXCLUDE_IPS: blankToUndefined(process.env.ANALYTICS_EXCLUDE_IPS),
     ANALYTICS_EXCLUDE_COUNTRIES: blankToUndefined(process.env.ANALYTICS_EXCLUDE_COUNTRIES),

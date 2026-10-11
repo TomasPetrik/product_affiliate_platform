@@ -4,10 +4,15 @@ import { notFound } from "next/navigation";
 import { AdminFlash } from "@/components/admin/admin-flash";
 import { EditProductPanels } from "@/components/admin/edit-product-panels";
 import { RetailerOffersPanel } from "@/components/admin/retailer-offers-panel";
-import { type ProductFormLinkValues } from "@/components/admin/product-form";
+import {
+  type ProductFormAmazonPlatformLinks,
+  type ProductFormLinkValues,
+} from "@/components/admin/product-form";
 import { adminNoticeMessage } from "@/lib/admin-notice";
 import { affiliateGoHref, pickAffiliateHopMarketplaceCode } from "@/lib/affiliate-go";
+import { AMAZON_HOP_PLATFORMS } from "@/lib/amazon-platform-tags";
 import { env } from "@/lib/env";
+import type { SocialPlatform } from "@/generated/prisma/enums";
 import { listCommentAutoReplyRulesForProduct } from "@/server/services/comment-auto-reply.service";
 import { listMarketingVideosForProduct } from "@/server/services/marketing-video.service";
 import {
@@ -46,20 +51,43 @@ export default async function EditProductPage({ params, searchParams }: EditProd
   }
 
   const links: Record<string, ProductFormLinkValues> = {};
+  const amazonPlatformLinks: Record<string, ProductFormAmazonPlatformLinks> = {};
   let primaryMarketplaceId = "";
   for (const link of product.affiliateLinks) {
-    links[link.marketplaceId] = {
-      affiliateUrl: link.affiliateUrl,
-      rawProductUrl: link.rawProductUrl,
-      externalProductId: link.externalProductId,
-      trackingTag: link.trackingTag ?? "",
-      lastKnownPrice: link.lastKnownPrice != null ? String(link.lastKnownPrice) : "",
-      lastKnownOriginalPrice:
-        link.lastKnownOriginalPrice != null ? String(link.lastKnownOriginalPrice) : "",
-      lastKnownPriceCurrency: link.lastKnownPriceCurrency ?? "",
-      lastKnownAvailability: link.lastKnownAvailability ?? "",
-      isActive: link.isActive,
-    };
+    const existing = links[link.marketplaceId];
+    if (!existing || link.isPrimary || link.marketplace.code !== "AMAZON") {
+      links[link.marketplaceId] = {
+        affiliateUrl: link.affiliateUrl,
+        rawProductUrl: link.rawProductUrl,
+        externalProductId: link.externalProductId,
+        trackingTag: link.trackingTag ?? "",
+        lastKnownPrice: link.lastKnownPrice != null ? String(link.lastKnownPrice) : "",
+        lastKnownOriginalPrice:
+          link.lastKnownOriginalPrice != null ? String(link.lastKnownOriginalPrice) : "",
+        lastKnownPriceCurrency: link.lastKnownPriceCurrency ?? "",
+        lastKnownAvailability: link.lastKnownAvailability ?? "",
+        isActive: link.isActive,
+      };
+    }
+    if (link.marketplace.code === "AMAZON" && link.socialPlatform) {
+      if (!amazonPlatformLinks[link.marketplaceId]) {
+        amazonPlatformLinks[link.marketplaceId] = {
+          INSTAGRAM: "",
+          FACEBOOK: "",
+          YOUTUBE: "",
+          TIKTOK: "",
+        };
+      }
+      amazonPlatformLinks[link.marketplaceId]![link.socialPlatform as SocialPlatform] =
+        link.affiliateUrl;
+    } else if (link.marketplace.code === "AMAZON" && !link.socialPlatform) {
+      // Legacy single Amazon offer — prefill all platform slots so save creates the 4 hops.
+      if (!amazonPlatformLinks[link.marketplaceId]) {
+        amazonPlatformLinks[link.marketplaceId] = Object.fromEntries(
+          AMAZON_HOP_PLATFORMS.map((platform) => [platform, link.affiliateUrl]),
+        ) as ProductFormAmazonPlatformLinks;
+      }
+    }
     if (link.isPrimary) {
       primaryMarketplaceId = link.marketplaceId;
     }
@@ -83,6 +111,19 @@ export default async function EditProductPage({ params, searchParams }: EditProd
     siteSettings,
   );
   const defaultReplyUrl = `${siteBase}${affiliateGoHref(product.slug, hopMarketplaceCode)}`;
+
+  const platformHopUrls = Object.fromEntries(
+    AMAZON_HOP_PLATFORMS.map((platform) => {
+      const link = product.affiliateLinks.find(
+        (row) => row.marketplace.code === "AMAZON" && row.socialPlatform === platform && row.isActive,
+      );
+      if (!link) return [platform, ""];
+      return [
+        platform,
+        `${siteBase}${affiliateGoHref(product.slug, "AMAZON", link.id, platform)}`,
+      ];
+    }),
+  ) as Partial<Record<SocialPlatform, string>>;
 
   const marketingVideosView = marketingVideos.map((video) => ({
     id: video.id,
@@ -133,11 +174,18 @@ export default async function EditProductPage({ params, searchParams }: EditProd
         currentHeroUrl={currentHeroUrl}
         highlightHero={noticeKey === "imported"}
         marketingVideos={marketingVideosView}
+        platformHopUrls={platformHopUrls}
         defaultReplyUrl={defaultReplyUrl}
         autoReplyRules={autoReplyRulesView}
         categories={categories}
         marketplaces={marketplaces}
         amazonAssociatesTag={env.AMAZON_ASSOCIATES_TAG ?? null}
+        amazonAssociatesTags={{
+          INSTAGRAM: env.AMAZON_ASSOCIATES_TAG_INSTAGRAM ?? null,
+          FACEBOOK: env.AMAZON_ASSOCIATES_TAG_FACEBOOK ?? null,
+          YOUTUBE: env.AMAZON_ASSOCIATES_TAG_YOUTUBE ?? null,
+          TIKTOK: env.AMAZON_ASSOCIATES_TAG_TIKTOK ?? null,
+        }}
         defaultValues={{
           id: product.id,
           publicId: product.publicId,
@@ -165,6 +213,7 @@ export default async function EditProductPage({ params, searchParams }: EditProd
             isPrimary: image.isPrimary,
           })),
           links,
+          amazonPlatformLinks,
           primaryMarketplaceId,
         }}
       />

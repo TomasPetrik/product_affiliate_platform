@@ -3,8 +3,13 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
-import type { ProductStatus } from "@/generated/prisma/enums";
+import type { ProductStatus, SocialPlatform } from "@/generated/prisma/enums";
 import { isApprovedImageUrl } from "@/lib/approved-image-url";
+import {
+  AMAZON_HOP_PLATFORMS,
+  resolveAmazonAssociatesTagForPlatform,
+  type AmazonAssociatesTagsByPlatform,
+} from "@/lib/amazon-platform-tags";
 import {
   extractAmazonAscSubtag,
   extractAmazonAsin,
@@ -14,6 +19,7 @@ import {
 import { safeAdminProductsReturnTo, withAdminNotice } from "@/lib/admin-notice";
 import { requireAdminSession } from "@/lib/auth";
 import { env } from "@/lib/env";
+import { SOCIAL_PLATFORM_LABELS } from "@/lib/social-external-id";
 import { writeAuditLog } from "@/server/services/audit.service";
 import { listUploadedImageFiles, storeUploadedProductImage } from "@/server/services/product-image.service";
 import {
@@ -83,60 +89,167 @@ export async function saveProductAction(
   const marketplaces = await listMarketplaces();
   const primaryMarketplaceId = String(formData.get("primaryMarketplaceId") ?? "");
   const links = [];
+  const amazonTags: AmazonAssociatesTagsByPlatform = {
+    INSTAGRAM: env.AMAZON_ASSOCIATES_TAG_INSTAGRAM ?? null,
+    FACEBOOK: env.AMAZON_ASSOCIATES_TAG_FACEBOOK ?? null,
+    YOUTUBE: env.AMAZON_ASSOCIATES_TAG_YOUTUBE ?? null,
+    TIKTOK: env.AMAZON_ASSOCIATES_TAG_TIKTOK ?? null,
+  };
+  const amazonFallbackTag = env.AMAZON_ASSOCIATES_TAG?.trim() ?? "";
 
   for (const marketplace of marketplaces) {
-    let affiliateUrl = String(formData.get(`link_${marketplace.id}_affiliateUrl`) ?? "");
     const rawProductUrl = String(formData.get(`link_${marketplace.id}_rawProductUrl`) ?? "");
     let externalProductId = String(formData.get(`link_${marketplace.id}_externalProductId`) ?? "");
     let trackingTag = String(formData.get(`link_${marketplace.id}_trackingTag`) ?? "");
+    const lastKnownPrice = formData.get(`link_${marketplace.id}_lastKnownPrice`) ?? "";
+    const lastKnownOriginalPrice = formData.get(`link_${marketplace.id}_lastKnownOriginalPrice`) ?? "";
+    const lastKnownPriceCurrency = String(
+      formData.get(`link_${marketplace.id}_lastKnownPriceCurrency`) ?? "",
+    );
+    const lastKnownAvailability = String(
+      formData.get(`link_${marketplace.id}_lastKnownAvailability`) ?? "",
+    );
+    const isActive = formData.get(`link_${marketplace.id}_isActive`) === "on";
 
     if (marketplace.code === "AMAZON") {
-      if (!externalProductId.trim()) {
-        const asin =
-          extractAmazonAsin(affiliateUrl) ?? extractAmazonAsin(rawProductUrl) ?? null;
-        if (asin) {
-          externalProductId = asin;
-        }
-      }
+      const platformUrls = Object.fromEntries(
+        AMAZON_HOP_PLATFORMS.map((platform) => [
+          platform,
+          String(formData.get(`link_${marketplace.id}_${platform}_affiliateUrl`) ?? ""),
+        ]),
+      ) as Record<SocialPlatform, string>;
 
-      const partnerTag = env.AMAZON_ASSOCIATES_TAG?.trim() ?? "";
-      // trackingTag is the unique ascsubtag — never the account partner tag.
-      if (!trackingTag.trim() || (partnerTag && trackingTag.trim() === partnerTag)) {
-        trackingTag = extractAmazonAscSubtag(affiliateUrl) ?? "";
+      if (!externalProductId.trim()) {
+        const asinSource =
+          Object.values(platformUrls).find((url) => extractAmazonAsin(url)) ??
+          extractAmazonAsin(rawProductUrl);
+        if (asinSource) {
+          externalProductId = extractAmazonAsin(asinSource) ?? asinSource;
+        }
       }
 
       const hasAmazonInput = Boolean(
-        affiliateUrl.trim() || rawProductUrl.trim() || externalProductId.trim(),
+        rawProductUrl.trim() ||
+          externalProductId.trim() ||
+          AMAZON_HOP_PLATFORMS.some((platform) => platformUrls[platform].trim()),
       );
-      const needsTracking =
-        Boolean(partnerTag) &&
-        hasAmazonInput &&
-        (!extractAmazonPartnerTag(affiliateUrl) ||
-          !extractAmazonAscSubtag(affiliateUrl) ||
-          !trackingTag.trim());
 
-      if (needsTracking) {
-        try {
-          const generated = generateAmazonTrackedAffiliate({
-            affiliateUrl,
-            rawProductUrl,
-            asin: externalProductId,
-            partnerTag,
-            productId,
-            customId: trackingTag.trim() || undefined,
-          });
-          affiliateUrl = generated.affiliateUrl;
-          trackingTag = generated.trackingTag;
-          if (!externalProductId.trim() && generated.asin) {
-            externalProductId = generated.asin;
+      if (!hasAmazonInput) {
+        continue;
+      }
+
+      const filledCount = AMAZON_HOP_PLATFORMS.filter((platform) =>
+        platformUrls[platform].trim(),
+      ).length;
+      if (filledCount !== AMAZON_HOP_PLATFORMS.length) {
+        return {
+          error:
+            "Amazon requires affiliate URLs for all four hop platforms (Instagram, Facebook, YouTube, TikTok).",
+        };
+      }
+
+      // Shared ascsubtag — never a platform Associates store tag.
+      const partnerTags = AMAZON_HOP_PLATFORMS.map((platform) =>
+        resolveAmazonAssociatesTagForPlatform(platform, amazonTags, amazonFallbackTag),
+      ).filter(Boolean);
+      if (
+        !trackingTag.trim() ||
+        partnerTags.includes(trackingTag.trim()) ||
+        trackingTag.trim() === amazonFallbackTag
+      ) {
+        trackingTag =
+          extractAmazonAscSubtag(
+            AMAZON_HOP_PLATFORMS.map((platform) => platformUrls[platform]).find(Boolean) ?? "",
+          ) ?? "";
+      }
+
+      let amazonPrimaryAssigned = false;
+      for (const platform of AMAZON_HOP_PLATFORMS) {
+        let affiliateUrl = platformUrls[platform];
+        const partnerTag =
+          resolveAmazonAssociatesTagForPlatform(platform, amazonTags, amazonFallbackTag) ?? "";
+
+        if (
+          partnerTag &&
+          (!extractAmazonPartnerTag(affiliateUrl) ||
+            extractAmazonPartnerTag(affiliateUrl) !== partnerTag ||
+            !extractAmazonAscSubtag(affiliateUrl) ||
+            !trackingTag.trim())
+        ) {
+          try {
+            const generated = generateAmazonTrackedAffiliate({
+              affiliateUrl,
+              rawProductUrl,
+              asin: externalProductId,
+              partnerTag,
+              productId,
+              customId: trackingTag.trim() || undefined,
+            });
+            affiliateUrl = generated.affiliateUrl;
+            trackingTag = generated.trackingTag;
+            if (!externalProductId.trim() && generated.asin) {
+              externalProductId = generated.asin;
+            }
+          } catch (error) {
+            return {
+              error: `Amazon ${SOCIAL_PLATFORM_LABELS[platform]}: ${
+                error instanceof Error ? error.message : "Could not build the affiliate URL."
+              }`,
+            };
           }
-        } catch (error) {
+        }
+
+        const candidate = {
+          marketplaceId: marketplace.id,
+          affiliateUrl,
+          rawProductUrl,
+          externalProductId,
+          trackingTag,
+          socialPlatform: platform,
+          lastKnownPrice,
+          lastKnownOriginalPrice,
+          lastKnownPriceCurrency,
+          lastKnownAvailability,
+          isActive,
+        };
+
+        const linkParsed = affiliateLinkSchema.safeParse(candidate);
+        if (!linkParsed.success) {
           return {
-            error: `Amazon: ${error instanceof Error ? error.message : "Could not build the affiliate URL."}`,
+            error: `Amazon ${SOCIAL_PLATFORM_LABELS[platform]}: ${
+              linkParsed.error.issues[0]?.message ?? "Invalid affiliate link."
+            }`,
           };
         }
+
+        const currency =
+          linkParsed.data.lastKnownPriceCurrency?.trim() ||
+          (linkParsed.data.lastKnownPrice != null ? parsed.data.currency : null);
+
+        const isPrimaryMarketplace = marketplace.id === primaryMarketplaceId;
+        const isPrimary = isPrimaryMarketplace && !amazonPrimaryAssigned;
+        if (isPrimary) amazonPrimaryAssigned = true;
+
+        links.push({
+          marketplaceId: marketplace.id,
+          marketplaceCode: marketplace.code,
+          affiliateUrl: linkParsed.data.affiliateUrl ?? "",
+          rawProductUrl: linkParsed.data.rawProductUrl ?? "",
+          externalProductId: linkParsed.data.externalProductId ?? "",
+          trackingTag: linkParsed.data.trackingTag || null,
+          socialPlatform: platform,
+          lastKnownPrice: linkParsed.data.lastKnownPrice ?? null,
+          lastKnownOriginalPrice: linkParsed.data.lastKnownOriginalPrice ?? null,
+          lastKnownPriceCurrency: currency,
+          lastKnownAvailability: linkParsed.data.lastKnownAvailability || null,
+          isActive: linkParsed.data.isActive,
+          isPrimary,
+        });
       }
+      continue;
     }
+
+    const affiliateUrl = String(formData.get(`link_${marketplace.id}_affiliateUrl`) ?? "");
 
     const candidate = {
       marketplaceId: marketplace.id,
@@ -144,11 +257,11 @@ export async function saveProductAction(
       rawProductUrl,
       externalProductId,
       trackingTag,
-      lastKnownPrice: formData.get(`link_${marketplace.id}_lastKnownPrice`) ?? "",
-      lastKnownOriginalPrice: formData.get(`link_${marketplace.id}_lastKnownOriginalPrice`) ?? "",
-      lastKnownPriceCurrency: String(formData.get(`link_${marketplace.id}_lastKnownPriceCurrency`) ?? ""),
-      lastKnownAvailability: String(formData.get(`link_${marketplace.id}_lastKnownAvailability`) ?? ""),
-      isActive: formData.get(`link_${marketplace.id}_isActive`) === "on",
+      lastKnownPrice,
+      lastKnownOriginalPrice,
+      lastKnownPriceCurrency,
+      lastKnownAvailability,
+      isActive,
     };
 
     const linkParsed = affiliateLinkSchema.safeParse(candidate);
@@ -167,6 +280,7 @@ export async function saveProductAction(
       rawProductUrl: linkParsed.data.rawProductUrl ?? "",
       externalProductId: linkParsed.data.externalProductId ?? "",
       trackingTag: linkParsed.data.trackingTag || null,
+      socialPlatform: null,
       lastKnownPrice: linkParsed.data.lastKnownPrice ?? null,
       lastKnownOriginalPrice: linkParsed.data.lastKnownOriginalPrice ?? null,
       lastKnownPriceCurrency: currency,

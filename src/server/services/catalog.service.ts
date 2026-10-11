@@ -58,14 +58,18 @@ function toMarketplaceLinks(
   product: ProductWithRelations,
   flags: AmazonOfferPreferenceFlags,
 ): MarketplaceLink[] {
+  const seenMarketplaces = new Set<string>();
   const links = visibleAffiliateLinks(product, flags).flatMap((link) => {
     if (!link.marketplace) return [];
+    // One public CTA per retailer — Amazon platform hops use `/go?p=` on social posts.
+    if (seenMarketplaces.has(link.marketplace.code)) return [];
+    seenMarketplaces.add(link.marketplace.code);
     return [
       {
         id: link.id,
         marketplace: link.marketplace.code,
         label: link.marketplace.name,
-        href: affiliateGoHref(product.slug, link.marketplace.code, link.id),
+        href: affiliateGoHref(product.slug, link.marketplace.code),
         price: link.lastKnownPrice ? Number(link.lastKnownPrice) : null,
         currency: link.lastKnownPriceCurrency ?? product.currency,
         availability: link.lastKnownAvailability,

@@ -55,4 +55,11 @@ describe("affiliateGoHref", () => {
       "/go/steam-cleaner-10-in-1-detachable-handheld-steam-mop-for-multi-surface?m=amazon",
     );
   });
+
+  it("includes social platform hop param", () => {
+    assert.equal(
+      affiliateGoHref("magnetic-car-phone-holder", "AMAZON", undefined, "INSTAGRAM"),
+      "/go/magnetic-car-phone-holder?m=amazon&p=instagram",
+    );
+  });
 });

@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import type { SocialPlatform } from "@/generated/prisma/enums";
 import { SOCIAL_PLATFORM_LABELS, SOCIAL_PLATFORMS } from "@/lib/social-external-id";
 import {
   deleteMarketingVideoAction,
@@ -45,6 +46,8 @@ export interface MarketingVideoView {
 interface MarketingVideosPanelProps {
   productId: string;
   videos: MarketingVideoView[];
+  /** Absolute `/go/...&p=` hop URLs for each social platform (Amazon Associates tags). */
+  platformHopUrls?: Partial<Record<SocialPlatform, string>>;
   className?: string;
 }
 
@@ -107,10 +110,16 @@ function EditLabelForm({
   );
 }
 
-export function MarketingVideosPanel({ productId, videos, className }: MarketingVideosPanelProps) {
+export function MarketingVideosPanel({
+  productId,
+  videos,
+  platformHopUrls = {},
+  className,
+}: MarketingVideosPanelProps) {
   const [saveState, saveAction, savePending] = useActionState(saveMarketingVideoAction, initialState);
   const [syncState, syncAction, syncPending] = useActionState(syncMarketingVideoViewsAction, initialState);
   const syncDialog = useMarketingVideoSyncResultsDialog(syncState.syncSummary, syncState.ok);
+  const hopEntries = SOCIAL_PLATFORMS.filter((platform) => platformHopUrls[platform]);
 
   return (
     <Card className={className}>
@@ -119,7 +128,7 @@ export function MarketingVideosPanel({ productId, videos, className }: Marketing
           <CardTitle className="text-sm">Marketing video funnel</CardTitle>
           <p className="mt-1 text-xs text-muted-foreground">
             Paste a platform URL or ID and save — the label is set automatically (YouTube, Instagram,
-            …). You can rename it anytime.
+            …). Use the matching Amazon hop URL in that platform’s bio / caption / comment reply.
           </p>
         </div>
         <form action={syncAction}>
@@ -143,6 +152,28 @@ export function MarketingVideosPanel({ productId, videos, className }: Marketing
           summary={syncDialog.summary}
           message={syncState.message}
         />
+
+        {hopEntries.length > 0 ? (
+          <div className="grid gap-2 rounded-md border p-3">
+            <p className="text-xs font-medium">Amazon hop links by platform</p>
+            <ul className="grid gap-2">
+              {hopEntries.map((platform) => (
+                <li key={platform} className="grid gap-0.5 text-xs">
+                  <span className="font-medium text-muted-foreground">
+                    {SOCIAL_PLATFORM_LABELS[platform]}
+                  </span>
+                  <code className="break-all rounded bg-muted px-1.5 py-1">
+                    {platformHopUrls[platform]}
+                  </code>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            Save all four Amazon platform hop URLs on the product to copy them here for each video.
+          </p>
+        )}
 
         {videos.length === 0 ? (
           <p className="text-sm text-muted-foreground">No marketing videos linked yet.</p>
@@ -186,6 +217,11 @@ export function MarketingVideosPanel({ productId, videos, className }: Marketing
                           {SOCIAL_PLATFORM_LABELS[post.platform]} · {formatViews(post.viewCount)} views
                         </p>
                         <p className="truncate text-muted-foreground">ID {post.externalId}</p>
+                        {platformHopUrls[post.platform] ? (
+                          <p className="mt-1 break-all text-muted-foreground">
+                            Hop {platformHopUrls[post.platform]}
+                          </p>
+                        ) : null}
                         {post.lastSyncError ? (
                           <p className="mt-1 text-destructive">{post.lastSyncError}</p>
                         ) : null}

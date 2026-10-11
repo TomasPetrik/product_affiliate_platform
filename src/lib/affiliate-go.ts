@@ -4,6 +4,7 @@
  *
  *   /go/magnetic-car-phone-holder
  *   /go/magnetic-car-phone-holder?m=amazon
+ *   /go/magnetic-car-phone-holder?m=amazon&p=instagram
  *   /go/magnetic-car-phone-holder?m=ebay
  */
 
@@ -11,6 +12,11 @@ import {
   filterOffersByAmazonPreference,
   type AmazonOfferPreferenceFlags,
 } from "@/lib/amazon-offer-preference";
+import {
+  parseSocialPlatformParam,
+  socialPlatformQueryValue,
+} from "@/lib/amazon-platform-tags";
+import type { SocialPlatform } from "@/generated/prisma/enums";
 
 export const PRODUCT_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
@@ -36,12 +42,15 @@ export function parseLinkIdParam(raw: string | null | undefined): string | null 
   return value;
 }
 
+export { parseSocialPlatformParam };
+
 export interface AffiliateHopLinkCandidate {
   marketplace: string;
   isPrimary: boolean;
   isActive?: boolean;
   affiliateUrl?: string | null;
   price?: number | null;
+  socialPlatform?: SocialPlatform | null;
 }
 
 /**
@@ -83,11 +92,19 @@ export function affiliateOfferGoHref(offerId: string): string {
   return id ? `/go/offer/${id}` : "/";
 }
 
-export function affiliateGoHref(productSlug: string, marketplaceCode?: string, linkId?: string): string {
+export function affiliateGoHref(
+  productSlug: string,
+  marketplaceCode?: string,
+  linkId?: string,
+  socialPlatform?: SocialPlatform | null,
+): string {
   const path = `/go/${productSlug}`;
   const params = new URLSearchParams();
   if (marketplaceCode) {
     params.set("m", marketplaceCode.toLowerCase());
+  }
+  if (socialPlatform) {
+    params.set("p", socialPlatformQueryValue(socialPlatform));
   }
   if (linkId) {
     params.set("lid", linkId);

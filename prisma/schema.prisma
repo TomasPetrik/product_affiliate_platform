@@ -203,6 +203,10 @@ model AffiliateLink {
   affiliateUrl       String
   trackingTag        String?
 
+  /// Social channel for Amazon Associates store tags (IG/FB/YT/TT hop links).
+  /// Null for non-Amazon retailers and legacy single Amazon offers.
+  socialPlatform SocialPlatform?
+
   listingTitle String?
   sellerName   String?
   condition    String?
@@ -226,11 +230,12 @@ model AffiliateLink {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([productId, marketplaceId, externalProductId])
-  @@unique([marketplaceId, externalProductId])
+  @@unique([productId, marketplaceId, externalProductId, socialPlatform])
+  @@unique([marketplaceId, externalProductId, socialPlatform])
   @@index([productId])
   @@index([marketplaceId])
   @@index([externalProductId])
+  @@index([socialPlatform])
   @@index([lastSyncedAt])
   @@map("affiliate_links")
 }

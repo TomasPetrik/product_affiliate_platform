@@ -1,6 +1,13 @@
 import { unstable_cache } from "next/cache";
 
-import { affiliateGoHref, isProductSlug, parseLinkIdParam, parseMarketplaceParam } from "@/lib/affiliate-go";
+import type { SocialPlatform } from "@/generated/prisma/enums";
+import {
+  affiliateGoHref,
+  isProductSlug,
+  parseLinkIdParam,
+  parseMarketplaceParam,
+  parseSocialPlatformParam,
+} from "@/lib/affiliate-go";
 import { filterOffersByAmazonPreference } from "@/lib/amazon-offer-preference";
 import { env } from "@/lib/env";
 import { prisma } from "@/lib/prisma";
@@ -38,10 +45,44 @@ export function sanitizeAffiliateDestination(raw: string): string | null {
   return url.toString();
 }
 
+function selectVisibleAffiliateLink<
+  T extends {
+    id: string;
+    isPrimary: boolean;
+    marketplace: string;
+    socialPlatform?: SocialPlatform | null;
+  },
+>(
+  visibleLinks: T[],
+  options: {
+    linkId: string | null;
+    marketplaceCode: string | null;
+    socialPlatform: SocialPlatform | null;
+  },
+): T | undefined {
+  if (options.linkId) {
+    return visibleLinks.find((link) => link.id === options.linkId);
+  }
+
+  const marketplaceCode = options.marketplaceCode;
+  const inMarketplace = marketplaceCode
+    ? visibleLinks.filter((link) => link.marketplace === marketplaceCode)
+    : visibleLinks;
+  const pool = inMarketplace.length > 0 ? inMarketplace : visibleLinks;
+
+  if (options.socialPlatform) {
+    const byPlatform = pool.find((link) => link.socialPlatform === options.socialPlatform);
+    if (byPlatform) return byPlatform;
+  }
+
+  return pool.find((link) => link.isPrimary) ?? pool[0];
+}
+
 async function lookupPublishedAffiliateTarget(
   slug: string,
   marketplaceCode: string | null,
   linkId: string | null,
+  socialPlatform: SocialPlatform | null,
 ): Promise<ResolvedAffiliateTarget | null> {
   if (!isProductSlug(slug)) return null;
 
@@ -58,6 +99,7 @@ async function lookupPublishedAffiliateTarget(
             id: true,
             affiliateUrl: true,
             isPrimary: true,
+            socialPlatform: true,
             lastKnownPrice: true,
             marketplace: { select: { code: true } },
           },
@@ -81,16 +123,11 @@ async function lookupPublishedAffiliateTarget(
     flags,
   );
 
-  // Prefer an explicit link / marketplace, but fall back to primary/first visible
-  // offer when `?m=` points at a retailer that is missing or filtered out
-  // (e.g. primary eBay while Amazon-only mode is on).
-  const selected = linkId
-    ? visibleLinks.find((link) => link.id === linkId)
-    : marketplaceCode
-      ? (visibleLinks.find((link) => link.marketplace === marketplaceCode) ??
-        visibleLinks.find((link) => link.isPrimary) ??
-        visibleLinks[0])
-      : (visibleLinks.find((link) => link.isPrimary) ?? visibleLinks[0]);
+  const selected = selectVisibleAffiliateLink(visibleLinks, {
+    linkId,
+    marketplaceCode,
+    socialPlatform,
+  });
 
   if (!selected) {
     return null;
@@ -114,10 +151,11 @@ export function resolvePublishedAffiliateTarget(
   slug: string,
   marketplaceCode: string | null,
   linkId: string | null = null,
+  socialPlatform: SocialPlatform | null = null,
 ) {
   return unstable_cache(
-    () => lookupPublishedAffiliateTarget(slug, marketplaceCode, linkId),
-    ["affiliate-redirect", slug, marketplaceCode ?? "", linkId ?? ""],
+    () => lookupPublishedAffiliateTarget(slug, marketplaceCode, linkId, socialPlatform),
+    ["affiliate-redirect", slug, marketplaceCode ?? "", linkId ?? "", socialPlatform ?? ""],
     {
       revalidate: AFFILIATE_REDIRECT_CACHE_SECONDS,
       tags: [AFFILIATE_REDIRECT_CACHE_TAG, `${AFFILIATE_REDIRECT_CACHE_TAG}:${slug}`],
@@ -135,6 +173,7 @@ export function resolveAffiliateGoPathFromLinkId(linkId: string): Promise<string
         select: {
           id: true,
           isActive: true,
+          socialPlatform: true,
           marketplace: { select: { code: true, isActive: true } },
           product: { select: { slug: true, status: true } },
         },
@@ -144,7 +183,12 @@ export function resolveAffiliateGoPathFromLinkId(linkId: string): Promise<string
         return null;
       }
 
-      return affiliateGoHref(link.product.slug, link.marketplace.code, link.id);
+      return affiliateGoHref(
+        link.product.slug,
+        link.marketplace.code,
+        link.id,
+        link.socialPlatform,
+      );
     },
     ["affiliate-redirect-link", linkId],
     {
@@ -233,4 +277,8 @@ export function marketplaceFromRequest(searchParams: URLSearchParams): string | 
 
 export function linkIdFromRequest(searchParams: URLSearchParams): string | null {
   return parseLinkIdParam(searchParams.get("lid") ?? searchParams.get("linkId"));
+}
+
+export function socialPlatformFromRequest(searchParams: URLSearchParams): SocialPlatform | null {
+  return parseSocialPlatformParam(searchParams.get("p") ?? searchParams.get("platform"));
 }

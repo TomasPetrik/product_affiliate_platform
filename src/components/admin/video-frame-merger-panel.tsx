@@ -8,6 +8,8 @@ import {
   type DragEvent,
 } from "react";
 import {
+  ChevronLeft,
+  ChevronRight,
   Download,
   Layers,
   Loader2,
@@ -17,6 +19,8 @@ import {
   Pause,
   Play,
   Scissors,
+  SkipBack,
+  SkipForward,
   Trash2,
   Undo2,
   Upload,
@@ -678,6 +682,44 @@ export function VideoFrameMergerPanel({
       document.body.style.overflow = prevOverflow;
     };
   }, [fullPreviewOpen]);
+
+  // Space (and Backspace) toggle play/pause when a timeline clip is selected.
+  useEffect(() => {
+    function isTypingTarget(target: EventTarget | null): boolean {
+      if (!(target instanceof HTMLElement)) return false;
+      if (target.isContentEditable) return true;
+      const tag = target.tagName;
+      return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+    }
+
+    function onKeyDown(event: KeyboardEvent) {
+      const isPlayPauseKey =
+        event.code === "Space" ||
+        event.key === " " ||
+        event.key === "Backspace";
+      if (!isPlayPauseKey) return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (isTypingTarget(event.target)) return;
+      if (merging || uploading || uploadingAudio) return;
+
+      const id = selectedIdRef.current;
+      if (!id) return;
+      const clipSelected = sequenceClipsRef.current.some(
+        (row) => row.segment.instanceId === id,
+      );
+      const audioSelected = audioTracksRef.current.some(
+        (track) => track.instanceId === id,
+      );
+      if (!clipSelected && !audioSelected) return;
+      if (sequenceClipsRef.current.length === 0) return;
+
+      event.preventDefault();
+      setPreviewPlaying((current) => !current);
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [merging, uploading, uploadingAudio]);
 
   useEffect(() => {
     const video = previewVideoRef.current;
@@ -1609,22 +1651,24 @@ export function VideoFrameMergerPanel({
           preview from any frame, then generate a versioned merge.
         </p>
       </CardHeader>
-      <CardContent className="grid gap-5">
+      <CardContent className="grid gap-3">
         {error ? (
           <Alert variant="destructive">
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         ) : null}
 
-        <div
-          className={cn(
-            "grid gap-2 rounded-xl transition-colors",
-            fileDropOver && "ring-2 ring-primary/40 ring-offset-2",
-          )}
-          onDragOver={onAvailableDragOver}
-          onDragLeave={onAvailableDragLeave}
-          onDrop={onAvailableDrop}
-        >
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-start">
+          <div className="grid min-w-0 gap-2">
+            <div
+              className={cn(
+                "grid gap-2 rounded-xl transition-colors",
+                fileDropOver && "ring-2 ring-primary/40 ring-offset-2",
+              )}
+              onDragOver={onAvailableDragOver}
+              onDragLeave={onAvailableDragLeave}
+              onDrop={onAvailableDrop}
+            >
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-xs font-medium text-muted-foreground">
               Available clips
@@ -1778,7 +1822,7 @@ export function VideoFrameMergerPanel({
           ) : (
             <p
               className={cn(
-                "rounded-lg border border-dashed px-3 py-5 text-center text-sm text-muted-foreground",
+                "rounded-lg border border-dashed px-3 py-3 text-center text-sm text-muted-foreground",
                 audioDropOver && "border-sky-500 bg-sky-500/5",
               )}
             >
@@ -1789,29 +1833,14 @@ export function VideoFrameMergerPanel({
           )}
         </div>
 
-        <div className="grid gap-2">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-xs font-medium text-muted-foreground">
-              Timeline
-              {sequenceClips.length > 0 ? ` (${sequenceClips.length})` : ""}
-              {audioTracks.length > 0 ? ` · ${audioTracks.length} audio` : ""}
-              {saveState === "saving" ? (
-                <span className="ml-2 text-[10px]">Saving…</span>
-              ) : saveState === "saved" ? (
-                <span className="ml-2 text-[10px]">Saved</span>
-              ) : saveState === "error" ? (
-                <span className="ml-2 text-[10px] text-destructive">
-                  Save failed
-                </span>
-              ) : null}
-            </p>
+            <div className="grid gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">
             {sequenceClips.length > 0 ? (
-              <div className="flex items-center gap-1.5">
+              <div className="flex flex-wrap items-center gap-1">
                 <Button
                   type="button"
                   variant="outline"
-                  size="sm"
-                  className="gap-1.5"
+                  size="icon-sm"
                   disabled={
                     undoStack.length === 0 ||
                     merging ||
@@ -1820,9 +1849,9 @@ export function VideoFrameMergerPanel({
                   }
                   onClick={undoTimeline}
                   title="Undo last timeline edit"
+                  aria-label="Undo"
                 >
                   <Undo2 className="size-3.5" />
-                  Undo
                 </Button>
                 <Button
                   type="button"
@@ -1838,7 +1867,7 @@ export function VideoFrameMergerPanel({
                 >
                   <ZoomOut className="size-3.5" />
                 </Button>
-                <span className="min-w-12 text-center text-[11px] tabular-nums text-muted-foreground">
+                <span className="min-w-10 text-center text-[11px] tabular-nums text-muted-foreground">
                   {Math.round(zoom * 100)}%
                 </span>
                 <Button
@@ -1862,14 +1891,158 @@ export function VideoFrameMergerPanel({
                   step={0.1}
                   value={zoom}
                   aria-label="Timeline zoom"
-                  className="ml-1 w-28 accent-[#f5d000]"
+                  className="w-24 accent-[#f5d000]"
                   onChange={(event) => setZoom(Number(event.target.value))}
                 />
-                <span className="hidden text-[10px] text-muted-foreground sm:inline">
-                  Pinch / Ctrl+scroll
-                </span>
+                {selected ? (
+                  <>
+                    <span className="mx-0.5 h-4 w-px bg-border" aria-hidden />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      disabled={!canSplitSelectedVideo()}
+                      title={
+                        canSplitSelectedVideo()
+                          ? "Split this clip at the playhead"
+                          : "Move the playhead inside the selected clip to split"
+                      }
+                      aria-label="Split"
+                      onClick={splitSelectedVideo}
+                    >
+                      <Scissors className="size-3.5" />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      disabled={stripAudio}
+                      title={
+                        stripAudio
+                          ? "Global “Remove clip audio” is on"
+                          : selected.segment.muted
+                            ? "Unmute this clip"
+                            : "Mute this clip (soundtrack can still play)"
+                      }
+                      aria-label={
+                        selected.segment.muted || stripAudio ? "Unmute" : "Mute"
+                      }
+                      onClick={() =>
+                        toggleSegmentMuted(selected.segment.instanceId)
+                      }
+                    >
+                      {selected.segment.muted || stripAudio ? (
+                        <VolumeX className="size-3.5" />
+                      ) : (
+                        <Volume2 className="size-3.5" />
+                      )}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      disabled={previewSegIndex <= 0}
+                      title="Move left"
+                      aria-label="Move left"
+                      onClick={() =>
+                        moveSegment(selected.segment.instanceId, -1)
+                      }
+                    >
+                      <ChevronLeft className="size-3.5" />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      disabled={previewSegIndex >= sequenceClips.length - 1}
+                      title="Move right"
+                      aria-label="Move right"
+                      onClick={() =>
+                        moveSegment(selected.segment.instanceId, 1)
+                      }
+                    >
+                      <ChevronRight className="size-3.5" />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      title="Remove clip"
+                      aria-label="Remove clip"
+                      onClick={() =>
+                        removeSegment(selected.segment.instanceId)
+                      }
+                    >
+                      <Trash2 className="size-3.5" />
+                    </Button>
+                  </>
+                ) : null}
+                {selectedAudioTrack ? (
+                  <>
+                    <span className="mx-0.5 h-4 w-px bg-border" aria-hidden />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      disabled={!canSplitSelectedAudio()}
+                      title={
+                        canSplitSelectedAudio()
+                          ? "Split soundtrack at the playhead"
+                          : "Move the playhead over the selected soundtrack to split"
+                      }
+                      aria-label="Split soundtrack"
+                      onClick={splitSelectedAudio}
+                    >
+                      <Scissors className="size-3.5" />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      title="Remove soundtrack"
+                      aria-label="Remove soundtrack"
+                      onClick={() =>
+                        removeAudioTrack(selectedAudioTrack.instanceId)
+                      }
+                    >
+                      <Trash2 className="size-3.5" />
+                    </Button>
+                  </>
+                ) : null}
               </div>
             ) : null}
+            <p className="text-xs font-medium text-muted-foreground">
+              Timeline
+              {sequenceClips.length > 0 ? ` (${sequenceClips.length})` : ""}
+              {audioTracks.length > 0 ? ` · ${audioTracks.length} audio` : ""}
+              {selected ? (
+                <span className="font-normal">
+                  {" "}
+                  · {clipProviderLabel(selected.clip.fileName)} ·{" "}
+                  {formatMergeTimelineTime(
+                    selected.segment.trimEndSec - selected.segment.trimStartSec,
+                  )}
+                  {selected.segment.muted ? " · muted" : ""}
+                </span>
+              ) : null}
+              {selectedAudioTrack ? (
+                <span className="font-normal text-sky-700 dark:text-sky-300">
+                  {" "}
+                  ·{" "}
+                  {audioById.get(selectedAudioTrack.assetId)?.fileName ??
+                    "audio"}
+                </span>
+              ) : null}
+              {saveState === "saving" ? (
+                <span className="ml-2 text-[10px]">Saving…</span>
+              ) : saveState === "saved" ? (
+                <span className="ml-2 text-[10px]">Saved</span>
+              ) : saveState === "error" ? (
+                <span className="ml-2 text-[10px] text-destructive">
+                  Save failed
+                </span>
+              ) : null}
+            </p>
           </div>
 
           <div
@@ -1877,7 +2050,7 @@ export function VideoFrameMergerPanel({
             onDragLeave={onSequenceDragLeave}
             onDrop={onSequenceDrop}
             className={cn(
-              "min-h-[7rem] rounded-xl border border-dashed p-3 transition-colors",
+              "min-h-[7rem] rounded-xl border border-dashed p-2 transition-colors",
               fileDropOver
                 ? "border-primary bg-primary/5"
                 : "border-border bg-muted/20",
@@ -1888,140 +2061,7 @@ export function VideoFrameMergerPanel({
                 Drop clips or local videos here to start the timeline.
               </p>
             ) : (
-              <div className="grid gap-2">
-                {selected ? (
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="text-[11px] font-medium text-muted-foreground">
-                      Selected: {clipProviderLabel(selected.clip.fileName)} ·{" "}
-                      {formatMergeTimelineTime(
-                        selected.segment.trimEndSec -
-                          selected.segment.trimStartSec,
-                      )}{" "}
-                      kept
-                      {selected.segment.muted ? " · muted" : ""}
-                    </p>
-                    <div className="flex gap-1">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="gap-1"
-                        disabled={!canSplitSelectedVideo()}
-                        title={
-                          canSplitSelectedVideo()
-                            ? "Split this clip at the playhead"
-                            : "Move the playhead inside the selected clip to split"
-                        }
-                        onClick={splitSelectedVideo}
-                      >
-                        <Scissors className="size-3.5" />
-                        Split
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="gap-1"
-                        disabled={stripAudio}
-                        title={
-                          stripAudio
-                            ? "Global “Remove clip audio” is on"
-                            : selected.segment.muted
-                              ? "Unmute this clip"
-                              : "Mute this clip (soundtrack can still play)"
-                        }
-                        onClick={() =>
-                          toggleSegmentMuted(selected.segment.instanceId)
-                        }
-                      >
-                        {selected.segment.muted || stripAudio ? (
-                          <VolumeX className="size-3.5" />
-                        ) : (
-                          <Volume2 className="size-3.5" />
-                        )}
-                        {selected.segment.muted || stripAudio ? "Muted" : "Mute"}
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        disabled={previewSegIndex <= 0}
-                        onClick={() =>
-                          moveSegment(selected.segment.instanceId, -1)
-                        }
-                      >
-                        Left
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        disabled={
-                          previewSegIndex >= sequenceClips.length - 1
-                        }
-                        onClick={() =>
-                          moveSegment(selected.segment.instanceId, 1)
-                        }
-                      >
-                        Right
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() =>
-                          removeSegment(selected.segment.instanceId)
-                        }
-                      >
-                        Remove
-                      </Button>
-                    </div>
-                  </div>
-                ) : null}
-                {selectedAudioTrack ? (
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="text-[11px] font-medium text-sky-700 dark:text-sky-300">
-                      Soundtrack:{" "}
-                      {audioById.get(selectedAudioTrack.assetId)?.fileName ??
-                        "audio"}{" "}
-                      · starts{" "}
-                      {formatMergeTimelineTime(selectedAudioTrack.startAtSec)} ·{" "}
-                      {formatMergeTimelineTime(
-                        selectedAudioTrack.trimEndSec -
-                          selectedAudioTrack.trimStartSec,
-                      )}{" "}
-                      kept
-                    </p>
-                    <div className="flex gap-1">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="gap-1"
-                        disabled={!canSplitSelectedAudio()}
-                        title={
-                          canSplitSelectedAudio()
-                            ? "Split soundtrack at the playhead"
-                            : "Move the playhead over the selected soundtrack to split"
-                        }
-                        onClick={splitSelectedAudio}
-                      >
-                        <Scissors className="size-3.5" />
-                        Split
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() =>
-                          removeAudioTrack(selectedAudioTrack.instanceId)
-                        }
-                      >
-                        Remove audio
-                      </Button>
-                    </div>
-                  </div>
-                ) : null}
+              <div className="grid gap-1.5">
                 <VideoFrameMergeTimeline
                   segments={sequenceClips.map(({ segment, clip }) => ({
                     instanceId: segment.instanceId,
@@ -2114,125 +2154,129 @@ export function VideoFrameMergerPanel({
               </div>
             )}
           </div>
+            </div>
+          </div>
+
+          <div className="flex w-full max-w-[22rem] flex-col gap-1.5 justify-self-center lg:sticky lg:top-4 lg:justify-self-end">
+            <p className="text-xs font-medium text-muted-foreground">
+              {activePreview ? (
+                <>
+                  Live preview ·{" "}
+                  {inBlackPad
+                    ? `black pad · ${formatMergeTimelineTime(videoCompositionSec + blackPadSec)}`
+                    : `part ${previewSegIndex + 1} of ${sequenceClips.length} · ${formatMergeTimelineTime(playheadSec)}`}
+                  {timelineDurationSec > videoCompositionSec + 0.04
+                    ? ` · timeline ${formatMergeTimelineTime(timelineDurationSec)}`
+                    : ""}
+                </>
+              ) : (
+                "Live preview"
+              )}
+            </p>
+            {!fullPreviewOpen && activePreview ? (
+              <div className="relative w-full overflow-hidden rounded-xl border bg-black ring-1 ring-border">
+                <video
+                  ref={previewVideoRef}
+                  muted={stripAudio || activePreview.segment.muted === true}
+                  playsInline
+                  controls={false}
+                  preload="metadata"
+                  onTimeUpdate={onPreviewTimeUpdate}
+                  onEnded={() => {
+                    if (previewPlayingRef.current) {
+                      advanceToNextClip();
+                    }
+                  }}
+                  className={cn(
+                    "aspect-[9/16] w-full object-contain",
+                    inBlackPad && "opacity-0",
+                  )}
+                />
+                {inBlackPad ? (
+                  <div className="absolute inset-0 flex items-center justify-center bg-black text-xs font-medium uppercase tracking-wide text-zinc-500">
+                    Black pad
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <div className="flex aspect-[9/16] w-full items-center justify-center rounded-xl border border-dashed border-border bg-muted/40 px-4 text-center text-xs text-muted-foreground">
+                {fullPreviewOpen && activePreview
+                  ? "Open in full preview"
+                  : "Add a clip to the timeline to preview."}
+              </div>
+            )}
+            <div className="flex items-center justify-center gap-1">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                disabled={!activePreview || previewSegIndex <= 0 || merging}
+                title="Previous clip"
+                aria-label="Previous clip"
+                onClick={() => {
+                  const prev = sequenceClips[previewSegIndex - 1]!;
+                  seekPreviewTo(
+                    previewSegIndex - 1,
+                    prev.segment.trimStartSec,
+                  );
+                  setPreviewPlaying(false);
+                }}
+              >
+                <SkipBack className="size-3.5" />
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon-sm"
+                disabled={!activePreview || uploading || merging}
+                title={previewPlaying ? "Pause" : "Play sequence"}
+                aria-label={previewPlaying ? "Pause" : "Play sequence"}
+                onClick={togglePreviewPlayback}
+              >
+                {previewPlaying ? (
+                  <Pause className="size-3.5" />
+                ) : (
+                  <Play className="size-3.5" />
+                )}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                disabled={
+                  !activePreview ||
+                  previewSegIndex >= sequenceClips.length - 1 ||
+                  merging
+                }
+                title="Next clip"
+                aria-label="Next clip"
+                onClick={() => {
+                  const next = sequenceClips[previewSegIndex + 1]!;
+                  seekPreviewTo(
+                    previewSegIndex + 1,
+                    next.segment.trimStartSec,
+                  );
+                  setPreviewPlaying(false);
+                }}
+              >
+                <SkipForward className="size-3.5" />
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon-sm"
+                disabled={!activePreview || uploading || merging}
+                title="Full preview"
+                aria-label="Full preview"
+                onClick={() => setFullPreviewOpen(true)}
+              >
+                <Maximize2 className="size-3.5" />
+              </Button>
+            </div>
+          </div>
         </div>
 
         <audio ref={previewAudioRef} preload="auto" className="hidden" />
-
-        {activePreview ? (
-          <div className="grid gap-2">
-            <p className="text-xs font-medium text-muted-foreground">
-              Live preview ·{" "}
-              {inBlackPad
-                ? `black pad · ${formatMergeTimelineTime(videoCompositionSec + blackPadSec)}`
-                : `part ${previewSegIndex + 1} of ${sequenceClips.length} · ${formatMergeTimelineTime(playheadSec)}`}
-              {timelineDurationSec > videoCompositionSec + 0.04
-                ? ` · timeline ${formatMergeTimelineTime(timelineDurationSec)}`
-                : ""}
-            </p>
-            <div className="flex flex-wrap items-end gap-4">
-              {!fullPreviewOpen ? (
-                <div className="relative w-[11rem] overflow-hidden rounded-xl border bg-black ring-1 ring-border">
-                  <video
-                    ref={previewVideoRef}
-                    muted={
-                      stripAudio || activePreview.segment.muted === true
-                    }
-                    playsInline
-                    controls={false}
-                    preload="metadata"
-                    onTimeUpdate={onPreviewTimeUpdate}
-                    onEnded={() => {
-                      if (previewPlayingRef.current) {
-                        advanceToNextClip();
-                      }
-                    }}
-                    className={cn(
-                      "aspect-[9/16] w-full object-contain",
-                      inBlackPad && "opacity-0",
-                    )}
-                  />
-                  {inBlackPad ? (
-                    <div className="absolute inset-0 flex items-center justify-center bg-black text-[10px] font-medium uppercase tracking-wide text-zinc-500">
-                      Black pad
-                    </div>
-                  ) : null}
-                </div>
-              ) : (
-                <div className="flex w-[11rem] aspect-[9/16] items-center justify-center rounded-xl border border-dashed border-border bg-muted/40 text-center text-[10px] text-muted-foreground">
-                  Open in full preview
-                </div>
-              )}
-              <div className="flex flex-col gap-2">
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="gap-1.5"
-                    disabled={uploading || merging}
-                    onClick={togglePreviewPlayback}
-                  >
-                    {previewPlaying ? (
-                      <Pause className="size-3.5" />
-                    ) : (
-                      <Play className="size-3.5" />
-                    )}
-                    {previewPlaying ? "Pause" : "Play sequence"}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="gap-1.5"
-                    disabled={uploading || merging}
-                    onClick={() => setFullPreviewOpen(true)}
-                  >
-                    <Maximize2 className="size-3.5" />
-                    Full preview
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    disabled={previewSegIndex <= 0 || merging}
-                    onClick={() => {
-                      const prev = sequenceClips[previewSegIndex - 1]!;
-                      seekPreviewTo(
-                        previewSegIndex - 1,
-                        prev.segment.trimStartSec,
-                      );
-                      setPreviewPlaying(false);
-                    }}
-                  >
-                    Prev clip
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    disabled={
-                      previewSegIndex >= sequenceClips.length - 1 || merging
-                    }
-                    onClick={() => {
-                      const next = sequenceClips[previewSegIndex + 1]!;
-                      seekPreviewTo(
-                        previewSegIndex + 1,
-                        next.segment.trimStartSec,
-                      );
-                      setPreviewPlaying(false);
-                    }}
-                  >
-                    Next clip
-                  </Button>
-                </div>
-                <p className="max-w-sm text-xs text-muted-foreground">
-                  Full preview shows source clips at native resolution in a 9:16
-                  frame (same framing as export). Play runs the whole sequence.
-                </p>
-              </div>
-            </div>
-          </div>
-        ) : null}
 
         {fullPreviewOpen && activePreview ? (
           <div

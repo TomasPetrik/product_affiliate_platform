@@ -23,6 +23,8 @@ export interface ClipPromptDetails {
   cutStartSec?: number;
   cutEndSec?: number;
   referenceImageCount: number;
+  /** Object URLs for reference image thumbnails (optional). */
+  referenceImagePreviewUrls?: string[];
   referenceAudioCount?: number;
   predictionId: string;
   status: string;
@@ -140,6 +142,26 @@ export function VideoFrameClipPromptDialog({
                     label="Ref images"
                     value={String(details.referenceImageCount)}
                   />
+                  {details.referenceImagePreviewUrls &&
+                  details.referenceImagePreviewUrls.length > 0 ? (
+                    <div className="grid grid-cols-[7.5rem_1fr] gap-2 text-sm">
+                      <dt className="text-muted-foreground">Previews</dt>
+                      <dd className="min-w-0">
+                        <ul className="flex flex-wrap gap-2">
+                          {details.referenceImagePreviewUrls.map((url, index) => (
+                            <li key={`${url}-${index}`}>
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={url}
+                                alt={`Reference ${index + 1}`}
+                                className="size-16 rounded-lg object-cover ring-1 ring-border"
+                              />
+                            </li>
+                          ))}
+                        </ul>
+                      </dd>
+                    </div>
+                  ) : null}
                   {details.referenceAudioCount != null ? (
                     <ParamRow
                       label="Ref audio"

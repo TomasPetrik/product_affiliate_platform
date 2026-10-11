@@ -288,38 +288,38 @@ export function VideoFrameWanVideoEditDialog({
 
     setDraftReady(false);
 
+    function applyJobForm(activeJob: WanVideoEditJob) {
+      setPrompt(activeJob.prompt || DEFAULT_WAN_VIDEO_EDIT_PROMPT);
+      setDuration(activeJob.duration == null ? "auto" : activeJob.duration);
+      setResolution(
+        (activeJob.resolution as WanVideoEditResolution) ||
+          DEFAULT_WAN_VIDEO_EDIT_RESOLUTION,
+      );
+      setSeed(activeJob.seed);
+      setGenerateAudio(activeJob.generateAudio);
+      setEnablePromptExpansion(activeJob.enablePromptExpansion);
+      // Dialog unmounts when closed — restore refs from the in-memory job
+      // (draft is cleared on submit, so without this reopen shows an empty picker).
+      setReferenceImageFiles(activeJob.referenceImages ?? []);
+      setAudioFiles(activeJob.referenceAudios ?? []);
+      setSpanAssetIds([]);
+      setShowSpanPicker(false);
+      setLocalError(activeJob.error);
+      setLocalSubmitting(false);
+      setCutPreviewError(null);
+      setRangePlaying(false);
+      setRefDragging(false);
+    }
+
     if (
       job &&
       (job.phase === "polling" ||
         job.phase === "submitting" ||
-        job.phase === "saving")
+        job.phase === "saving" ||
+        job.phase === "failed" ||
+        job.phase === "completed")
     ) {
-      setPrompt(job.prompt || DEFAULT_WAN_VIDEO_EDIT_PROMPT);
-      setDuration(job.duration == null ? "auto" : job.duration);
-      setResolution(
-        (job.resolution as WanVideoEditResolution) ||
-          DEFAULT_WAN_VIDEO_EDIT_RESOLUTION,
-      );
-      setSeed(job.seed);
-      setGenerateAudio(job.generateAudio);
-      setEnablePromptExpansion(job.enablePromptExpansion);
-      setLocalError(job.error);
-      setLocalSubmitting(false);
-      setDraftReady(true);
-      return;
-    }
-    if (job?.phase === "failed" || job?.phase === "completed") {
-      setPrompt(job.prompt || DEFAULT_WAN_VIDEO_EDIT_PROMPT);
-      setDuration(job.duration == null ? "auto" : job.duration);
-      setResolution(
-        (job.resolution as WanVideoEditResolution) ||
-          DEFAULT_WAN_VIDEO_EDIT_RESOLUTION,
-      );
-      setSeed(job.seed);
-      setGenerateAudio(job.generateAudio);
-      setEnablePromptExpansion(job.enablePromptExpansion);
-      setLocalError(job.error);
-      setLocalSubmitting(false);
+      applyJobForm(job);
       setDraftReady(true);
       return;
     }
@@ -364,7 +364,20 @@ export function VideoFrameWanVideoEditDialog({
     setRefDragging(false);
     setDraftReady(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, spanId, projectId, cutStartSec, cutEndSec, job?.phase, job?.predictionId, job?.prompt, job?.error]);
+  }, [
+    open,
+    spanId,
+    projectId,
+    cutStartSec,
+    cutEndSec,
+    job?.phase,
+    job?.predictionId,
+    job?.historyId,
+    job?.prompt,
+    job?.error,
+    job?.referenceImages?.length,
+    job?.referenceAudios?.length,
+  ]);
 
   useEffect(() => {
     if (!open || !draftReady) return;
@@ -613,7 +626,6 @@ export function VideoFrameWanVideoEditDialog({
         status: "cutting",
         progress: 8,
       });
-      clearWanVideoEditDialogDraft(projectId, spanId);
 
       const submitted = await submitWanVideoEditAction(formData);
       if (submitted.error || !submitted.predictionId) {
@@ -622,6 +634,9 @@ export function VideoFrameWanVideoEditDialog({
         onJobSubmitError(spanId, message);
         return;
       }
+
+      // Keep draft until submit succeeds so a failed submit can still restore refs.
+      clearWanVideoEditDialogDraft(projectId, spanId);
 
       onJobAccepted({
         ...baseJob,

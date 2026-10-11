@@ -479,6 +479,9 @@ function clipPromptFromWanEdit(
     cutStartSec: entry.cutStartSec,
     cutEndSec: entry.cutEndSec,
     referenceImageCount: entry.referenceImages.length,
+    referenceImagePreviewUrls: entry.referenceImages.map((image) =>
+      URL.createObjectURL(image.blob),
+    ),
     referenceAudioCount: entry.referenceAudios.length,
     predictionId: entry.predictionId,
     status: entry.status,
@@ -500,12 +503,23 @@ function clipPromptFromWanClip(entry: WanVideoHistoryEntry): ClipPromptDetails {
     enablePromptExpansion: entry.enablePromptExpansion,
     aspectRatio: entry.aspectRatio,
     referenceImageCount: entry.referenceImages.length,
+    referenceImagePreviewUrls: entry.referenceImages.map((image) =>
+      URL.createObjectURL(image.blob),
+    ),
     predictionId: entry.predictionId,
     status: entry.status,
     sourceLabel: entry.sourceLabel,
     inferenceMs: entry.inferenceMs,
     costUsd: entry.costUsd,
   };
+}
+
+function revokeClipPromptPreviewUrls(map: Map<string, ClipPromptDetails>) {
+  for (const details of map.values()) {
+    for (const url of details.referenceImagePreviewUrls ?? []) {
+      URL.revokeObjectURL(url);
+    }
+  }
 }
 
 function buildClipPromptDetailsByFileName(input: {
@@ -1073,16 +1087,22 @@ export function VideoFrameExtractPanel({
           listWanVideoHistory(),
         ]);
         if (cancelled) return;
-        setClipPromptByFileName(
-          buildClipPromptDetailsByFileName({
+        setClipPromptByFileName((previous) => {
+          revokeClipPromptPreviewUrls(previous);
+          return buildClipPromptDetailsByFileName({
             clips: spanClips,
             projectId: project.id,
             editHistory,
             clipHistory,
-          }),
-        );
+          });
+        });
       } catch {
-        if (!cancelled) setClipPromptByFileName(new Map());
+        if (!cancelled) {
+          setClipPromptByFileName((previous) => {
+            revokeClipPromptPreviewUrls(previous);
+            return new Map();
+          });
+        }
       }
     })();
     return () => {

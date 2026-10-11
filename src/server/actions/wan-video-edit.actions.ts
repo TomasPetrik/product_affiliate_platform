@@ -29,6 +29,7 @@ import {
   cutVideoSegment,
   VideoCutError,
 } from "@/server/services/video-cut.service";
+import { resolveProjectSourceVideoPath } from "@/server/services/video-frame-project.service";
 import {
   getWaveSpeedPrediction,
   isWaveSpeedConfigured,
@@ -185,16 +186,32 @@ async function cutProjectSpanToWaveSpeedUrl(input: {
   projectId: string;
   startSec: number;
   endSec: number;
+  videoId?: string | null;
 }): Promise<string> {
   const project = await prisma.videoFrameProject.findUnique({
     where: { id: input.projectId },
-    select: { id: true, videoPath: true, videoFileName: true },
+    select: {
+      id: true,
+      videoPath: true,
+      videoFileName: true,
+      videoMimeType: true,
+      videoBytes: true,
+      durationSec: true,
+      videoWidth: true,
+      videoHeight: true,
+      videosJson: true,
+    },
   });
-  if (!project?.videoPath) {
+  if (!project) {
+    throw new Error("Project not found.");
+  }
+
+  const videoPath = resolveProjectSourceVideoPath(project, input.videoId);
+  if (!videoPath) {
     throw new Error("Project source video not found.");
   }
 
-  const absolute = absoluteFromPublicUpload(project.videoPath);
+  const absolute = absoluteFromPublicUpload(videoPath);
   if (!absolute) {
     throw new Error("Project video path is invalid.");
   }
@@ -268,6 +285,7 @@ export async function submitWanVideoEditAction(
 
     const videoFile = formData.get("video");
     const projectId = String(formData.get("projectId") ?? "").trim();
+    const videoId = String(formData.get("videoId") ?? "").trim() || null;
     const cutStartSec = Number(String(formData.get("cutStartSec") ?? ""));
     const cutEndSec = Number(String(formData.get("cutEndSec") ?? ""));
 
@@ -284,6 +302,7 @@ export async function submitWanVideoEditAction(
         projectId,
         startSec: cutStartSec,
         endSec: cutEndSec,
+        videoId,
       });
     } else {
       return {

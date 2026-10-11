@@ -5,11 +5,14 @@ import { revalidatePath } from "next/cache";
 import { requireAdminSession } from "@/lib/auth";
 import { writeAuditLog } from "@/server/services/audit.service";
 import {
+  addVideoFrameProjectVideos,
+  appendSourceSpanReferenceFrames,
   createVideoFrameProject,
   deleteVideoFrameEdit,
   deleteVideoFrameProject,
   getVideoFrameProject,
   deleteCustomSpanMedia,
+  deleteSourceSpanReferenceFrame,
   mergeVideoFrameClips,
   replaceCustomSpanFrames,
   replaceVideoFrameProjectFrames,
@@ -21,6 +24,7 @@ import {
   uploadVideoFrameLocalClip,
   type VideoFrameProjectDetail,
 } from "@/server/services/video-frame-project.service";
+import { MAX_MANUAL_SPAN_REFERENCE_FRAMES } from "@/lib/video-frame-project-paths";
 import {
   mergeVideoFrameClipsSchema,
   saveVideoFrameMergerStateSchema,
@@ -46,33 +50,107 @@ export async function createVideoFrameProjectAction(
   _prev: VideoFrameProjectActionState,
   formData: FormData,
 ): Promise<VideoFrameProjectActionState> {
-  const session = await requireAdminSession();
+  try {
+    const session = await requireAdminSession();
 
-  const nameParsed = videoFrameProjectNameSchema.safeParse(formData.get("name") ?? "");
-  if (!nameParsed.success) {
-    return { error: nameParsed.error.issues[0]?.message ?? "Invalid name." };
+    const nameParsed = videoFrameProjectNameSchema.safeParse(formData.get("name") ?? "");
+    if (!nameParsed.success) {
+      return { error: nameParsed.error.issues[0]?.message ?? "Invalid name." };
+    }
+
+    const videos = [
+      ...formData.getAll("videos"),
+      ...formData.getAll("video"),
+    ].filter((entry): entry is File => entry instanceof File && entry.size > 0);
+
+    if (videos.length === 0) {
+      return { error: "Choose at least one video file." };
+    }
+
+    const result = await createVideoFrameProject({ name: nameParsed.data, videos });
+    if ("error" in result) {
+      return { error: result.error };
+    }
+
+    await writeAuditLog({
+      actor: session,
+      action: "video_frame_project.create",
+      entityType: "VideoFrameProject",
+      entityId: result.id,
+      after: {
+        name: result.name,
+        videoFileName: result.videoFileName,
+        videoCount: result.videos.length,
+        videoBytes: result.videoBytes,
+      },
+    });
+
+    revalidateVideoFrameProjects(result.id);
+    return { ok: true, project: result };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (/unexpected end of form/i.test(message)) {
+      return {
+        error:
+          "Upload was truncated (request body too large). Try a smaller video, or redeploy so the 210MB proxy body limit is active.",
+      };
+    }
+    return {
+      error: message.trim() || "Failed to create project.",
+    };
   }
+}
 
-  const video = formData.get("video");
-  if (!(video instanceof File) || video.size <= 0) {
-    return { error: "Choose a video file." };
+export async function addVideoFrameProjectVideosAction(
+  formData: FormData,
+): Promise<VideoFrameProjectActionState> {
+  try {
+    const session = await requireAdminSession();
+
+    const projectId = String(formData.get("projectId") ?? "").trim();
+    if (!projectId) {
+      return { error: "Missing project id." };
+    }
+
+    const videos = formData
+      .getAll("videos")
+      .filter((entry): entry is File => entry instanceof File && entry.size > 0);
+
+    if (videos.length === 0) {
+      return { error: "Choose at least one video file." };
+    }
+
+    const result = await addVideoFrameProjectVideos({ projectId, videos });
+    if ("error" in result) {
+      return { error: result.error };
+    }
+
+    await writeAuditLog({
+      actor: session,
+      action: "video_frame_project.add_videos",
+      entityType: "VideoFrameProject",
+      entityId: result.id,
+      after: {
+        videoCount: result.videos.length,
+        addedCount: videos.length,
+        videoBytes: result.videoBytes,
+      },
+    });
+
+    revalidateVideoFrameProjects(result.id);
+    return { ok: true, project: result };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (/unexpected end of form/i.test(message)) {
+      return {
+        error:
+          "Upload was truncated (request body too large). Try a smaller video, or redeploy so the 210MB proxy body limit is active.",
+      };
+    }
+    return {
+      error: message.trim() || "Failed to add videos.",
+    };
   }
-
-  const result = await createVideoFrameProject({ name: nameParsed.data, video });
-  if ("error" in result) {
-    return { error: result.error };
-  }
-
-  await writeAuditLog({
-    actor: session,
-    action: "video_frame_project.create",
-    entityType: "VideoFrameProject",
-    entityId: result.id,
-    after: { name: result.name, videoFileName: result.videoFileName, videoBytes: result.videoBytes },
-  });
-
-  revalidateVideoFrameProjects(result.id);
-  return { ok: true, project: result };
 }
 
 export async function saveVideoFrameProjectAction(
@@ -97,6 +175,7 @@ export async function saveVideoFrameProjectAction(
     after: {
       name: result.name,
       spanCount: result.spans.length,
+      videoCount: result.videos.length,
       durationSec: result.durationSec,
     },
   });
@@ -165,6 +244,90 @@ export async function saveVideoFrameProjectFramesAction(
       thumbnailsBytes: result.thumbnailsBytes,
       totalBytes: result.totalBytes,
     },
+  });
+
+  revalidateVideoFrameProjects(result.id);
+  return { ok: true, project: result };
+}
+
+export async function appendSourceSpanReferenceFramesAction(
+  formData: FormData,
+): Promise<VideoFrameProjectActionState> {
+  const session = await requireAdminSession();
+  const projectId = String(formData.get("projectId") ?? "").trim();
+  const spanId = String(formData.get("spanId") ?? "").trim();
+  if (!projectId) {
+    return { error: "Missing project id." };
+  }
+  if (!spanId) {
+    return { error: "Missing span id." };
+  }
+
+  const files = formData
+    .getAll("frameFiles")
+    .filter((value): value is File => value instanceof File && value.size > 0);
+
+  if (files.length === 0) {
+    return { error: "Choose at least one image." };
+  }
+  if (files.length > MAX_MANUAL_SPAN_REFERENCE_FRAMES) {
+    return {
+      error: `At most ${MAX_MANUAL_SPAN_REFERENCE_FRAMES} reference photos per upload.`,
+    };
+  }
+
+  const result = await appendSourceSpanReferenceFrames({
+    projectId,
+    spanId,
+    frames: files.map((file) => ({
+      file,
+      fileName: file.name || "reference.jpg",
+    })),
+  });
+  if ("error" in result) {
+    return { error: result.error };
+  }
+
+  await writeAuditLog({
+    actor: session,
+    action: "video_frame_project.append_span_references",
+    entityType: "VideoFrameProject",
+    entityId: result.id,
+    after: { spanId, addedCount: files.length },
+  });
+
+  revalidateVideoFrameProjects(result.id);
+  return { ok: true, project: result };
+}
+
+export async function deleteSourceSpanReferenceFrameAction(input: {
+  projectId: string;
+  spanId: string;
+  frameAssetId: string;
+}): Promise<VideoFrameProjectActionState> {
+  const session = await requireAdminSession();
+  const projectId = input.projectId.trim();
+  const spanId = input.spanId.trim();
+  const frameAssetId = input.frameAssetId.trim();
+  if (!projectId || !spanId || !frameAssetId) {
+    return { error: "Missing project, span, or frame." };
+  }
+
+  const result = await deleteSourceSpanReferenceFrame({
+    projectId,
+    spanId,
+    frameAssetId,
+  });
+  if ("error" in result) {
+    return { error: result.error };
+  }
+
+  await writeAuditLog({
+    actor: session,
+    action: "video_frame_project.delete_span_reference",
+    entityType: "VideoFrameProject",
+    entityId: result.id,
+    after: { spanId, frameAssetId },
   });
 
   revalidateVideoFrameProjects(result.id);

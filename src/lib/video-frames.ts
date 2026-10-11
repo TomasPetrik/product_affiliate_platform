@@ -11,6 +11,8 @@ export interface FrameSpan {
   kind?: FrameSpanKind;
   /** Optional display name (custom spans). */
   label?: string;
+  /** Project source video id for source spans (omitted = primary/first video). */
+  videoId?: string;
 }
 
 export function isCustomSpan(span: FrameSpan): boolean {
@@ -148,7 +150,10 @@ export function newSpanId(): string {
   return `span-${crypto.randomUUID()}`;
 }
 
-export function createDefaultSpans(duration: number): FrameSpan[] {
+export function createDefaultSpans(
+  duration: number,
+  videoId?: string,
+): FrameSpan[] {
   if (!Number.isFinite(duration) || duration <= 0) {
     return [];
   }
@@ -159,6 +164,7 @@ export function createDefaultSpans(duration: number): FrameSpan[] {
       start: 0,
       end: duration,
       frameCount: 4,
+      ...(videoId ? { videoId } : {}),
     },
   ];
 }
@@ -203,6 +209,10 @@ export function clampSpan(span: FrameSpan, duration: number): FrameSpan {
   const rawEnd = Number.isFinite(span.end) ? span.end : rawStart;
   const start = Math.min(Math.max(0, rawStart), safeDuration);
   const end = Math.min(Math.max(start, rawEnd), safeDuration);
+  const videoId =
+    typeof span.videoId === "string" && span.videoId.trim()
+      ? span.videoId.trim()
+      : undefined;
   return {
     ...span,
     kind: span.kind === "source" ? "source" : undefined,
@@ -210,7 +220,23 @@ export function clampSpan(span: FrameSpan, duration: number): FrameSpan {
     end,
     frameCount,
     ...(label ? { label } : {}),
+    ...(videoId ? { videoId } : {}),
   };
+}
+
+/** Source spans that belong to a given project video (missing videoId → primary). */
+export function spansForVideo(
+  spans: FrameSpan[],
+  videoId: string | null | undefined,
+  primaryVideoId: string | null | undefined,
+): FrameSpan[] {
+  return spans.filter((span) => {
+    if (isCustomSpan(span)) return false;
+    const spanVideoId = span.videoId?.trim() || primaryVideoId || null;
+    const target = videoId?.trim() || primaryVideoId || null;
+    if (!target) return true;
+    return spanVideoId === target;
+  });
 }
 
 /** Round to slider step so preview cache keys stay stable while dragging. */

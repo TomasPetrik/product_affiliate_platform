@@ -20,6 +20,9 @@ const nextConfig: NextConfig = {
     // worker keeps total connections bounded; with a small catalog this
     // has no meaningful effect on build time.
     cpus: 1,
+    // Admin `proxy.ts` clones request bodies. Default is 10MB; without this,
+    // video-frame uploads are truncated → "Unexpected end of form".
+    proxyClientMaxBodySize: "210mb",
     serverActions: {
       // Product gallery uploads + video-frame project source videos (up to 200MB).
       bodySizeLimit: "210mb",

@@ -1025,20 +1025,24 @@ enum VideoFrameAssetKind {
   AUDIO
 }
 
-/// Named admin project: source video + span config + extracted stills.
+/// Named admin project: source video(s) + span config + extracted stills.
 model VideoFrameProject {
   id            String  @id @default(cuid())
   name          String
+  /// Denormalized from first entry in videosJson (list UI / back-compat).
   videoFileName String?
   videoMimeType String?
-  /// Public path, e.g. /uploads/video-frames/{id}/source.mp4
+  /// Public path of primary source, e.g. /uploads/video-frames/{id}/source.mp4
   videoPath     String?
+  /// Sum of all source video file sizes.
   videoBytes    BigInt  @default(0)
   durationSec   Float   @default(0)
   videoWidth    Int?
   videoHeight   Int?
 
-  /// FrameSpan[] JSON: { id, start, end, frameCount }
+  /// ProjectSourceVideo[] JSON — one or more uploaded source videos.
+  videosJson Json @default("[]")
+  /// FrameSpan[] JSON: { id, start, end, frameCount, videoId? }
   spansJson Json @default("[]")
   /// Video merger timeline state JSON (segments, trims, playhead, zoom).
   mergerJson Json @default("{}")

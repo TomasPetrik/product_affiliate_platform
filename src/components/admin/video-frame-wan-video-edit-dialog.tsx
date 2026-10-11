@@ -85,6 +85,8 @@ export interface VideoFrameWanVideoEditDialogProps {
   projectId: string;
   /** Full project source video URL for in-dialog cut preview. */
   videoUrl: string | null;
+  /** Which project source video the span was cut from. */
+  videoId?: string | null;
   spanId: string;
   spanLabel: string;
   cutStartSec: number;
@@ -206,6 +208,7 @@ export function VideoFrameWanVideoEditDialog({
   onOpenChange,
   projectId,
   videoUrl,
+  videoId = null,
   spanId,
   spanLabel,
   cutStartSec,
@@ -449,6 +452,7 @@ export function VideoFrameWanVideoEditDialog({
         projectId,
         startSec: cutStartSec,
         endSec: cutEndSec,
+        videoId,
       });
       if (result.error || !result.path) {
         setCutPreviewPath(null);
@@ -542,6 +546,7 @@ export function VideoFrameWanVideoEditDialog({
       if (enablePromptExpansion) formData.set("enablePromptExpansion", "1");
       formData.set("generateAudio", generateAudio ? "1" : "0");
       formData.set("projectId", projectId);
+      if (videoId) formData.set("videoId", videoId);
       formData.set("cutStartSec", String(cutStartSec));
       formData.set("cutEndSec", String(cutEndSec));
 

@@ -17,6 +17,7 @@ import {
   cutVideoSegment,
   VideoCutError,
 } from "@/server/services/video-cut.service";
+import { resolveProjectSourceVideoPath } from "@/server/services/video-frame-project.service";
 
 export interface PreviewSpanCutState {
   error?: string;
@@ -41,6 +42,8 @@ export async function previewSpanCutAction(input: {
   projectId: string;
   startSec: number;
   endSec: number;
+  /** Which project source video to cut from (defaults to primary). */
+  videoId?: string | null;
 }): Promise<PreviewSpanCutState> {
   await requireAdminSession();
 
@@ -59,13 +62,28 @@ export async function previewSpanCutAction(input: {
 
   const project = await prisma.videoFrameProject.findUnique({
     where: { id: projectId },
-    select: { id: true, videoPath: true },
+    select: {
+      id: true,
+      videoPath: true,
+      videoFileName: true,
+      videoMimeType: true,
+      videoBytes: true,
+      durationSec: true,
+      videoWidth: true,
+      videoHeight: true,
+      videosJson: true,
+    },
   });
-  if (!project?.videoPath) {
+  if (!project) {
+    return { error: "Project not found." };
+  }
+
+  const videoPath = resolveProjectSourceVideoPath(project, input.videoId);
+  if (!videoPath) {
     return { error: "Project source video not found." };
   }
 
-  const absolute = absoluteFromPublicUpload(project.videoPath);
+  const absolute = absoluteFromPublicUpload(videoPath);
   if (!absolute) {
     return { error: "Project video path is invalid." };
   }

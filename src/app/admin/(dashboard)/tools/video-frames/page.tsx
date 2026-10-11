@@ -30,8 +30,9 @@ export default async function AdminVideoFramesPage() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Video creator</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Each uploaded video becomes a named project with saved spans, extracted JPGs, and storage
-          usage. Open a project anytime to continue editing — changes autosave.
+          Upload one or more source videos into a named project, then choose which video to create
+          spans from. Extracted JPGs and storage usage are saved — open a project anytime to
+          continue editing; changes autosave.
         </p>
       </div>
 
@@ -73,6 +74,9 @@ export default async function AdminVideoFramesPage() {
                         {project.videoFileName ? (
                           <span className="text-xs text-muted-foreground">
                             {project.videoFileName}
+                            {project.videoCount > 1
+                              ? ` +${project.videoCount - 1} more`
+                              : ""}
                           </span>
                         ) : null}
                       </div>

@@ -54,13 +54,23 @@ import {
   isSourceSpan,
   newSpanId,
   previewTimeKey,
+  spansForVideo,
   timestampsForSpan,
   totalFrameCount,
   uniquePreviewTimes,
   type ExtractedFrame,
   type FrameSpan,
 } from "@/lib/video-frames";
-import { MAX_VIDEO_FRAME_PROJECT_VIDEO_BYTES } from "@/lib/video-frame-project-paths";
+import {
+  isManualSpanReferenceFrame,
+  MAX_MANUAL_SPAN_REFERENCE_FRAMES,
+  MAX_VIDEO_FRAME_PROJECT_VIDEO_BYTES,
+} from "@/lib/video-frame-project-paths";
+import {
+  findProjectSourceVideo,
+  MAX_VIDEO_FRAME_PROJECT_VIDEOS,
+  type ProjectSourceVideo,
+} from "@/lib/video-frame-project-videos";
 import { cn } from "@/lib/utils";
 import {
   DEFAULT_WAN_SIZE,
@@ -112,7 +122,10 @@ import {
 import { VideoFrameClipCompareDialog } from "@/components/admin/video-frame-clip-compare-dialog";
 import { VideoFrameMergerPanel } from "@/components/admin/video-frame-merger-panel";
 import {
+  addVideoFrameProjectVideosAction,
+  appendSourceSpanReferenceFramesAction,
   deleteCustomSpanMediaAction,
+  deleteSourceSpanReferenceFrameAction,
   deleteVideoFrameEditAction,
   saveCustomSpanFramesAction,
   saveVideoFrameClipAction,
@@ -237,9 +250,18 @@ function revokePreviewMap(map: Record<string, string>) {
   }
 }
 
+/** Preview cache key scoped to a source video so switching videos cannot overwrite thumbs. */
+function videoScopedPreviewKey(
+  videoId: string | null | undefined,
+  time: number,
+): string {
+  return `${videoId?.trim() || "_"}:${previewTimeKey(time)}`;
+}
+
 function ensurePreviewTimes(
   times: number[],
   options: {
+    videoId: string | null | undefined;
     generation: number;
     generationRef: { current: number };
     cacheRef: { current: Record<string, string> };
@@ -251,8 +273,8 @@ function ensurePreviewTimes(
     onError?: () => void;
   },
 ) {
-  const neededKeys = new Set(times.map((time) => previewTimeKey(time)));
-  const missing = times.filter((time) => !options.cacheRef.current[previewTimeKey(time)]);
+  const keyFor = (time: number) => videoScopedPreviewKey(options.videoId, time);
+  const missing = times.filter((time) => !options.cacheRef.current[keyFor(time)]);
 
   // Keep thumbnails for times still needed; drop unused later via prune.
   options.setPreviewUrls({ ...options.cacheRef.current });
@@ -287,7 +309,7 @@ function ensurePreviewTimes(
         if (!Number.isFinite(time)) {
           continue;
         }
-        const key = previewTimeKey(time);
+        const key = keyFor(time);
         if (options.cacheRef.current[key]) {
           continue;
         }
@@ -315,19 +337,63 @@ function ensurePreviewTimes(
   });
 }
 
-function prunePreviewCache(
+/** Prune preview thumbs for one video only — never touch other videos' caches. */
+function prunePreviewCacheForVideo(
+  videoId: string | null | undefined,
   keepTimes: number[],
   cacheRef: { current: Record<string, string> },
   setPreviewUrls: (urls: Record<string, string>) => void,
 ) {
-  const keep = new Set(keepTimes.map((time) => previewTimeKey(time)));
+  const prefix = `${videoId?.trim() || "_"}:`;
+  const keep = new Set(
+    keepTimes.map((time) => videoScopedPreviewKey(videoId, time)),
+  );
   for (const [key, url] of Object.entries(cacheRef.current)) {
+    if (!key.startsWith(prefix)) {
+      continue;
+    }
     if (!keep.has(key)) {
       URL.revokeObjectURL(url);
       delete cacheRef.current[key];
     }
   }
   setPreviewUrls({ ...cacheRef.current });
+}
+
+function findSpanFrameAssetNearTime(
+  assets: VideoFrameProjectDetail["assets"],
+  spanId: string,
+  time: number,
+): VideoFrameProjectDetail["assets"][number] | null {
+  const rounded = Math.round(time * 10) / 10;
+  return (
+    assets.find(
+      (asset) =>
+        asset.kind === "FRAME" &&
+        asset.spanId === spanId &&
+        !isManualSpanReferenceFrame(asset.fileName) &&
+        Math.round(asset.timeSec * 10) / 10 === rounded,
+    ) ?? null
+  );
+}
+
+/** Prefer extracted stills for a span; fall back to live preview for that span's video. */
+function resolveSpanPreviewUrl(input: {
+  spanId: string;
+  videoId: string | null | undefined;
+  time: number;
+  previewUrls: Record<string, string>;
+  assets: VideoFrameProjectDetail["assets"];
+}): string | undefined {
+  const extracted = findSpanFrameAssetNearTime(
+    input.assets,
+    input.spanId,
+    input.time,
+  );
+  if (extracted?.path) {
+    return extracted.path;
+  }
+  return input.previewUrls[videoScopedPreviewKey(input.videoId, input.time)];
 }
 
 function framesFromProject(project: VideoFrameProjectDetail): ExtractedFrame[] {
@@ -488,17 +554,23 @@ function findAssetNearTime(
   assets: VideoFrameProjectDetail["assets"],
   time: number,
   kind: "FRAME" | "EDITED",
+  spanId?: string | null,
 ) {
   const rounded = Math.round(time * 10) / 10;
   return (
     assets.find(
       (asset) =>
-        asset.kind === kind && Math.round(asset.timeSec * 10) / 10 === rounded,
+        asset.kind === kind &&
+        Math.round(asset.timeSec * 10) / 10 === rounded &&
+        (spanId == null || asset.spanId === spanId) &&
+        (kind !== "FRAME" || !isManualSpanReferenceFrame(asset.fileName)),
     ) ?? null
   );
 }
 
 function spanClipCandidates(input: {
+  spanId: string;
+  videoId: string | null | undefined;
   exportTimes: number[];
   assets: VideoFrameProjectDetail["assets"];
   editedUrls: Record<string, string>;
@@ -506,10 +578,23 @@ function spanClipCandidates(input: {
 }): SpanClipFrameCandidate[] {
   return input.exportTimes.map((time, frameIndex) => {
     const key = previewTimeKey(time);
-    const editedAsset = findAssetNearTime(input.assets, time, "EDITED");
-    const frameAsset = findAssetNearTime(input.assets, time, "FRAME");
+    const editedAsset = findAssetNearTime(
+      input.assets,
+      time,
+      "EDITED",
+      input.spanId,
+    );
+    const frameAsset = findAssetNearTime(
+      input.assets,
+      time,
+      "FRAME",
+      input.spanId,
+    );
     const editedUrl = input.editedUrls[key] ?? editedAsset?.path ?? null;
-    const originalThumbUrl = input.previewUrls[key] ?? frameAsset?.path ?? null;
+    const originalThumbUrl =
+      frameAsset?.path ??
+      input.previewUrls[videoScopedPreviewKey(input.videoId, time)] ??
+      null;
     const label =
       frameIndex === 0
         ? "First"
@@ -557,6 +642,33 @@ function customSpanClipCandidates(
       frameAssetId: frame.id,
     };
   });
+}
+
+/** User-uploaded reference photos on a source span (for Wan/Krea refs). */
+function manualSpanReferenceCandidates(
+  spanId: string,
+  assets: VideoFrameProjectDetail["assets"],
+): SpanClipFrameCandidate[] {
+  const frames = assets
+    .filter(
+      (asset) =>
+        asset.kind === "FRAME" &&
+        asset.spanId === spanId &&
+        isManualSpanReferenceFrame(asset.fileName),
+    )
+    .sort(
+      (a, b) =>
+        (a.frameIndex ?? 0) - (b.frameIndex ?? 0) || a.timeSec - b.timeSec,
+    );
+  return frames.map((frame, frameIndex) => ({
+    time: frame.timeSec,
+    label: `Ref ${frameIndex + 1}`,
+    thumbUrl: frame.path,
+    originalThumbUrl: frame.path,
+    editedUrl: null,
+    editedAssetId: null,
+    frameAssetId: frame.id,
+  }));
 }
 
 const ACCEPT_CUSTOM_IMAGES =
@@ -661,8 +773,34 @@ export function VideoFrameExtractPanel({
   const localFrameUrlsRef = useRef<Set<string>>(new Set());
   const [autosaveReady, setAutosaveReady] = useState(false);
 
+  const initialVideos =
+    project.videos.length > 0
+      ? project.videos
+      : project.videoPath
+        ? [
+            {
+              id: "legacy-source",
+              fileName: project.videoFileName ?? "source.mp4",
+              mimeType: project.videoMimeType,
+              path: project.videoPath,
+              bytes: project.videoBytes,
+              durationSec: project.durationSec,
+              width: project.videoWidth,
+              height: project.videoHeight,
+            } satisfies ProjectSourceVideo,
+          ]
+        : [];
+  const initialPrimaryVideoId = initialVideos[0]?.id ?? null;
+  const initialActiveVideo =
+    findProjectSourceVideo(initialVideos, initialPrimaryVideoId) ?? null;
   const initialDuration =
-    Number.isFinite(project.durationSec) && project.durationSec > 0 ? project.durationSec : 0;
+    initialActiveVideo &&
+    Number.isFinite(initialActiveVideo.durationSec) &&
+    initialActiveVideo.durationSec > 0
+      ? initialActiveVideo.durationSec
+      : Number.isFinite(project.durationSec) && project.durationSec > 0
+        ? project.durationSec
+        : 0;
   const initialSpans =
     project.spans.length > 0
       ? project.spans
@@ -672,15 +810,48 @@ export function VideoFrameExtractPanel({
               Number.isFinite(span.end) &&
               Number.isFinite(span.frameCount),
           )
-          .map((span) =>
-            initialDuration > 0 ? clampSpan(span, initialDuration) : span,
-          )
-      : initialDuration > 0
-        ? createDefaultSpans(initialDuration)
+          .map((span) => {
+            if (isCustomSpan(span)) {
+              return clampSpan(span, 0);
+            }
+            const video = findProjectSourceVideo(
+              initialVideos,
+              span.videoId ?? initialPrimaryVideoId,
+            );
+            const spanDuration =
+              video && video.durationSec > 0 ? video.durationSec : initialDuration;
+            return spanDuration > 0
+              ? clampSpan(
+                  {
+                    ...span,
+                    videoId: span.videoId ?? initialPrimaryVideoId ?? undefined,
+                  },
+                  spanDuration,
+                )
+              : {
+                  ...span,
+                  videoId: span.videoId ?? initialPrimaryVideoId ?? undefined,
+                };
+          })
+      : initialDuration > 0 && initialPrimaryVideoId
+        ? createDefaultSpans(initialDuration, initialPrimaryVideoId)
         : [];
 
   const [name, setName] = useState(project.name);
-  const [videoUrl] = useState<string | null>(project.videoPath);
+  const [videos, setVideos] = useState<ProjectSourceVideo[]>(initialVideos);
+  const [activeVideoId, setActiveVideoId] = useState<string | null>(
+    initialPrimaryVideoId,
+  );
+  const [addingVideos, setAddingVideos] = useState(false);
+  const [sourceVideoDropOver, setSourceVideoDropOver] = useState(false);
+  const addVideosInputRef = useRef<HTMLInputElement>(null);
+  const activeVideoIdRef = useRef(activeVideoId);
+  activeVideoIdRef.current = activeVideoId;
+  const videosRef = useRef(videos);
+  videosRef.current = videos;
+  const activeVideo = findProjectSourceVideo(videos, activeVideoId);
+  const videoUrl = activeVideo?.path ?? null;
+  const primaryVideoId = videos[0]?.id ?? null;
   const [duration, setDuration] = useState(initialDuration);
   /** Live slider values while dragging. */
   const [spans, setSpans] = useState<FrameSpan[]>(initialSpans);
@@ -756,6 +927,9 @@ export function VideoFrameExtractPanel({
   const customImageInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const customVideoInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const customMediaInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const sourceRefImageInputRefs = useRef<Record<string, HTMLInputElement | null>>(
+    {},
+  );
   const [clipLightbox, setClipLightbox] = useState<VideoFrameProjectAssetDto | null>(
     null,
   );
@@ -803,10 +977,90 @@ export function VideoFrameExtractPanel({
     setSpanClips(clipsFromProject(detail));
     setMergedClips(mergesFromProject(detail));
     setMergerAudioAssets(audioFromProject(detail));
+    if (detail.videos.length > 0) {
+      setVideos(detail.videos);
+      setActiveVideoId((current) =>
+        current && detail.videos.some((video) => video.id === current)
+          ? current
+          : (detail.videos[0]?.id ?? null),
+      );
+    }
     if (detail.spans.length > 0) {
       setSpans(detail.spans);
       spansRef.current = detail.spans;
       setCommittedSpans(detail.spans);
+    }
+  }
+
+  function selectVideo(videoId: string) {
+    if (videoId === activeVideoIdRef.current) return;
+    // Keep other videos' preview thumbs in cache — only wait for the new source.
+    setPreviewReady(false);
+    setLiveFrameLoading(false);
+    setExportPreviewLoading(false);
+    liveGenerationRef.current += 1;
+    exportGenerationRef.current += 1;
+    setActiveVideoId(videoId);
+    const video = videosRef.current.find((item) => item.id === videoId);
+    setDuration(
+      video && Number.isFinite(video.durationSec) && video.durationSec > 0
+        ? video.durationSec
+        : 0,
+    );
+    if (video?.width && video.height) {
+      setVideoAspect(video.width / video.height);
+    }
+  }
+
+  async function onAddVideos(fileList: FileList | File[] | null) {
+    if (!fileList || fileList.length === 0) {
+      return;
+    }
+    const remaining = MAX_VIDEO_FRAME_PROJECT_VIDEOS - videos.length;
+    if (remaining <= 0) {
+      setError(`You can upload at most ${MAX_VIDEO_FRAME_PROJECT_VIDEOS} videos.`);
+      return;
+    }
+    const videosOnly = Array.from(fileList).filter(isVideoFile);
+    if (videosOnly.length === 0) {
+      setError("Drop MP4, WebM, or MOV videos.");
+      return;
+    }
+    const picked = videosOnly.slice(0, remaining);
+    const formData = new FormData();
+    formData.set("projectId", project.id);
+    for (const file of picked) {
+      formData.append("videos", file);
+    }
+    setAddingVideos(true);
+    setError(null);
+    try {
+      const result = await addVideoFrameProjectVideosAction(formData);
+      if (result.error || !result.project) {
+        setError(result.error ?? "Failed to add videos.");
+        return;
+      }
+      const previousIds = new Set(videos.map((video) => video.id));
+      applyProjectDetail(result.project);
+      const firstNew = result.project.videos.find((video) => !previousIds.has(video.id));
+      if (firstNew) {
+        setPreviewReady(false);
+        setLiveFrameLoading(false);
+        setExportPreviewLoading(false);
+        liveGenerationRef.current += 1;
+        exportGenerationRef.current += 1;
+        setActiveVideoId(firstNew.id);
+        setDuration(firstNew.durationSec > 0 ? firstNew.durationSec : 0);
+        if (firstNew.width && firstNew.height) {
+          setVideoAspect(firstNew.width / firstNew.height);
+        }
+      }
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to add videos.");
+    } finally {
+      setAddingVideos(false);
+      if (addVideosInputRef.current) addVideosInputRef.current.value = "";
     }
   }
 
@@ -2013,13 +2267,24 @@ export function VideoFrameExtractPanel({
     setWanEditLoadingTime(null);
   }
 
-  function buildSpanClipCandidates(exportTimes: number[]): SpanClipFrameCandidate[] | null {
-    const candidates = spanClipCandidates({
-      exportTimes,
-      assets: projectAssets,
-      editedUrls,
-      previewUrls,
-    });
+  function buildSpanClipCandidates(
+    spanId: string,
+    exportTimes: number[],
+  ): SpanClipFrameCandidate[] | null {
+    const span = spans.find((item) => item.id === spanId);
+    const spanVideoId =
+      span?.videoId?.trim() || primaryVideoId || activeVideoId;
+    const candidates = [
+      ...spanClipCandidates({
+        spanId,
+        videoId: spanVideoId,
+        exportTimes,
+        assets: projectAssets,
+        editedUrls,
+        previewUrls,
+      }),
+      ...manualSpanReferenceCandidates(spanId, projectAssets),
+    ];
     if (candidates.length === 0) {
       setError("This span has no planned frames to generate a clip from.");
       return null;
@@ -2038,8 +2303,12 @@ export function VideoFrameExtractPanel({
     return candidates;
   }
 
-  function openKreaClip(spanIndex: number, exportTimes: number[]) {
-    const candidates = buildSpanClipCandidates(exportTimes);
+  function openKreaClip(
+    spanId: string,
+    spanIndex: number,
+    exportTimes: number[],
+  ) {
+    const candidates = buildSpanClipCandidates(spanId, exportTimes);
     if (!candidates) return;
     setKreaClip({ spanIndex, candidates });
   }
@@ -2049,7 +2318,7 @@ export function VideoFrameExtractPanel({
     const candidates =
       span && isCustomSpan(span)
         ? buildCustomSpanClipCandidates(spanId)
-        : buildSpanClipCandidates(exportTimes);
+        : buildSpanClipCandidates(spanId, exportTimes);
     if (!candidates) return;
     setWanClip({ spanId, spanIndex, candidates });
   }
@@ -2066,7 +2335,7 @@ export function VideoFrameExtractPanel({
       );
       return;
     }
-    const candidates = buildSpanClipCandidates(exportTimes);
+    const candidates = buildSpanClipCandidates(spanId, exportTimes);
     if (!candidates) return;
     const ordered = [...exportTimes].sort((a, b) => a - b);
     const cutStartSec = ordered[0] ?? 0;
@@ -2078,6 +2347,63 @@ export function VideoFrameExtractPanel({
       cutEndSec,
       candidates,
     });
+  }
+
+  async function importSourceSpanReferenceImages(spanId: string, files: File[]) {
+    const images = files
+      .filter(isImageFile)
+      .slice(0, MAX_MANUAL_SPAN_REFERENCE_FRAMES);
+    if (images.length === 0) {
+      setError("Choose JPG, PNG, WebP, GIF, or AVIF images.");
+      return;
+    }
+    setCustomSpanImportingId(spanId);
+    setError(null);
+    try {
+      const formData = new FormData();
+      formData.set("projectId", project.id);
+      formData.set("spanId", spanId);
+      for (const file of images) {
+        formData.append("frameFiles", file, file.name);
+      }
+      const saved = await appendSourceSpanReferenceFramesAction(formData);
+      if (saved.error || !saved.project) {
+        setError(saved.error ?? "Failed to add reference photo.");
+        return;
+      }
+      applyProjectDetail(saved.project);
+      router.refresh();
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to add reference photo.",
+      );
+    } finally {
+      setCustomSpanImportingId(null);
+    }
+  }
+
+  async function deleteSourceSpanReference(spanId: string, frameAssetId: string) {
+    setCustomSpanImportingId(spanId);
+    setError(null);
+    try {
+      const result = await deleteSourceSpanReferenceFrameAction({
+        projectId: project.id,
+        spanId,
+        frameAssetId,
+      });
+      if (result.error || !result.project) {
+        setError(result.error ?? "Failed to delete reference photo.");
+        return;
+      }
+      applyProjectDetail(result.project);
+      router.refresh();
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to delete reference photo.",
+      );
+    } finally {
+      setCustomSpanImportingId(null);
+    }
   }
 
   function upsertWanClipJob(job: WanClipJob) {
@@ -2432,29 +2758,83 @@ export function VideoFrameExtractPanel({
       setVideoAspect(video.videoWidth / video.videoHeight);
     }
     const nextDuration = video.duration;
+    const currentVideoId = activeVideoIdRef.current;
     setDuration(nextDuration);
     setError(null);
     markPreviewReady();
 
-    if (spansRef.current.length === 0) {
-      const next = createDefaultSpans(nextDuration);
+    if (currentVideoId) {
+      setVideos((prev) =>
+        prev.map((item) =>
+          item.id === currentVideoId
+            ? {
+                ...item,
+                durationSec: nextDuration,
+                width: video.videoWidth || item.width,
+                height: video.videoHeight || item.height,
+              }
+            : item,
+        ),
+      );
+    }
+
+    const primaryId = videosRef.current[0]?.id ?? currentVideoId;
+    const anySourceSpans = spansRef.current.some(isSourceSpan);
+
+    // Seed a default span only for a brand-new project (no source spans yet).
+    // Switching videos must never create or rewrite spans for other videos.
+    if (!anySourceSpans && currentVideoId) {
+      const defaults = createDefaultSpans(
+        nextDuration,
+        currentVideoId ?? undefined,
+      );
+      const next = [...spansRef.current, ...defaults];
       spansRef.current = next;
       setSpans(next);
       setCommittedSpans(next);
       return;
     }
 
-    const clamped = spansRef.current.map((span) => clampSpan(span, nextDuration));
-    spansRef.current = clamped;
-    setSpans(clamped);
-    setCommittedSpans(clamped);
+    // Clamp only spans that already belong to this video; leave all others alone.
+    let changed = false;
+    const clamped = spansRef.current.map((span) => {
+      if (isCustomSpan(span)) {
+        return span;
+      }
+      const spanVideoId = span.videoId?.trim() || primaryId || null;
+      if (!currentVideoId || spanVideoId !== currentVideoId) {
+        return span;
+      }
+      const next = clampSpan(
+        { ...span, videoId: spanVideoId ?? undefined },
+        nextDuration,
+      );
+      if (
+        next.start !== span.start ||
+        next.end !== span.end ||
+        next.frameCount !== span.frameCount ||
+        next.videoId !== span.videoId
+      ) {
+        changed = true;
+      }
+      return next;
+    });
+    if (changed) {
+      spansRef.current = clamped;
+      setSpans(clamped);
+      setCommittedSpans(clamped);
+    }
   }
 
   function updateSpan(id: string, patch: Partial<FrameSpan>) {
     setSpans((prev) => {
-      const next = prev.map((span) =>
-        span.id === id ? clampSpan({ ...span, ...patch }, duration) : span,
-      );
+      const next = prev.map((span) => {
+        if (span.id !== id) return span;
+        const spanDuration = isCustomSpan(span)
+          ? 0
+          : duration;
+        return clampSpan({ ...span, ...patch }, spanDuration);
+      });
       spansRef.current = next;
       return next;
     });
@@ -2465,10 +2845,16 @@ export function VideoFrameExtractPanel({
   }
 
   function addSpan() {
-    if (duration <= 0) {
+    if (duration <= 0 || !activeVideoId) {
       return;
     }
-    const lastSource = [...spans].reverse().find((span) => isSourceSpan(span));
+    const lastSource = [...spans]
+      .reverse()
+      .find(
+        (span) =>
+          isSourceSpan(span) &&
+          (span.videoId?.trim() || primaryVideoId) === activeVideoId,
+      );
     const start = lastSource ? Math.min(duration, lastSource.end) : 0;
     const end = Math.min(duration, start + Math.max(1, duration / 4));
     const nextSpan = clampSpan(
@@ -2478,6 +2864,7 @@ export function VideoFrameExtractPanel({
         start,
         end: Math.max(start + 0.1, end),
         frameCount: 4,
+        videoId: activeVideoId,
       },
       duration,
     );
@@ -2714,6 +3101,7 @@ export function VideoFrameExtractPanel({
         projectId: project.id,
         name: trimmed,
         spans: committedSpans,
+        videos: videosRef.current,
         durationSec: duration > 0 ? duration : undefined,
         videoWidth: videoRef.current?.videoWidth || project.videoWidth,
         videoHeight: videoRef.current?.videoHeight || project.videoHeight,
@@ -2734,6 +3122,7 @@ export function VideoFrameExtractPanel({
     committedSpans,
     name,
     duration,
+    videos,
     extracting,
     project.id,
     project.videoWidth,
@@ -2741,20 +3130,29 @@ export function VideoFrameExtractPanel({
     router,
   ]);
 
-  const timelineSpans = spans.filter(isSourceSpan);
-  const plannedMarks = committedSpans
-    .filter(isSourceSpan)
-    .flatMap((span) => {
-      const spanIndex = committedSpans.findIndex((item) => item.id === span.id);
-      return timestampsForSpan(span.start, span.end, span.frameCount).map(
-        (time, index) => ({
-          spanId: span.id,
-          spanIndex: spanIndex >= 0 ? spanIndex : 0,
-          index,
-          time,
-        }),
-      );
-    });
+  const activeSourceSpans = spansForVideo(spans, activeVideoId, primaryVideoId);
+  const activeCommittedSourceSpans = spansForVideo(
+    committedSpans,
+    activeVideoId,
+    primaryVideoId,
+  );
+  const timelineSpans = activeSourceSpans;
+  const plannedMarks = activeCommittedSourceSpans.flatMap((span) => {
+    const spanIndex = committedSpans.findIndex((item) => item.id === span.id);
+    return timestampsForSpan(span.start, span.end, span.frameCount).map(
+      (time, index) => ({
+        spanId: span.id,
+        spanIndex: spanIndex >= 0 ? spanIndex : 0,
+        index,
+        time,
+      }),
+    );
+  });
+  const visibleSpans = spans.filter(
+    (span) => isCustomSpan(span) || activeSourceSpans.some((item) => item.id === span.id),
+  );
+  const otherVideoSpanCount =
+    spans.filter(isSourceSpan).length - activeSourceSpans.length;
 
   // Live first/last boundary frames while dragging (especially last frame above end slider).
   useEffect(() => {
@@ -2774,10 +3172,13 @@ export function VideoFrameExtractPanel({
     liveGenerationRef.current = generation;
 
     const timer = window.setTimeout(() => {
-      const boundaryTimes = spans
-        .filter(isSourceSpan)
-        .flatMap((span) => [span.start, span.end]);
+      const boundaryTimes = spansForVideo(
+        spans,
+        activeVideoId,
+        primaryVideoId,
+      ).flatMap((span) => [span.start, span.end]);
       ensurePreviewTimes(boundaryTimes, {
+        videoId: activeVideoId,
         generation,
         generationRef: liveGenerationRef,
         cacheRef: previewCacheRef,
@@ -2793,7 +3194,7 @@ export function VideoFrameExtractPanel({
     return () => {
       window.clearTimeout(timer);
     };
-  }, [spans, duration, videoUrl, extracting, previewReady]);
+  }, [spans, duration, videoUrl, extracting, previewReady, activeVideoId, primaryVideoId]);
 
   // Full export-preview strip: only when spans are committed (pointer release).
   useEffect(() => {
@@ -2802,10 +3203,20 @@ export function VideoFrameExtractPanel({
       !Number.isFinite(duration) ||
       duration <= 0 ||
       extracting ||
-      committedSpans.length === 0 ||
       !previewReady ||
       !isSeekableVideo(previewVideoRef.current)
     ) {
+      return;
+    }
+
+    const activeCommitted = spansForVideo(
+      committedSpans,
+      activeVideoId,
+      primaryVideoId,
+    );
+    // Nothing to preview for this video — leave other videos' cached thumbs alone.
+    if (activeCommitted.length === 0) {
+      setExportPreviewLoading(false);
       return;
     }
 
@@ -2813,19 +3224,19 @@ export function VideoFrameExtractPanel({
     exportGenerationRef.current = generation;
     setExportPreviewLoading(true);
 
-    const neededTimes = uniquePreviewTimes(committedSpans);
-    prunePreviewCache(
+    const neededTimes = uniquePreviewTimes(activeCommitted);
+    prunePreviewCacheForVideo(
+      activeVideoId,
       [
         ...neededTimes,
-        ...spansRef.current
-          .filter(isSourceSpan)
-          .flatMap((span) => [span.start, span.end]),
+        ...activeCommitted.flatMap((span) => [span.start, span.end]),
       ],
       previewCacheRef,
       setPreviewUrls,
     );
 
     ensurePreviewTimes(neededTimes, {
+      videoId: activeVideoId,
       generation,
       generationRef: exportGenerationRef,
       cacheRef: previewCacheRef,
@@ -2836,12 +3247,24 @@ export function VideoFrameExtractPanel({
       setLoading: setExportPreviewLoading,
       onError: () => setError("Could not generate span preview thumbnails."),
     });
-  }, [committedSpans, duration, videoUrl, extracting, previewReady]);
+  }, [
+    committedSpans,
+    duration,
+    videoUrl,
+    extracting,
+    previewReady,
+    activeVideoId,
+    primaryVideoId,
+  ]);
 
   const extractFrames = useCallback(async () => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
-    const activeSpans = committedSpans.filter(isSourceSpan);
+    const activeSpans = spansForVideo(
+      committedSpans,
+      activeVideoId,
+      primaryVideoId,
+    );
     if (!video || !canvas || duration <= 0 || activeSpans.length === 0) {
       return;
     }
@@ -2948,9 +3371,16 @@ export function VideoFrameExtractPanel({
         void video.play().catch(() => undefined);
       }
     }
-  }, [duration, committedSpans, project.id, router]);
+  }, [
+    duration,
+    committedSpans,
+    activeVideoId,
+    primaryVideoId,
+    project.id,
+    router,
+  ]);
 
-  const plannedTotal = totalFrameCount(committedSpans.filter(isSourceSpan));
+  const plannedTotal = totalFrameCount(activeCommittedSourceSpans);
 
   return (
     <div className="flex flex-col gap-6">
@@ -2993,8 +3423,146 @@ export function VideoFrameExtractPanel({
             />
           </div>
 
-          {project.videoFileName ? (
-            <p className="text-xs text-muted-foreground">{project.videoFileName}</p>
+          {videos.length > 0 ? (
+            <div
+              className={cn(
+                "flex flex-col gap-2 rounded-xl border border-dashed p-3 transition-colors",
+                sourceVideoDropOver
+                  ? "border-primary bg-primary/5"
+                  : "border-transparent",
+              )}
+              onDragEnter={(event) => {
+                if (
+                  !hasFileDrag(event) ||
+                  addingVideos ||
+                  extracting ||
+                  videos.length >= MAX_VIDEO_FRAME_PROJECT_VIDEOS
+                ) {
+                  return;
+                }
+                event.preventDefault();
+                setSourceVideoDropOver(true);
+              }}
+              onDragOver={(event) => {
+                if (
+                  !hasFileDrag(event) ||
+                  addingVideos ||
+                  extracting ||
+                  videos.length >= MAX_VIDEO_FRAME_PROJECT_VIDEOS
+                ) {
+                  return;
+                }
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "copy";
+                if (!sourceVideoDropOver) setSourceVideoDropOver(true);
+              }}
+              onDragLeave={(event) => {
+                if (
+                  event.currentTarget.contains(
+                    event.relatedTarget as Node | null,
+                  )
+                ) {
+                  return;
+                }
+                setSourceVideoDropOver(false);
+              }}
+              onDrop={(event) => {
+                event.preventDefault();
+                setSourceVideoDropOver(false);
+                if (
+                  addingVideos ||
+                  extracting ||
+                  videos.length >= MAX_VIDEO_FRAME_PROJECT_VIDEOS
+                ) {
+                  return;
+                }
+                void onAddVideos(event.dataTransfer.files);
+              }}
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex min-w-0 flex-col gap-0.5">
+                  <Label>Source video</Label>
+                  <p className="text-xs text-muted-foreground">
+                    {sourceVideoDropOver
+                      ? "Drop videos to add…"
+                      : "Select a video for spans, or drag & drop to add more"}
+                  </p>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    ref={addVideosInputRef}
+                    type="file"
+                    accept="video/mp4,video/webm,video/quicktime,video/x-m4v"
+                    multiple
+                    className="sr-only"
+                    disabled={
+                      addingVideos ||
+                      extracting ||
+                      videos.length >= MAX_VIDEO_FRAME_PROJECT_VIDEOS
+                    }
+                    onChange={(event) => void onAddVideos(event.target.files)}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5"
+                    disabled={
+                      addingVideos ||
+                      extracting ||
+                      videos.length >= MAX_VIDEO_FRAME_PROJECT_VIDEOS
+                    }
+                    onClick={() => addVideosInputRef.current?.click()}
+                  >
+                    {addingVideos ? (
+                      <Loader2 className="size-3.5 animate-spin" />
+                    ) : (
+                      <Upload className="size-3.5" />
+                    )}
+                    Add videos
+                  </Button>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {videos.map((video, index) => {
+                  const selected = video.id === activeVideoId;
+                  const spanCount = spansForVideo(
+                    spans,
+                    video.id,
+                    primaryVideoId,
+                  ).length;
+                  return (
+                    <button
+                      key={video.id}
+                      type="button"
+                      disabled={extracting}
+                      onClick={() => selectVideo(video.id)}
+                      className={cn(
+                        "max-w-full rounded-lg border px-3 py-2 text-left transition-colors",
+                        selected
+                          ? "border-foreground bg-foreground text-background"
+                          : "border-border bg-muted/30 hover:bg-muted/50",
+                      )}
+                    >
+                      <span className="block truncate text-sm font-medium">
+                        {index + 1}. {video.fileName}
+                      </span>
+                      <span
+                        className={cn(
+                          "block text-xs",
+                          selected ? "text-background/70" : "text-muted-foreground",
+                        )}
+                      >
+                        {spanCount} span{spanCount === 1 ? "" : "s"}
+                        {video.durationSec > 0
+                          ? ` · ${formatVideoTime(video.durationSec)}`
+                          : ""}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           ) : null}
 
           {error ? (
@@ -3006,6 +3574,7 @@ export function VideoFrameExtractPanel({
           {videoUrl ? (
             <div className="overflow-hidden rounded-xl bg-black ring-1 ring-border">
               <video
+                key={activeVideoId ?? videoUrl}
                 ref={videoRef}
                 src={videoUrl}
                 controls
@@ -3016,13 +3585,82 @@ export function VideoFrameExtractPanel({
               />
             </div>
           ) : (
-            <Alert variant="destructive">
-              <AlertDescription>This project has no source video on disk.</AlertDescription>
-            </Alert>
+            <div
+              className={cn(
+                "flex flex-col items-center gap-3 rounded-xl border border-dashed px-4 py-8 text-center transition-colors",
+                sourceVideoDropOver
+                  ? "border-primary bg-primary/5"
+                  : "border-border bg-muted/20",
+              )}
+              onDragEnter={(event) => {
+                if (!hasFileDrag(event) || addingVideos) return;
+                event.preventDefault();
+                setSourceVideoDropOver(true);
+              }}
+              onDragOver={(event) => {
+                if (!hasFileDrag(event) || addingVideos) return;
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "copy";
+                if (!sourceVideoDropOver) setSourceVideoDropOver(true);
+              }}
+              onDragLeave={(event) => {
+                if (
+                  event.currentTarget.contains(
+                    event.relatedTarget as Node | null,
+                  )
+                ) {
+                  return;
+                }
+                setSourceVideoDropOver(false);
+              }}
+              onDrop={(event) => {
+                event.preventDefault();
+                setSourceVideoDropOver(false);
+                if (addingVideos) return;
+                void onAddVideos(event.dataTransfer.files);
+              }}
+            >
+              <Upload className="size-6 text-muted-foreground" />
+              <div className="flex flex-col gap-1">
+                <p className="text-sm font-medium">
+                  {sourceVideoDropOver
+                    ? "Drop videos to add…"
+                    : "No source video on disk"}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Drag & drop MP4, WebM, or MOV files here, or use Add videos
+                </p>
+              </div>
+              <input
+                ref={addVideosInputRef}
+                type="file"
+                accept="video/mp4,video/webm,video/quicktime,video/x-m4v"
+                multiple
+                className="sr-only"
+                disabled={addingVideos}
+                onChange={(event) => void onAddVideos(event.target.files)}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                disabled={addingVideos}
+                onClick={() => addVideosInputRef.current?.click()}
+              >
+                {addingVideos ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <Upload className="size-3.5" />
+                )}
+                Add videos
+              </Button>
+            </div>
           )}
 
           {videoUrl ? (
             <video
+              key={`preview-${activeVideoId ?? videoUrl}`}
               ref={previewVideoRef}
               src={videoUrl}
               muted
@@ -3046,8 +3684,12 @@ export function VideoFrameExtractPanel({
             <div>
               <CardTitle className="text-base">Frame spans</CardTitle>
               <p className="mt-1 text-sm text-muted-foreground">
-                Source spans use the timeline. Custom spans import images or a short
-                video for Wan clip.
+                Add span uses the currently selected video only — switching
+                videos does not change existing spans. Custom spans import images
+                or a short video for Wan clip.
+                {otherVideoSpanCount > 0
+                  ? ` ${otherVideoSpanCount} span${otherVideoSpanCount === 1 ? "" : "s"} on other videos.`
+                  : ""}
               </p>
             </div>
             <div className="flex shrink-0 flex-wrap gap-1.5">
@@ -3111,13 +3753,23 @@ export function VideoFrameExtractPanel({
             </div>
 
             <div className="flex flex-col gap-3">
-              {spans.map((span, index) => {
+              {activeSourceSpans.length === 0 ? (
+                <p className="rounded-lg border border-dashed border-border bg-background/40 px-3 py-4 text-center text-sm text-muted-foreground">
+                  No spans on this video yet. Use Add span to create one from the
+                  selected source.
+                </p>
+              ) : null}
+              {visibleSpans.map((span) => {
+                const index = spans.findIndex((item) => item.id === span.id);
                 const custom = isCustomSpan(span);
                 const committed =
                   committedSpans.find((item) => item.id === span.id) ?? span;
                 const customFrames = custom
                   ? customSpanClipCandidates(span.id, projectAssets)
                   : [];
+                const manualRefs = custom
+                  ? []
+                  : manualSpanReferenceCandidates(span.id, projectAssets);
                 const exportTimes = custom
                   ? customFrames.map((frame) => frame.time)
                   : timestampsForSpan(
@@ -3125,8 +3777,26 @@ export function VideoFrameExtractPanel({
                       committed.end,
                       committed.frameCount,
                     );
-                const startKey = previewTimeKey(span.start);
-                const endKey = previewTimeKey(span.end);
+                const spanVideoId =
+                  span.videoId?.trim() || primaryVideoId || activeVideoId;
+                const startPreviewUrl = custom
+                  ? undefined
+                  : resolveSpanPreviewUrl({
+                      spanId: span.id,
+                      videoId: spanVideoId,
+                      time: span.start,
+                      previewUrls,
+                      assets: projectAssets,
+                    });
+                const endPreviewUrl = custom
+                  ? undefined
+                  : resolveSpanPreviewUrl({
+                      spanId: span.id,
+                      videoId: spanVideoId,
+                      time: span.end,
+                      previewUrls,
+                      assets: projectAssets,
+                    });
                 const importing = customSpanImportingId === span.id;
                 const spanClip = projectAssets.find(
                   (asset) =>
@@ -3170,7 +3840,9 @@ export function VideoFrameExtractPanel({
                             size="sm"
                             className="gap-1.5"
                             disabled={extracting || !wanReady}
-                            onClick={() => openKreaClip(index, exportTimes)}
+                            onClick={() =>
+                              openKreaClip(span.id, index, exportTimes)
+                            }
                           >
                             <Clapperboard className="size-3.5" />
                             Krea clip
@@ -3547,9 +4219,9 @@ export function VideoFrameExtractPanel({
                           min={0}
                           max={duration}
                           step={0.1}
-                          startUrl={previewUrls[startKey]}
-                          endUrl={previewUrls[endKey]}
-                          loading={liveFrameLoading}
+                          startUrl={startPreviewUrl}
+                          endUrl={endPreviewUrl}
+                          loading={liveFrameLoading && !startPreviewUrl}
                           aspect={videoAspect}
                           disabled={extracting}
                           onChangeStart={(start) =>
@@ -3623,6 +4295,13 @@ export function VideoFrameExtractPanel({
                         <div className="flex items-end gap-1.5 overflow-x-auto pb-0.5">
                           {exportTimes.map((time, frameIndex) => {
                             const key = previewTimeKey(time);
+                            const thumbUrl = resolveSpanPreviewUrl({
+                              spanId: span.id,
+                              videoId: spanVideoId,
+                              time,
+                              previewUrls,
+                              assets: projectAssets,
+                            });
                             const isEdge =
                               frameIndex === 0 || frameIndex === exportTimes.length - 1;
                             const label =
@@ -3646,9 +4325,9 @@ export function VideoFrameExtractPanel({
                                 <TinyThumb
                                   label={label}
                                   time={time}
-                                  url={previewUrls[key]}
+                                  url={thumbUrl}
                                   loading={
-                                    (exportPreviewLoading && !previewUrls[key]) ||
+                                    (exportPreviewLoading && !thumbUrl) ||
                                     (wanEditLoadingTime !== null &&
                                       previewTimeKey(wanEditLoadingTime) === key)
                                   }
@@ -3722,6 +4401,194 @@ export function VideoFrameExtractPanel({
                               </div>
                             );
                           })}
+                        </div>
+
+                        <div
+                          className={cn(
+                            "flex flex-col gap-2 rounded-lg border border-transparent border-t border-t-border/70 pt-3 transition-colors",
+                            customSpanDropOverId === span.id &&
+                              "border-primary bg-primary/5",
+                          )}
+                          onDragEnter={(event) => {
+                            if (
+                              !hasFileDrag(event) ||
+                              importing ||
+                              extracting ||
+                              manualRefs.length >= MAX_MANUAL_SPAN_REFERENCE_FRAMES
+                            ) {
+                              return;
+                            }
+                            event.preventDefault();
+                            setCustomSpanDropOverId(span.id);
+                          }}
+                          onDragOver={(event) => {
+                            if (
+                              !hasFileDrag(event) ||
+                              importing ||
+                              extracting ||
+                              manualRefs.length >= MAX_MANUAL_SPAN_REFERENCE_FRAMES
+                            ) {
+                              return;
+                            }
+                            event.preventDefault();
+                            event.dataTransfer.dropEffect = "copy";
+                            if (customSpanDropOverId !== span.id) {
+                              setCustomSpanDropOverId(span.id);
+                            }
+                          }}
+                          onDragLeave={(event) => {
+                            if (
+                              event.currentTarget.contains(
+                                event.relatedTarget as Node | null,
+                              )
+                            ) {
+                              return;
+                            }
+                            if (customSpanDropOverId === span.id) {
+                              setCustomSpanDropOverId(null);
+                            }
+                          }}
+                          onDrop={(event) => {
+                            event.preventDefault();
+                            setCustomSpanDropOverId(null);
+                            if (
+                              importing ||
+                              extracting ||
+                              manualRefs.length >= MAX_MANUAL_SPAN_REFERENCE_FRAMES
+                            ) {
+                              return;
+                            }
+                            const files = Array.from(
+                              event.dataTransfer.files ?? [],
+                            );
+                            if (files.length > 0) {
+                              void importSourceSpanReferenceImages(
+                                span.id,
+                                files,
+                              );
+                            }
+                          }}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="text-xs font-medium text-muted-foreground">
+                                Reference photos ({manualRefs.length})
+                              </p>
+                              <p className="text-[11px] text-muted-foreground">
+                                Add your own stills for Wan / Krea reference
+                              </p>
+                            </div>
+                            <input
+                              ref={(el) => {
+                                sourceRefImageInputRefs.current[span.id] = el;
+                              }}
+                              type="file"
+                              accept={ACCEPT_CUSTOM_IMAGES}
+                              multiple
+                              className="hidden"
+                              onChange={(event) => {
+                                const files = Array.from(event.target.files ?? []);
+                                event.target.value = "";
+                                if (files.length > 0) {
+                                  void importSourceSpanReferenceImages(
+                                    span.id,
+                                    files,
+                                  );
+                                }
+                              }}
+                            />
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="gap-1.5 shrink-0"
+                              disabled={
+                                importing ||
+                                extracting ||
+                                manualRefs.length >= MAX_MANUAL_SPAN_REFERENCE_FRAMES
+                              }
+                              onClick={() =>
+                                sourceRefImageInputRefs.current[span.id]?.click()
+                              }
+                            >
+                              {importing ? (
+                                <Loader2 className="size-3.5 animate-spin" />
+                              ) : (
+                                <ImagePlus className="size-3.5" />
+                              )}
+                              Add photo
+                            </Button>
+                          </div>
+                          {manualRefs.length > 0 ? (
+                            <div className="flex items-end gap-1.5 overflow-x-auto pb-0.5">
+                              {manualRefs.map((frame) => (
+                                <div
+                                  key={frame.frameAssetId ?? frame.label}
+                                  className="relative flex shrink-0 flex-col items-center gap-1"
+                                >
+                                  <button
+                                    type="button"
+                                    className="rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                    onClick={() => {
+                                      if (frame.thumbUrl) {
+                                        setLightbox({
+                                          label: frame.label,
+                                          time: frame.time,
+                                          url: frame.thumbUrl,
+                                        });
+                                      }
+                                    }}
+                                  >
+                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                    <img
+                                      src={frame.thumbUrl ?? ""}
+                                      alt={frame.label}
+                                      className="rounded-md bg-muted object-cover ring-1 ring-border"
+                                      style={{
+                                        height: EXPORT_THUMB_HEIGHT_PX,
+                                        width: "auto",
+                                        aspectRatio: String(videoAspect),
+                                      }}
+                                    />
+                                  </button>
+                                  {frame.frameAssetId ? (
+                                    <Button
+                                      type="button"
+                                      variant="secondary"
+                                      size="icon-sm"
+                                      className="absolute right-0 top-0 h-6 w-6 bg-background/90 shadow"
+                                      disabled={importing || extracting}
+                                      aria-label={`Delete ${frame.label}`}
+                                      onClick={() =>
+                                        void deleteSourceSpanReference(
+                                          span.id,
+                                          frame.frameAssetId!,
+                                        )
+                                      }
+                                    >
+                                      <X className="size-3" />
+                                    </Button>
+                                  ) : null}
+                                  <span className="text-[10px] text-muted-foreground">
+                                    {frame.label}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled={importing || extracting}
+                              onClick={() =>
+                                sourceRefImageInputRefs.current[span.id]?.click()
+                              }
+                              className="rounded-lg border border-dashed border-border bg-background/40 px-3 py-4 text-center text-[11px] text-muted-foreground transition-colors hover:bg-muted/30"
+                            >
+                              {customSpanDropOverId === span.id
+                                ? "Drop photos…"
+                                : "Drag & drop photos here, or use Add photo"}
+                            </button>
+                          )}
                         </div>
 
                         {(() => {
@@ -3978,10 +4845,15 @@ export function VideoFrameExtractPanel({
                 )}
                 {extracting
                   ? `Extracting ${progress.done}/${progress.total}…`
-                  : `Extract ${plannedTotal} JPG frames`}
+                  : `Extract ${plannedTotal} JPG frames${
+                      videos.length > 1 && activeVideo
+                        ? ` from this video`
+                        : ""
+                    }`}
               </Button>
               <p className="text-xs text-muted-foreground">
-                Runs locally in the browser. Seeking may take a moment on long videos.
+                Runs locally in the browser for the selected video. Seeking may take a
+                moment on long videos.
               </p>
             </div>
           </CardContent>
@@ -4120,7 +4992,17 @@ export function VideoFrameExtractPanel({
             }
           }}
           projectId={project.id}
-          videoUrl={videoUrl}
+          videoUrl={
+            findProjectSourceVideo(
+              videos,
+              committedSpans.find((span) => span.id === wanVideoEdit.spanId)
+                ?.videoId ?? activeVideoId,
+            )?.path ?? videoUrl
+          }
+          videoId={
+            committedSpans.find((span) => span.id === wanVideoEdit.spanId)
+              ?.videoId ?? activeVideoId
+          }
           spanId={wanVideoEdit.spanId}
           spanLabel={`Span ${wanVideoEdit.spanIndex + 1}`}
           cutStartSec={wanVideoEdit.cutStartSec}
@@ -4148,7 +5030,13 @@ export function VideoFrameExtractPanel({
           if (!open) setClipLightbox(null);
         }}
         clip={clipLightbox}
-        sourceVideoUrl={videoUrl}
+        sourceVideoUrl={
+          findProjectSourceVideo(
+            videos,
+            committedSpans.find((span) => span.id === clipLightbox?.spanId)
+              ?.videoId ?? activeVideoId,
+          )?.path ?? videoUrl
+        }
         compareStartSec={clipCompareRange?.start ?? null}
         compareEndSec={clipCompareRange?.end ?? null}
       />

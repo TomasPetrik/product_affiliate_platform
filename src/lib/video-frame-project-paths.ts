@@ -4,6 +4,21 @@ export const LOCAL_VIDEO_FRAME_UPLOAD_PREFIX = "/uploads/video-frames/";
 export const MAX_VIDEO_FRAME_PROJECT_VIDEO_BYTES = 200 * 1024 * 1024;
 /** Soundtrack uploads for the Video merger (mp3/wav/aac/ogg/m4a). */
 export const MAX_VIDEO_FRAME_PROJECT_AUDIO_BYTES = 80 * 1024 * 1024;
+/**
+ * FRAME assets uploaded by the user as Wan/Krea reference stills on a source span.
+ * Kept when re-extracting video frames for that span.
+ */
+export const MANUAL_SPAN_REF_FILE_PREFIX = "ref-manual-";
+/** Max manual reference photos per source span. */
+export const MAX_MANUAL_SPAN_REFERENCE_FRAMES = 10;
+/** Base timeSec for manual refs so they never collide with video timeline times. */
+export const MANUAL_SPAN_REF_TIME_BASE = 100_000;
+/** Base frameIndex for manual refs (keeps them above typical extract indices). */
+export const MANUAL_SPAN_REF_FRAME_INDEX_BASE = 1_000;
+
+export function isManualSpanReferenceFrame(fileName: string): boolean {
+  return fileName.startsWith(MANUAL_SPAN_REF_FILE_PREFIX);
+}
 
 /** On-disk root for video-frame project media. */
 export function videoFrameProjectsUploadsDir(): string {

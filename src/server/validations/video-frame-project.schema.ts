@@ -7,6 +7,18 @@ export const frameSpanSchema = z.object({
   frameCount: z.number().int().min(1).max(120),
   kind: z.enum(["source", "custom"]).optional(),
   label: z.string().trim().max(80).optional(),
+  videoId: z.string().trim().min(1).max(80).optional(),
+});
+
+export const projectSourceVideoMetaSchema = z.object({
+  id: z.string().min(1).max(80),
+  fileName: z.string().min(1).max(240),
+  mimeType: z.string().max(120).nullable(),
+  path: z.string().min(1).max(500),
+  bytes: z.number().int().min(0),
+  durationSec: z.number().finite().min(0).max(60 * 60 * 6),
+  width: z.number().int().positive().max(10_000).nullable(),
+  height: z.number().int().positive().max(10_000).nullable(),
 });
 
 export const videoFrameProjectNameSchema = z
@@ -19,6 +31,8 @@ export const saveVideoFrameProjectSchema = z.object({
   projectId: z.string().min(1),
   name: videoFrameProjectNameSchema,
   spans: z.array(frameSpanSchema).max(50),
+  /** Updated source-video metadata (durations/dims); paths must match existing files. */
+  videos: z.array(projectSourceVideoMetaSchema).max(12).optional(),
   durationSec: z.number().finite().min(0).max(60 * 60 * 6).optional(),
   videoWidth: z.number().int().positive().max(10_000).nullable().optional(),
   videoHeight: z.number().int().positive().max(10_000).nullable().optional(),

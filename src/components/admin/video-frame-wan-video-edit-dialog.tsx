@@ -811,28 +811,61 @@ export function VideoFrameWanVideoEditDialog({
                   }
                 />
 
+                <div
+                  onDragEnter={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    if (
+                      !busy &&
+                      waveSpeedConfigured &&
+                      totalRefCount < MAX_WAN_VIDEO_EDIT_REFERENCE_IMAGES
+                    ) {
+                      setRefDragging(true);
+                    }
+                  }}
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    if (
+                      !busy &&
+                      waveSpeedConfigured &&
+                      totalRefCount < MAX_WAN_VIDEO_EDIT_REFERENCE_IMAGES
+                    ) {
+                      setRefDragging(true);
+                    }
+                  }}
+                  onDragLeave={(event) => {
+                    event.preventDefault();
+                    if (
+                      event.currentTarget.contains(
+                        event.relatedTarget as Node | null,
+                      )
+                    ) {
+                      return;
+                    }
+                    setRefDragging(false);
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setRefDragging(false);
+                    if (busy || !waveSpeedConfigured) return;
+                    addReferenceImageFiles(event.dataTransfer.files);
+                  }}
+                  className={cn(
+                    "grid gap-2 rounded-xl border border-dashed p-3 transition",
+                    refDragging
+                      ? "border-foreground bg-muted/40"
+                      : "border-border bg-muted/10",
+                    (busy || !waveSpeedConfigured) && "opacity-60",
+                  )}
+                >
                 {totalRefCount === 0 && !showSpanPicker ? (
                   <button
                     type="button"
                     disabled={busy || !waveSpeedConfigured}
                     onClick={() => refInputRef.current?.click()}
-                    onDragOver={(event) => {
-                      event.preventDefault();
-                      if (!busy) setRefDragging(true);
-                    }}
-                    onDragLeave={() => setRefDragging(false)}
-                    onDrop={(event) => {
-                      event.preventDefault();
-                      setRefDragging(false);
-                      if (!busy) addReferenceImageFiles(event.dataTransfer.files);
-                    }}
-                    className={cn(
-                      "flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed px-4 py-8 text-center transition",
-                      refDragging
-                        ? "border-foreground bg-muted/40"
-                        : "border-border bg-muted/10 hover:border-foreground/40 hover:bg-muted/20",
-                      (busy || !waveSpeedConfigured) && "opacity-60",
-                    )}
+                    className="flex flex-col items-center justify-center gap-2 rounded-lg px-4 py-6 text-center transition hover:bg-muted/30"
                   >
                     <Upload className="size-5 text-muted-foreground" />
                     <span className="text-sm font-medium">
@@ -912,6 +945,15 @@ export function VideoFrameWanVideoEditDialog({
                   </ul>
                 ) : null}
 
+                {totalRefCount > 0 &&
+                totalRefCount < MAX_WAN_VIDEO_EDIT_REFERENCE_IMAGES ? (
+                  <p className="text-center text-[11px] text-muted-foreground">
+                    {refDragging
+                      ? "Drop images to add…"
+                      : "Drag & drop more images here"}
+                  </p>
+                ) : null}
+
                 <div className="flex flex-wrap gap-1.5">
                   {totalRefCount > 0 || showSpanPicker ? (
                     <Button
@@ -954,6 +996,7 @@ export function VideoFrameWanVideoEditDialog({
                       Clear
                     </Button>
                   ) : null}
+                </div>
                 </div>
 
                 {showSpanPicker ? (

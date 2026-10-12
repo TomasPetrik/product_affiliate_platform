@@ -1790,7 +1790,7 @@ export function VideoFrameMergerPanel({
           </Alert>
         ) : null}
 
-        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(16rem,24rem)] lg:items-stretch">
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(19rem,36rem)] lg:items-stretch">
           <div className="grid min-w-0 content-start gap-2">
             <div>
               <CardTitle className="text-base">Video merger</CardTitle>
@@ -1972,11 +1972,11 @@ export function VideoFrameMergerPanel({
         </div>
           </div>
 
-          <div className="flex min-h-[22rem] w-full flex-col gap-1.5 lg:h-full lg:min-h-0">
-            <div className="relative mx-auto min-h-0 w-full flex-1">
+          <div className="flex min-h-[33rem] w-full flex-col gap-1.5 lg:h-full lg:min-h-[33rem]">
+            <div className="relative mx-auto min-h-[calc(33rem-2rem)] w-full min-w-[18.5rem] flex-1">
               <div className="absolute inset-0 flex justify-center">
                 {!fullPreviewOpen && activePreview ? (
-                  <div className="relative h-full max-w-full aspect-[9/16] overflow-hidden rounded-xl border bg-black ring-1 ring-border">
+                  <div className="relative h-full min-h-full max-w-full aspect-[9/16] overflow-hidden rounded-xl border bg-black ring-1 ring-border">
                     <video
                       ref={previewVideoRef}
                       muted={stripAudio || activePreview.segment.muted === true}
@@ -2001,7 +2001,7 @@ export function VideoFrameMergerPanel({
                     ) : null}
                   </div>
                 ) : (
-                  <div className="flex h-full max-w-full aspect-[9/16] items-center justify-center rounded-xl border border-dashed border-border bg-muted/40 px-4 text-center text-xs text-muted-foreground">
+                  <div className="flex h-full min-h-full max-w-full aspect-[9/16] items-center justify-center rounded-xl border border-dashed border-border bg-muted/40 px-4 text-center text-xs text-muted-foreground">
                     {fullPreviewOpen && activePreview
                       ? "Open in full preview"
                       : "Add a clip to the timeline to preview."}
